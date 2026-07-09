@@ -1,0 +1,11 @@
+/build/
+/vtk_build/
+/.vs/
+*.exe
+*.ilk
+*.log
+*.obj
+*.pdb
+*.sln
+*.tmp
+*.vcxproj*

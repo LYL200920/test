@@ -1,0 +1,7 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configurePreset": "windows-msvc",
+  "cmake.buildPreset": "windows-relwithdebinfo",
+  "cmake.testPreset": "windows-relwithdebinfo",
+  "cmake.configureOnOpen": false
+}

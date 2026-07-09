@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "test: build RelWithDebInfo",
+      "type": "process",
+      "command": "${env:ProgramFiles}\\Git\\bin\\bash.exe",
+      "args": [
+        "${workspaceFolder}/build_on_windows.sh",
+        "RelWithDebInfo"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$msCompile",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "detail": "Build and install VTK when needed, then build test and run tests."
+    },
+    {
+      "label": "test: build Release",
+      "type": "process",
+      "command": "${env:ProgramFiles}\\Git\\bin\\bash.exe",
+      "args": [
+        "${workspaceFolder}/build_on_windows.sh",
+        "Release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$msCompile",
+      "group": "build"
+    }
+  ]
+}

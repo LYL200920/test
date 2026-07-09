@@ -1,0 +1,42 @@
+
+// user state description here
+
+  > states_tuple;
+
+#undef classname
+#undef mbr_empty1
+#undef mbr_empty0
+#undef mbr
+#undef mbr_impl1
+#undef mbr_impl2
+#undef mfn
+#undef ct
+#undef enter
+#undef exit
+
+#undef state
+//#undef expand_state_0
+//#undef expand_state_n
+
+#undef trans
+
+#undef _and
+#undef _or
+#undef _not
+#undef _le
+#undef falling_edge
+#undef rising_edge
+#undef if_then_else
+#undef do_if
+#undef do_if_once
+
+#undef timeout
+#undef timeout_h
+#undef timeout_m
+#undef timeout_s
+#undef timeout_ms
+#undef timeout_us
+#undef timeout_ns
+#undef const_int
+#undef const_uint
+

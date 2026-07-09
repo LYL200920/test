@@ -1,0 +1,140 @@
+
+#include <utils/pp_utils.hpp>
+#include <utils/pp_args.hpp>
+#include <utils/pp_arith.hpp>
+#include <utils/pp_if_then_else.hpp>
+
+#ifdef _and
+#error
+#endif
+
+#ifdef _or
+#error
+#endif
+
+#ifdef _not
+#error
+#endif
+
+#ifdef _le
+#error
+#endif
+
+#define pp_forward(...) __VA_ARGS__
+#define comma    ,
+
+//#define ct (x) bind_ct<decltype (x), x>
+
+#define enter(...) enter < __VA_ARGS__ >
+#define exit(...) exit< __VA_ARGS__ >
+
+/*
+// the original idea was to add the "always" condition automatically.
+// however it's not possible because mfn (x) will expand into multiple arguments
+// and thus trans will often have more than 1 arg and subsequently the test
+// doesn't work.
+
+#define trans_eq1_1(...) trans < always, __VA_ARGS__ >
+#define trans_eq1_0(...) trans < __VA_ARGS__ >
+
+#define trans(...) trans_impl_1(pp_arith_eq (pp_args_size(__VA_ARGS__), 1), __VA_ARGS__)
+#define trans_impl_1(E, ...) trans_impl_2 (E, __VA_ARGS__)
+#define trans_impl_2(E, ...) trans_eq1_ ## E (__VA_ARGS__)
+*/
+
+#define pp_unparen(...) __VA_ARGS__
+
+#define trans(...) trans < __VA_ARGS__ >
+
+#define do_if(...) do_if < __VA_ARGS__ >
+#define do_if_once(...) do_if_once < __VA_ARGS__ >
+
+
+#if defined (_MSC_VER) && (!defined(_MSVC_TRADITIONAL) || _MSVC_TRADITIONAL)
+
+#define state(name, ...) pp_if_then_else (pp_arith_eq (pp_args_size(__VA_ARGS__), 0), \
+					  expand_state_0, \
+					  expand_state_n, \
+					  name, __VA_ARGS__)
+
+#define expand_state_0_(name, args) state< name, args void>
+#define expand_state_0(name, ...) expand_state_0_(name, __VA_ARGS__)
+
+#define expand_state_n(name, ...) state < name, __VA_ARGS__ >
+
+#else // _MSC_VER
+
+#define state(name, ...) pp_if_then_else (pp_arith_eq (pp_args_size(__VA_ARGS__), 0), \
+					  expand_state_0, \
+					  expand_state_n, \
+					  name, __VA_ARGS__)
+
+#define expand_state_0(name, ...) state< name, __VA_ARGS__ void>
+#define expand_state_n(name, ...) state<name, __VA_ARGS__ >
+
+//#define state(name,...) state<name, __VA_ARGS__, trans(never, never_state) >
+//#define state(name,...) state<name, __VA_ARGS__ >
+
+#endif // _MSC_VER
+
+#define _and(...) cond_and < __VA_ARGS__ >
+#define _or(...) cond_or < __VA_ARGS__ >
+#define _not(x) cond_not < x >
+#define _le(x, y) cond_le <x, y>
+#define falling_edge(x) falling_edge<x>
+#define rising_edge(x) rising_edge<x>
+
+#define if_then_else(a,b,c) if_then_else<a,b,c>
+#define if_then(a,b) if_then<a,b>
+
+#define timeout(...) timeout < __VA_ARGS__ >
+#define timeout_h(...) timeout_h < __VA_ARGS__ >
+#define timeout_m(...) timeout_m < __VA_ARGS__ >
+#define timeout_s(...) timeout_s < __VA_ARGS__ >
+#define timeout_ms(...) timeout_ms < __VA_ARGS__ >
+#define timeout_us(...) timeout_us < __VA_ARGS__ >
+#define timeout_ns(...) timeout_ns < __VA_ARGS__ >
+
+#define const_int(x) const_int<x>
+#define const_uint(x) const_uint<x>
+
+/*
+#define mfn_empty1(x,...) state_machine_impl::bind_fn<decltype (&classname::x), &classname::x >
+#define mfn_empty0(x,...) state_machine_impl::bind_fn<decltype (&classname::x), &classname::x, __VA_ARGS__ >
+
+#define mfn(x, ...) mfn_impl1 (x, pp_arith_eq (pp_args_size (__VA_ARGS__), 0), __VA_ARGS__)
+#define mfn_impl1(x, E, ...) mfn_impl2 (x, E, __VA_ARGS__)
+#define mfn_impl2(x, E, ...) mfn_empty ## E (x, __VA_ARGS__)
+*/
+
+#define mfn(x, ...) pp_if_then_else (pp_arith_eq (pp_args_size (__VA_ARGS__), 0), \
+				     expand_mfn_0, \
+				     expand_mfn_n, \
+				     x, __VA_ARGS__)
+
+
+#define expand_mfn_0(x,...) state_machine_impl::bind_fn<decltype (&classname::x), &classname::x>
+#define expand_mfn_n(x,...) state_machine_impl::bind_fn<decltype (&classname::x), &classname::x, __VA_ARGS__>
+
+//#define expand_mfn_0(__x__, ...) expand_mfn1(__x__)
+//#define expand_mfn_n(x, ...) x, __VA_ARGS__
+//#define expand_mfn_0(x, ...) pp_unparen (bind_fn<decltype (&classname::x), &classname::x>)
+//#define expand_mfn_n(x, ...) XXXXX
+
+//#define expand_mfn_0(x,...) expand_mfn_1(x)
+
+
+
+
+//#define expand_mfn_1(x) pp_concat (bind_fn<decltype, )
+
+//#define expand_mfn1(x) bind_fn<decltype &classname::x, &classname::x, void>
+//#define expand_mfn1(x) pp_forward (bind_fn<decltype &x comma &classname::x>)
+
+
+
+
+
+typedef states<
+
+ // user state description here
