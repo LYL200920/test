@@ -9,9 +9,13 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/stdpaths.h>
-#include <wx/tokenzr.h>
 
-#include <algorithm>
+#include "pose_point_io.h"
+
+#include <array>
+#include <cmath>
+#include <filesystem>
+#include <sstream>
 #include <vector>
 
 namespace
@@ -26,19 +30,97 @@ const wxString HIK_DEFAULT_PORT = "7930";
 const wxString KUKA_DEFAULT_IP = "192.168.1.25";
 const wxString KUKA_DEFAULT_PORT = "54600";
 
-const wxString RECV_DELIMITER = "\r\n";
 // HIK 回复终止符：async_read_some 是字节流，一条回复可能分多次到达，
 // HIK 回复以 ';' 结尾，按 ';' 重组为完整消息后再转发给 KUKA。
 const char HIK_PACKET_TERM = ';';
 
 const wxString FLOW_CONFIG_SECTION = "/Flow";
 const wxString FLOW_CONFIG_KEY = "last_message";
+const std::array<const char*, 6> REFERENCE_POSE_KEYS = {
+  "reference_x", "reference_y", "reference_z",
+  "reference_a", "reference_b", "reference_c"
+};
+const std::array<const char*, 6> REFERENCE_POSE_LABELS = {
+  "X:", "Y:", "Z:", "A:", "B:", "C:"
+};
 
 wxString Trim_Value (wxString value)
 {
   value.Trim (true);
   value.Trim (false);
   return value;
+}
+
+bool Try_Parse_Double (const wxString& value, double* parsed)
+{
+  if( parsed == nullptr )
+    return false;
+
+  wxString trimmed = Trim_Value(value);
+  if( trimmed.IsEmpty ( ) )
+    return false;
+
+  double value_double = 0.0;
+  if( !trimmed.ToDouble (&value_double) || !std::isfinite (value_double) )
+    return false;
+
+  *parsed = value_double;
+  return true;
+}
+
+wxString Format_Transform_Log (const robot_model::XyzabcPose& reference_pose,
+                               const robot_model::XyzabcPose& hik_pose,
+                               const robot_model::Matrix4& transform)
+{
+  std::ostringstream out;
+  out << "reference xyzabc="
+      << robot_model::Format_Xyzabc_Pose (reference_pose) << "\n";
+  out << "HIK xyzabc=" << robot_model::Format_Xyzabc_Pose (hik_pose) << "\n";
+  out << "T = T_hik * inverse(T_ref), rot=ZYX(Rz(A)*Ry(B)*Rx(C))\n";
+  out << robot_model::Format_Matrix4 (transform);
+  return wxString::FromUTF8(out.str ( ));
+}
+
+wxString Format_Transformed_Points_Log (
+  const std::vector<robot_model::XyzabcPose>& points,
+  const robot_model::Matrix4& transform)
+{
+  if( points.empty ( ) )
+  {
+    return wxString::FromUTF8(u8"point.txt 中没有待转换点");
+  }
+
+  std::ostringstream out;
+  out << "transformed points from point.txt (line 2+), rot=ZYX\n";
+  for( size_t i = 0; i < points.size ( ); ++i )
+  {
+    const robot_model::XyzabcPose transformed =
+      robot_model::Transform_Xyzabc_Pose (transform, points[i]);
+    out << "line " << ( i + 2 ) << " "
+        << robot_model::Format_Xyzabc_Pose (points[i])
+        << " -> " << robot_model::Format_Xyzabc_Pose (transformed);
+    if( i + 1 < points.size ( ) )
+    {
+      out << "\n";
+    }
+  }
+  return wxString::FromUTF8(out.str ( ));
+}
+
+wxString Format_Transformed_Points_For_KUKA (
+  const std::vector<robot_model::XyzabcPose>& points,
+  const robot_model::Matrix4& transform)
+{
+  wxString body;
+  for( const auto& point : points )
+  {
+    const robot_model::XyzabcPose transformed =
+      robot_model::Transform_Xyzabc_Pose (transform, point);
+    body += ",";
+    body += wxString::FromUTF8(
+      robot_model::Format_Xyzabc_Pose_Csv (transformed));
+  }
+  return body;
 }
 }
 
@@ -133,10 +215,13 @@ Flow_Panel::~Flow_Panel()
 
 void Flow_Panel::Build_Ui()
 {
-  m_config_path = wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath() +
-                  "/vtk_flow_config.ini";
+  const wxString exe_dir =
+    wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
+  m_config_path = exe_dir + "/vtk_flow_config.ini";
+  m_point_file_path = exe_dir + "/Resource/Robot/point.txt";
 
   const wxString last_msg = Load_Config();
+  Load_Point_File();
 
   auto* sizer = new wxBoxSizer(wxVERTICAL);
 
@@ -181,8 +266,35 @@ void Flow_Panel::Build_Ui()
     sizer->Add(ep.status_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
   };
 
+  auto build_reference_pose = [this, sizer]() {
+    auto* title = new wxStaticText(
+      this, wxID_ANY,
+      wxString::FromUTF8(u8"参考点设置（XYZABC 输入，姿态按 ZYX 旋转）"));
+    wxFont tf = title->GetFont();
+    tf.MakeBold();
+    title->SetFont(tf);
+
+    auto* grid = new wxFlexGridSizer(3, 4, 4, 6);
+    for (std::size_t i = 0; i < m_reference_pose_inputs.size(); ++i)
+    {
+      auto* label = new wxStaticText(this, wxID_ANY, REFERENCE_POSE_LABELS[i]);
+      m_reference_pose_inputs[i] = new wxTextCtrl(
+        this, wxID_ANY,
+        wxString::Format("%.6f", m_reference_pose_values[i]));
+      m_reference_pose_inputs[i]->SetMinSize(wxSize(70, -1));
+      grid->Add(label, 0, wxALIGN_CENTER_VERTICAL);
+      grid->Add(m_reference_pose_inputs[i], 1, wxEXPAND);
+    }
+    grid->AddGrowableCol(1, 1);
+    grid->AddGrowableCol(3, 1);
+
+    sizer->Add(title, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
+    sizer->Add(grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  };
+
   build_endpoint(m_hik);
   build_endpoint(m_kuka);
+  build_reference_pose();
 
   // ---- 发送内容 + 运行控制 ----
   auto* input_label = new wxStaticText(this, wxID_ANY,
@@ -229,6 +341,55 @@ void Flow_Panel::Build_Ui()
   sizer->Add(clear_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
   SetSizer(sizer);
+
+  if( m_point_file_loaded )
+  {
+    Append_Log("[i POINT]", m_point_file_status);
+  }
+  else if( !m_point_file_status.IsEmpty ( ) )
+  {
+    Append_Log("[E POINT]", m_point_file_status);
+  }
+}
+
+void Flow_Panel::Load_Point_File()
+{
+  m_point_file_loaded = false;
+  m_point_file_status.Clear ( );
+  m_points_to_transform.clear ( );
+
+  robot_model::Pose_Point_File point_file;
+  std::string error_message;
+  const std::filesystem::path path (m_point_file_path.ToStdWstring ( ));
+  if( !robot_model::Load_Pose_Point_File (path, &point_file, &error_message) )
+  {
+    m_point_file_status =
+      wxString::FromUTF8(error_message) + " " + m_point_file_path;
+    return;
+  }
+
+  Apply_Reference_Pose_To_Ui (point_file.default_pose);
+  m_points_to_transform = point_file.transform_points;
+  m_point_file_loaded = true;
+  const wxString default_pose_text = wxString::FromUTF8(
+    robot_model::Format_Xyzabc_Pose(point_file.default_pose));
+  m_point_file_status = wxString::Format(
+    wxString::FromUTF8(u8"point.txt 已加载：默认参考点 %s，待转换点 %llu 个"),
+    default_pose_text.c_str ( ),
+    static_cast<unsigned long long>(m_points_to_transform.size ( )));
+}
+
+void Flow_Panel::Apply_Reference_Pose_To_Ui(
+  const robot_model::XyzabcPose& pose)
+{
+  m_reference_pose_values = pose;
+  for( size_t i = 0; i < m_reference_pose_inputs.size ( ); ++i )
+  {
+    if( m_reference_pose_inputs[i] != nullptr )
+    {
+      m_reference_pose_inputs[i]->SetValue (wxString::Format("%.6f", pose[i]));
+    }
+  }
 }
 
 Flow_Panel::Flow_Endpoint* Flow_Panel::Find_Endpoint_By_Window(wxWindow* win)
@@ -390,6 +551,30 @@ void Flow_Panel::Handle_HIK_Recv(const wxString& msg)
   // 始终打印收到的完整回复
   Append_Log("[HIK <]", msg);
 
+  robot_model::XyzabcPose reference_pose = { };
+  robot_model::XyzabcPose hik_pose = { };
+  robot_model::Matrix4 transform = { };
+  wxString transform_error_tag;
+  wxString transform_error_message;
+  const bool has_transform = Calculate_HIK_Reference_Transform(
+    msg,
+    &reference_pose,
+    &hik_pose,
+    &transform,
+    &transform_error_tag,
+    &transform_error_message);
+  if( has_transform )
+  {
+    Append_Log("[T REF]",
+               Format_Transform_Log(reference_pose, hik_pose, transform));
+    Append_Log("[P OUT]",
+               Format_Transformed_Points_Log(m_points_to_transform, transform));
+  }
+  else
+  {
+    Append_Log(transform_error_tag, transform_error_message);
+  }
+
   if (m_step == Flow_Step::Step1_Wait_Recv1)
   {
     // ② 把完整 HIK 回复原样转发给 KUKA（KUKA 协议以 ';' 结尾）
@@ -400,10 +585,12 @@ void Flow_Panel::Handle_HIK_Recv(const wxString& msg)
       return;
     }
 
-    std::string fwd(msg.mb_str(wxConvUTF8));
+    const wxString kuka_body =
+      Build_KUKA_Forward_Body(msg, has_transform ? &transform : nullptr);
+    std::string fwd(kuka_body.mb_str(wxConvUTF8));
     fwd += ";";
     m_kuka.client->send(fwd);
-    Append_Log("[KUKA >]", msg);
+    Append_Log("[KUKA >]", kuka_body);
 
     Set_Step(Flow_Step::Step3_Wait_Recv2);
     Start_Wait_Timer();
@@ -526,6 +713,97 @@ void Flow_Panel::Append_Log(const wxString& tag, const wxString& msg)
   m_log->AppendText(line);
 }
 
+bool Flow_Panel::Read_Reference_Pose(robot_model::XyzabcPose* pose,
+                                     wxString* error_message) const
+{
+  if (pose == nullptr)
+    return false;
+
+  for (std::size_t i = 0; i < pose->size(); ++i)
+  {
+    if (m_reference_pose_inputs[i] == nullptr)
+    {
+      if (error_message != nullptr)
+        *error_message = wxString::FromUTF8(u8"参考点输入框未初始化");
+      return false;
+    }
+
+    const wxString value = Trim_Value(m_reference_pose_inputs[i]->GetValue());
+    double parsed = 0.0;
+    if (!Try_Parse_Double(value, &parsed))
+    {
+      if (error_message != nullptr)
+      {
+        *error_message = wxString::FromUTF8(u8"参考点 ") +
+                         wxString::FromUTF8(REFERENCE_POSE_LABELS[i]) +
+                         wxString::FromUTF8(u8" 输入无效：") + value;
+      }
+      return false;
+    }
+    (*pose)[i] = parsed;
+  }
+  return true;
+}
+
+bool Flow_Panel::Calculate_HIK_Reference_Transform(
+  const wxString& msg,
+  robot_model::XyzabcPose* reference_pose,
+  robot_model::XyzabcPose* hik_pose,
+  robot_model::Matrix4* transform,
+  wxString* error_tag,
+  wxString* error_message) const
+{
+  if( reference_pose == nullptr || hik_pose == nullptr || transform == nullptr )
+  {
+    if( error_tag != nullptr )
+      *error_tag = "[E REF]";
+    if( error_message != nullptr )
+      *error_message = wxString::FromUTF8(u8"转换矩阵输出参数无效");
+    return false;
+  }
+
+  wxString reference_error;
+  if (!Read_Reference_Pose(reference_pose, &reference_error))
+  {
+    if( error_tag != nullptr )
+      *error_tag = "[E REF]";
+    if( error_message != nullptr )
+      *error_message = reference_error;
+    return false;
+  }
+
+  std::string parse_error;
+  if (!robot_model::Parse_Xyzabc_Pose_Text(
+        std::string(msg.mb_str(wxConvUTF8)), hik_pose, &parse_error))
+  {
+    if( error_tag != nullptr )
+      *error_tag = "[E HIK]";
+    if( error_message != nullptr )
+    {
+      *error_message = wxString::FromUTF8(u8"HIK 位姿解析失败：") +
+                       wxString::FromUTF8(parse_error);
+    }
+    return false;
+  }
+
+  *transform =
+    robot_model::Build_Relative_Pose_Transform(*reference_pose, *hik_pose);
+  return true;
+}
+
+wxString Flow_Panel::Build_KUKA_Forward_Body(
+  const wxString& hik_msg,
+  const robot_model::Matrix4* transform) const
+{
+  wxString body = hik_msg;
+  if( transform != nullptr )
+  {
+    body += Format_Transformed_Points_For_KUKA(
+      m_points_to_transform, *transform);
+  }
+  return body;
+}
+
 wxString Flow_Panel::Load_Config()
 {
   wxString last_msg;
@@ -535,6 +813,16 @@ wxString Flow_Panel::Load_Config()
                         wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_RELATIVE_PATH);
     config.SetPath(FLOW_CONFIG_SECTION);
     config.Read(FLOW_CONFIG_KEY, &last_msg, wxEmptyString);
+    for (std::size_t i = 0; i < m_reference_pose_values.size(); ++i)
+    {
+      wxString value_text;
+      double parsed = 0.0;
+      if (config.Read(REFERENCE_POSE_KEYS[i], &value_text) &&
+          Try_Parse_Double(value_text, &parsed))
+      {
+        m_reference_pose_values[i] = parsed;
+      }
+    }
   }
   return last_msg;
 }
@@ -551,5 +839,17 @@ void Flow_Panel::Save_Config()
                       wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_RELATIVE_PATH);
   config.SetPath(FLOW_CONFIG_SECTION);
   config.Write(FLOW_CONFIG_KEY, msg);
+  for (std::size_t i = 0; i < m_reference_pose_inputs.size(); ++i)
+  {
+    if (m_reference_pose_inputs[i] == nullptr)
+      continue;
+
+    double parsed = 0.0;
+    if (Try_Parse_Double(m_reference_pose_inputs[i]->GetValue(), &parsed))
+    {
+      m_reference_pose_values[i] = parsed;
+      config.Write(REFERENCE_POSE_KEYS[i], wxString::Format("%.12g", parsed));
+    }
+  }
   config.Flush();
 }

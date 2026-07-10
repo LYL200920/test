@@ -1,6 +1,7 @@
 #ifndef includeguard_flow_panel_h_includeguard
 #define includeguard_flow_panel_h_includeguard
 
+#include "pose_transform.h"
 #include "tcp_client.h"
 
 #include <wx/panel.h>
@@ -8,9 +9,11 @@
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
+#include <array>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 class wxButton;
 class wxComboBox;
@@ -89,6 +92,19 @@ private:
   void Start_Wait_Timer ( );
   void Stop_Wait_Timer ( );
   void Append_Log (const wxString& tag, const wxString& msg);
+  bool Calculate_HIK_Reference_Transform (const wxString& msg,
+                                          robot_model::XyzabcPose* reference_pose,
+                                          robot_model::XyzabcPose* hik_pose,
+                                          robot_model::Matrix4* transform,
+                                          wxString* error_tag,
+                                          wxString* error_message) const;
+  bool Read_Reference_Pose (robot_model::XyzabcPose* pose,
+                            wxString* error_message) const;
+  wxString Build_KUKA_Forward_Body (
+    const wxString& hik_msg,
+    const robot_model::Matrix4* transform) const;
+  void Load_Point_File ( );
+  void Apply_Reference_Pose_To_Ui (const robot_model::XyzabcPose& pose);
 
   wxString Load_Config ( );
   void Save_Config ( );
@@ -103,11 +119,17 @@ private:
   wxStaticText* m_flow_status_label = nullptr;
   wxTextCtrl* m_log = nullptr;
   wxButton* m_clear_btn = nullptr;
+  std::array<wxTextCtrl*, 6> m_reference_pose_inputs = { };
+  std::array<double, 6> m_reference_pose_values = { };
+  std::vector<robot_model::XyzabcPose> m_points_to_transform;
+  bool m_point_file_loaded = false;
+  wxString m_point_file_status;
 
   wxTimer m_wait_timer;
   Flow_Step m_step = Flow_Step::Idle;
 
   wxString m_config_path;
+  wxString m_point_file_path;
 
   wxDECLARE_EVENT_TABLE ( );
 };
