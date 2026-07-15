@@ -12,50 +12,50 @@
 
 namespace
 {
-wxString From_Utf8(const char *text)
-{
-  return wxString::FromUTF8(text);
-}
-
-wxString From_Utf8(const std::string &text)
-{
-  return wxString::FromUTF8(text.c_str());
-}
-
-wxString Device_Type_Label(std::uint32_t device_type)
-{
-  switch (device_type)
+  wxString From_Utf8(const char *text)
   {
-  case DeviceType_Ethernet:
-    return From_Utf8(u8"以太网");
-  case DeviceType_USB:
-    return "USB";
-  case DeviceType_Ethernet_Vir:
-    return From_Utf8(u8"虚拟以太网");
-  case DeviceType_USB_Vir:
-    return From_Utf8(u8"虚拟 USB");
-  default:
-    return wxString::Format(From_Utf8(u8"未知 (0x%X)"), device_type);
+    return wxString::FromUTF8(text);
   }
-}
 
-wxString Camera_State_Label(Camera_State state)
-{
-  switch (state)
+  wxString From_Utf8(const std::string &text)
   {
-  case Camera_State::Uninitialized:
-    return From_Utf8(u8"未初始化");
-  case Camera_State::Initialized:
-    return From_Utf8(u8"已初始化");
-  case Camera_State::Opened:
-    return From_Utf8(u8"已打开");
-  case Camera_State::Grabbing:
-    return From_Utf8(u8"采集中");
-  case Camera_State::Error:
-    return From_Utf8(u8"错误");
+    return wxString::FromUTF8(text.c_str());
   }
-  return From_Utf8(u8"未知");
-}
+
+  wxString Device_Type_Label(std::uint32_t device_type)
+  {
+    switch (device_type)
+    {
+    case DeviceType_Ethernet:
+      return From_Utf8(u8"以太网");
+    case DeviceType_USB:
+      return "USB";
+    case DeviceType_Ethernet_Vir:
+      return From_Utf8(u8"虚拟以太网");
+    case DeviceType_USB_Vir:
+      return From_Utf8(u8"虚拟 USB");
+    default:
+      return wxString::Format(From_Utf8(u8"未知 (0x%X)"), device_type);
+    }
+  }
+
+  wxString Camera_State_Label(Camera_State state)
+  {
+    switch (state)
+    {
+    case Camera_State::Uninitialized:
+      return From_Utf8(u8"未初始化");
+    case Camera_State::Initialized:
+      return From_Utf8(u8"已初始化");
+    case Camera_State::Opened:
+      return From_Utf8(u8"已打开");
+    case Camera_State::Grabbing:
+      return From_Utf8(u8"采集中");
+    case Camera_State::Error:
+      return From_Utf8(u8"错误");
+    }
+    return From_Utf8(u8"未知");
+  }
 } // namespace
 
 Camera_Config_Dialog::Camera_Config_Dialog(
@@ -67,33 +67,27 @@ Camera_Config_Dialog::Camera_Config_Dialog(
 {
   Build_Ui();
   Bind(wxEVT_SHOW, &Camera_Config_Dialog::On_Show, this);
-  m_camera_service.Bind(
-      wxEVT_CAMERA_UPDATED,
-      &Camera_Config_Dialog::On_Camera_Updated,
-      this);
+  m_camera_service.Bind(wxEVT_CAMERA_UPDATED,
+                        &Camera_Config_Dialog::On_Camera_Updated,
+                        this);
   CentreOnParent();
 }
 
 Camera_Config_Dialog::~Camera_Config_Dialog()
 {
-  m_camera_service.Unbind(
-      wxEVT_CAMERA_UPDATED,
-      &Camera_Config_Dialog::On_Camera_Updated,
-      this);
+  m_camera_service.Unbind(wxEVT_CAMERA_UPDATED,
+                          &Camera_Config_Dialog::On_Camera_Updated,
+                          this);
 }
 
 void Camera_Config_Dialog::Build_Ui()
 {
-  m_version_text = new wxStaticText(
-      this, wxID_ANY, From_Utf8(u8"SDK版本：未初始化"));
-  m_state_text = new wxStaticText(
-      this, wxID_ANY, From_Utf8(u8"状态：未初始化"));
-  m_status_text = new wxStaticText(
-      this, wxID_ANY, From_Utf8(u8"等待搜索设备"));
+  m_version_text = new wxStaticText(this, wxID_ANY, From_Utf8(u8"SDK版本：未初始化"));
+  m_state_text = new wxStaticText(this, wxID_ANY, From_Utf8(u8"状态：未初始化"));
+  m_status_text = new wxStaticText(this, wxID_ANY, From_Utf8(u8"等待搜索设备"));
 
-  m_device_list = new wxListCtrl(
-      this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-      wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_HRULES | wxLC_VRULES);
+  m_device_list = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                 wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_HRULES | wxLC_VRULES);
   m_device_list->InsertColumn(0, From_Utf8(u8"序号"), wxLIST_FORMAT_LEFT, 64);
   m_device_list->InsertColumn(1, From_Utf8(u8"型号"), wxLIST_FORMAT_LEFT, 180);
   m_device_list->InsertColumn(2, From_Utf8(u8"序列号"), wxLIST_FORMAT_LEFT, 180);
@@ -245,7 +239,8 @@ void Camera_Config_Dialog::On_Show(wxShowEvent &event)
     return;
 
   m_initial_load_started = true;
-  CallAfter([this]() { Load_Devices(); });
+  CallAfter([this]()
+            { Load_Devices(); });
 }
 
 void Camera_Config_Dialog::On_Refresh(wxCommandEvent &)

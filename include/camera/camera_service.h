@@ -16,7 +16,7 @@
 #include <thread>
 #include <vector>
 
-wxDECLARE_EVENT (wxEVT_CAMERA_UPDATED, wxThreadEvent);
+wxDECLARE_EVENT(wxEVT_CAMERA_UPDATED, wxThreadEvent);
 
 enum class Camera_Operation
 {
@@ -37,64 +37,63 @@ enum class Camera_Operation
 class Camera_Service : public wxEvtHandler
 {
 public:
-  Camera_Service ( );
-  ~Camera_Service ( ) override;
+  Camera_Service();
+  ~Camera_Service() override;
 
-  std::uint64_t Request_Refresh_Devices ( );
-  std::uint64_t Request_Select_Device (const std::string& serial_number);
-  std::uint64_t Request_Open_Selected_Device ( );
-  std::uint64_t Request_Get_Device_Info ( );
-  std::uint64_t Request_Get_Stream_Configuration ( );
-  std::uint64_t Request_Load_Parameters ( );
-  std::uint64_t Request_Apply_Parameters (
-    std::vector<Camera_Parameter_Update> updates);
-  std::uint64_t Request_Close_Device ( );
-  std::uint64_t Request_Start_Acquisition ( );
-  std::uint64_t Request_Stop_Acquisition ( );
+  std::uint64_t Request_Refresh_Devices();
+  std::uint64_t Request_Select_Device(const std::string &serial_number);
+  std::uint64_t Request_Open_Selected_Device();
+  std::uint64_t Request_Get_Device_Info();
+  std::uint64_t Request_Get_Stream_Configuration();
+  std::uint64_t Request_Load_Parameters();
+  std::uint64_t Request_Apply_Parameters(std::vector<Camera_Parameter_Update> updates);
+  std::uint64_t Request_Close_Device();
+  std::uint64_t Request_Start_Acquisition();
+  std::uint64_t Request_Stop_Acquisition();
 
-  Camera_State State ( ) const { return m_state; }
-  const std::string& Last_Error ( ) const { return m_last_error; }
-  bool Is_Initialized ( ) const { return m_initialized; }
-  bool Is_Device_Open ( ) const { return m_device_open; }
-  bool Can_Refresh_Devices ( ) const { return m_can_refresh_devices; }
-  bool Can_Select_Device ( ) const { return m_can_select_device; }
-  bool Is_Busy ( ) const { return m_pending_request_count != 0; }
+  Camera_State State() const { return m_state; }
+  const std::string &Last_Error() const { return m_last_error; }
+  bool Is_Initialized() const { return m_initialized; }
+  bool Is_Device_Open() const { return m_device_open; }
+  bool Can_Refresh_Devices() const { return m_can_refresh_devices; }
+  bool Can_Select_Device() const { return m_can_select_device; }
+  bool Is_Busy() const { return m_pending_request_count != 0; }
 
-  const SDK_VERSION& Version ( ) const { return m_version; }
-  const std::vector<CAMERA_DEVICE_INFO>& Devices ( ) const { return m_devices; }
-  const std::optional<Camera_Device_Detail>& Device_Detail ( ) const
+  const SDK_VERSION &Version() const { return m_version; }
+  const std::vector<CAMERA_DEVICE_INFO> &Devices() const { return m_devices; }
+  const std::optional<Camera_Device_Detail> &Device_Detail() const
   {
     return m_device_detail;
   }
-  const std::vector<Camera_Parameter>& Parameters ( ) const
+  const std::vector<Camera_Parameter> &Parameters() const
   {
     return m_parameters;
   }
-  bool Parameters_Loaded ( ) const { return m_parameters_loaded; }
-  const std::string& Parameter_Status ( ) const { return m_parameter_status; }
-  const std::vector<Camera_Stream_Config>& Stream_Configuration ( ) const
+  bool Parameters_Loaded() const { return m_parameters_loaded; }
+  const std::string &Parameter_Status() const { return m_parameter_status; }
+  const std::vector<Camera_Stream_Config> &Stream_Configuration() const
   {
     return m_stream_configuration;
   }
-  bool Stream_Configuration_Loaded ( ) const
+  bool Stream_Configuration_Loaded() const
   {
     return m_stream_configuration_loaded;
   }
-  const std::string& Selected_Serial_Number ( ) const
+  const std::string &Selected_Serial_Number() const
   {
     return m_selected_serial_number;
   }
 
-  Camera_Operation Last_Operation ( ) const { return m_last_operation; }
-  bool Last_Operation_Succeeded ( ) const { return m_last_operation_succeeded; }
-  std::uint64_t Last_Completed_Request ( ) const
+  Camera_Operation Last_Operation() const { return m_last_operation; }
+  bool Last_Operation_Succeeded() const { return m_last_operation_succeeded; }
+  std::uint64_t Last_Completed_Request() const
   {
     return m_last_completed_request;
   }
 
-  std::shared_ptr<const Camera_Frame> Latest_Frame ( ) const
+  std::shared_ptr<const Camera_Frame> Latest_Frame() const
   {
-    return m_frame_buffer.Latest ( );
+    return m_frame_buffer.Latest();
   }
 
 private:
@@ -128,21 +127,18 @@ private:
     std::string selected_serial_number;
   };
 
-  std::uint64_t Enqueue (
-    Camera_Operation operation,
-    std::string serial_number = {},
-    std::vector<Camera_Parameter_Update> parameter_updates = {});
-  void Worker_Loop ( );
-  Worker_Result Execute_Command (
-    Camera_Manager& core,
-    const Command& command);
-  Worker_Result Build_Result (
-    const Camera_Manager& core,
-    const Command& command,
-    bool success,
-    std::string error) const;
-  void Post_Worker_Result (Worker_Result result);
-  void On_Worker_Result (wxThreadEvent& event);
+  std::uint64_t Enqueue(Camera_Operation operation,
+                        std::string serial_number = {},
+                        std::vector<Camera_Parameter_Update> parameter_updates = {});
+  void Worker_Loop();
+  Worker_Result Execute_Command(Camera_Manager &core,
+                                const Command &command);
+  Worker_Result Build_Result(const Camera_Manager &core,
+                             const Command &command,
+                             bool success,
+                             std::string error) const;
+  void Post_Worker_Result(Worker_Result result);
+  void On_Worker_Result(wxThreadEvent &event);
 
 private:
   std::thread m_worker;
