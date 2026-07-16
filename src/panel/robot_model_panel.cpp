@@ -4,7 +4,6 @@
 #include "camera_image_view.h"
 #include "camera_service.h"
 #include "robot_joint_state_builder.h"
-#include "robot_model_config_loader.h"
 #include "robot_model_config_dialog.h"
 #include "robot_model_repository.h"
 #include "robot_trajectory_io.h"
@@ -13,6 +12,7 @@
 #include "flow_panel.h"
 #include "point_cloud_view.h"
 
+#include <wx/button.h>
 #include <wx/filedlg.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
@@ -21,6 +21,7 @@
 #include <wx/utils.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <utility>
@@ -32,6 +33,7 @@ constexpr int DEFAULT_JOINT_MAX = 180;
 constexpr int TRAJECTORY_FRAME_COUNT = 120;
 constexpr int TRAJECTORY_TIMER_MS = 16;
 constexpr int TRAJECTORY_SPEED_DEFAULT_INDEX = 2;
+constexpr std::size_t ROBOT_JOINT_COUNT = 6;
 constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR210_R2700_2";
 constexpr std::array<double, 5> TRAJECTORY_SPEED_SCALES = {
   0.25, 0.5, 1.0, 2.0, 4.0
@@ -97,13 +99,15 @@ bool validate_model_files (
 
   return true;
 }
+
 } // namespace
 
 Robot_Model_Panel::Robot_Model_Panel (
   wxWindow* parent,
   Camera_Service& camera_service,
   wxWindowID id)
-  : wxPanel (parent, id)
+  : wxPanel (parent, id),
+    m_point_cloud_overlay_controller (camera_service)
 {
   auto* title = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"显示区域"));
@@ -122,9 +126,45 @@ Robot_Model_Panel::Robot_Model_Panel (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Camera_Image_Display, this);
   m_point_cloud_display_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Point_Cloud_Display, this);
+  auto* load_overlay_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"加载点云叠加"));
+  auto* clear_overlay_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"清除点云叠加"));
+  load_overlay_button->Bind (
+    wxEVT_BUTTON, &Robot_Model_Panel::On_Load_Point_Cloud_Overlay, this);
+  clear_overlay_button->Bind (
+    wxEVT_BUTTON, &Robot_Model_Panel::On_Clear_Point_Cloud_Overlay, this);
+  m_camera_pose_button = new wxToggleButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"显示相机位姿"));
+  m_camera_pose_button->Bind (
+    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Toggle_Camera_Pose, this);
+  m_flange_frame_button = new wxToggleButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"显示法兰坐标系"));
+  m_flange_frame_button->Bind (
+    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Toggle_Flange_Frame, this);
+  m_flange_free_drag_button = new wxToggleButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"自由拖拽"));
+  m_flange_free_drag_button->Bind (
+    wxEVT_TOGGLEBUTTON,
+    &Robot_Model_Panel::On_Toggle_Flange_Free_Drag,
+    this);
+  m_flange_6d_button = new wxToggleButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"6D 操纵"));
+  m_flange_6d_button->Bind (
+    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Toggle_Flange_6D, this);
 
   m_display_book = new wxSimplebook (this, wxID_ANY);
   m_view = new Robot_Model_View (m_display_book);
+  m_view->Set_On_Flange_Dragged (
+    [this] (const robot_model::Robot_Position_IK_Result& result)
+    {
+      Apply_Flange_Drag_Result (result);
+    });
+  m_view->Set_On_Flange_Pose_Dragged (
+    [this] (const robot_model::Robot_Pose_IK_Result& result)
+    {
+      Apply_Flange_Pose_Drag_Result (result);
+    });
   m_camera_image_view = new Camera_Image_View (
     m_display_book, camera_service);
   m_point_cloud_view = new Point_Cloud_View (
@@ -164,6 +204,18 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_camera_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
   toolbar_sizer->Add (
     m_point_cloud_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+  toolbar_sizer->Add (
+    load_overlay_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+  toolbar_sizer->Add (
+    clear_overlay_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+  toolbar_sizer->Add (
+    m_camera_pose_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+  toolbar_sizer->Add (
+    m_flange_frame_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+  toolbar_sizer->Add (
+    m_flange_free_drag_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+  toolbar_sizer->Add (
+    m_flange_6d_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (m_model_name_text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (m_status_text, 1, wxALIGN_CENTER_VERTICAL);
 
@@ -195,6 +247,182 @@ void Robot_Model_Panel::On_Camera_Image_Display (wxCommandEvent&)
 void Robot_Model_Panel::On_Point_Cloud_Display (wxCommandEvent&)
 {
   Select_Display_Page (Main_Display_Page::Point_Cloud);
+}
+
+void Robot_Model_Panel::On_Load_Point_Cloud_Overlay (wxCommandEvent&)
+{
+  const auto result = m_point_cloud_overlay_controller.Load_Latest (
+    m_view->Scene_Renderer ( ));
+  if( !result.success )
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (result.error_message.c_str ( )),
+      wxString::FromUTF8 (u8"点云叠加失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  Select_Display_Page (Main_Display_Page::Robot);
+  m_status_text->SetLabel (wxString::Format (
+    wxString::FromUTF8 (u8"点云已叠加：%zu 点"),
+    result.point_count));
+  m_view->Render_Scene ( );
+}
+
+void Robot_Model_Panel::On_Clear_Point_Cloud_Overlay (wxCommandEvent&)
+{
+  m_point_cloud_overlay_controller.Clear ( );
+  m_status_text->SetLabel (wxString::FromUTF8 (u8"点云叠加已清除"));
+  m_view->Render_Scene ( );
+}
+
+void Robot_Model_Panel::On_Toggle_Camera_Pose (wxCommandEvent&)
+{
+  if( !m_camera_pose_button || !m_camera_pose_button->GetValue ( ) )
+  {
+    m_camera_pose_controller.Hide ( );
+    if( m_camera_pose_button )
+    {
+      m_camera_pose_button->SetLabel (wxString::FromUTF8 (u8"显示相机位姿"));
+    }
+    m_status_text->SetLabel (wxString::FromUTF8 (u8"相机位姿已隐藏"));
+    m_view->Render_Scene ( );
+    return;
+  }
+
+  std::string error;
+  if( !m_camera_pose_controller.Show (m_view->Scene_Renderer ( ), &error) )
+  {
+    m_camera_pose_button->SetValue (false);
+    wxMessageBox (
+      wxString::FromUTF8 (error.c_str ( )),
+      wxString::FromUTF8 (u8"相机位姿加载失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  Select_Display_Page (Main_Display_Page::Robot);
+  m_camera_pose_button->SetLabel (wxString::FromUTF8 (u8"隐藏相机位姿"));
+
+  m_status_text->SetLabel (wxString::FromUTF8 (u8"相机位姿已显示"));
+  m_view->Render_Scene ( );
+}
+
+void Robot_Model_Panel::On_Toggle_Flange_Frame (wxCommandEvent&)
+{
+  const bool visible =
+    m_flange_frame_button && m_flange_frame_button->GetValue ( );
+  m_view->Set_Flange_Frame_Visible (visible);
+  if( visible && !m_view->Has_Flange_Pose ( ) )
+  {
+    m_flange_frame_button->SetValue (false);
+    m_flange_frame_button->SetLabel (
+      wxString::FromUTF8 (u8"显示法兰坐标系"));
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"当前模型没有可用的法兰位姿"));
+    return;
+  }
+
+  m_flange_frame_button->SetLabel (
+    visible
+      ? wxString::FromUTF8 (u8"隐藏法兰坐标系")
+      : wxString::FromUTF8 (u8"显示法兰坐标系"));
+  m_status_text->SetLabel (
+    visible
+      ? wxString::FromUTF8 (u8"法兰坐标系已显示")
+      : wxString::FromUTF8 (u8"法兰坐标系已隐藏"));
+
+  if( !visible && m_flange_6d_button && m_flange_6d_button->GetValue ( ) )
+  {
+    Set_Flange_Interaction_Mode (
+      Robot_Model_View::Flange_Interaction_Mode::Observe);
+  }
+}
+
+void Robot_Model_Panel::On_Toggle_Flange_Free_Drag (wxCommandEvent&)
+{
+  const bool enabled = m_flange_free_drag_button &&
+    m_flange_free_drag_button->GetValue ( );
+  if( enabled && !m_view->Has_Flange_Pose ( ) )
+  {
+    m_flange_free_drag_button->SetValue (false);
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"当前模型没有可拖拽的法兰位姿"));
+    return;
+  }
+
+  if( enabled && Is_Trajectory_Active ( ) )
+  {
+    Stop_Trajectory_Playback ( );
+  }
+  if( enabled )
+  {
+    Select_Display_Page (Main_Display_Page::Robot);
+    Set_Flange_Interaction_Mode (
+      Robot_Model_View::Flange_Interaction_Mode::Free_Translation);
+  }
+  else
+  {
+    Set_Flange_Interaction_Mode (
+      Robot_Model_View::Flange_Interaction_Mode::Observe);
+  }
+  m_status_text->SetLabel (
+    enabled
+      ? wxString::FromUTF8 (u8"自由拖拽：拖动黄色手柄")
+      : wxString::FromUTF8 (u8"观察模式"));
+}
+
+void Robot_Model_Panel::On_Toggle_Flange_6D (wxCommandEvent&)
+{
+  const bool enabled = m_flange_6d_button && m_flange_6d_button->GetValue ( );
+  if( enabled && !m_view->Has_Flange_Pose ( ) )
+  {
+    m_flange_6d_button->SetValue (false);
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"当前模型没有可操纵的法兰位姿"));
+    return;
+  }
+  if( enabled && Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
+  if( enabled ) Select_Display_Page (Main_Display_Page::Robot);
+  Set_Flange_Interaction_Mode (enabled
+    ? Robot_Model_View::Flange_Interaction_Mode::Transform_6D
+    : Robot_Model_View::Flange_Interaction_Mode::Observe);
+  m_status_text->SetLabel (enabled
+    ? wxString::FromUTF8 (u8"6D 操纵：彩色轴端平移，圆环旋转")
+    : wxString::FromUTF8 (u8"观察模式"));
+}
+
+void Robot_Model_Panel::Set_Flange_Interaction_Mode (
+  Robot_Model_View::Flange_Interaction_Mode mode)
+{
+  const bool free_translation =
+    mode == Robot_Model_View::Flange_Interaction_Mode::Free_Translation;
+  const bool transform_6d =
+    mode == Robot_Model_View::Flange_Interaction_Mode::Transform_6D;
+  m_flange_free_drag_button->SetValue (free_translation);
+  m_flange_6d_button->SetValue (transform_6d);
+  m_flange_free_drag_button->SetLabel (wxString::FromUTF8 (
+    free_translation ? u8"停止自由拖拽" : u8"自由拖拽"));
+  m_flange_6d_button->SetLabel (wxString::FromUTF8 (
+    transform_6d ? u8"停止 6D 操纵" : u8"6D 操纵"));
+  m_view->Set_Flange_Interaction_Mode (mode);
+
+  if( free_translation )
+  {
+    m_view->Set_Flange_Frame_Visible (false);
+    m_flange_frame_button->SetValue (false);
+    m_flange_frame_button->SetLabel (
+      wxString::FromUTF8 (u8"显示法兰坐标系"));
+  }
+  else if( transform_6d )
+  {
+    m_view->Set_Flange_Frame_Visible (true);
+    m_flange_frame_button->SetValue (true);
+    m_flange_frame_button->SetLabel (
+      wxString::FromUTF8 (u8"隐藏法兰坐标系"));
+  }
 }
 
 void Robot_Model_Panel::Select_Display_Page (Main_Display_Page page)
@@ -497,6 +725,13 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
   m_joint_panel->Set_On_Joint_Changed (
     [this] { Update_Joint_State_From_Sliders ( ); });
 
+  m_cartesian_pose_panel = new Cartesian_Pose_Panel (panel);
+  m_cartesian_pose_panel->Set_On_World_Frame_Visibility_Changed (
+    [this] (bool visible)
+    {
+      if( m_view ) m_view->Set_World_Frame_Visible (visible);
+    });
+
   m_trajectory_panel = new Trajectory_Control_Panel (
     panel,
     TRAJECTORY_SPEED_DEFAULT_INDEX,
@@ -529,10 +764,10 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
 
   auto* sizer = new wxBoxSizer (wxVERTICAL);
   sizer->Add (m_joint_panel, 0, wxEXPAND);
+  sizer->Add (m_cartesian_pose_panel, 0, wxEXPAND | wxTOP, 14);
   sizer->Add (m_trajectory_panel, 0, wxEXPAND);
   sizer->AddStretchSpacer (1);
   panel->SetSizer (sizer);
-  Update_Joint_State_From_Sliders ( );
   Update_Trajectory_Speed_Label ( );
   Update_Trajectory_Point_List ( );
   Update_Trajectory_Status ( );
@@ -548,7 +783,7 @@ void Robot_Model_Panel::Apply_Joint_Limits (
     return;
   }
 
-  for( size_t i = 0; i < m_joint_state.input_angles_deg.size ( ); ++i )
+  for( size_t i = 0; i < ROBOT_JOINT_COUNT; ++i )
   {
     int min_value = slider_limit_at (params.joint_mins, i, DEFAULT_JOINT_MIN);
     int max_value = slider_limit_at (params.joint_maxs, i, DEFAULT_JOINT_MAX);
@@ -568,20 +803,79 @@ void Robot_Model_Panel::Apply_Joint_Limits (
 
 void Robot_Model_Panel::Update_Joint_State_From_Sliders ( )
 {
-  m_joint_state = robot_model::Build_Joint_State_From_Input_Angles (
-    m_params, Read_Joint_Input_Angles ( ));
+  if( !m_view || !m_view->Has_Current_Model ( ) || !m_joint_panel ) return;
+  const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
+    m_view->Kinematic_Params ( ), m_joint_panel->Read_Input_Angles ( ));
+  m_view->Set_Joint_State (joint_state);
+  Sync_Joint_Controls_From_State ( );
+}
 
-  for( size_t i = 0; i < m_joint_state.input_angles_deg.size ( ); ++i )
+void Robot_Model_Panel::Sync_Joint_Controls_From_State ( )
+{
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+  const auto& joint_state = m_view->Joint_State ( );
+  if( m_joint_panel )
   {
-    Update_Joint_Value_Label (i,
-                              m_joint_state.input_angles_deg[i],
-                              m_joint_state.effective_angles_deg[i]);
+    m_joint_panel->Set_Input_Angles (joint_state.input_angles_deg);
+  }
+  for( size_t i = 0; i < joint_state.input_angles_deg.size ( ); ++i )
+  {
+    Update_Joint_Value_Label (
+      i,
+      joint_state.input_angles_deg[i],
+      joint_state.effective_angles_deg[i]);
+  }
+  Update_Cartesian_Pose ( );
+}
+
+void Robot_Model_Panel::Update_Cartesian_Pose ( )
+{
+  if( !m_cartesian_pose_panel || !m_view ) return;
+  robot_model::Matrix4 world_from_flange = { };
+  if( m_view->Get_World_From_Flange (&world_from_flange) )
+  {
+    m_cartesian_pose_panel->Set_World_From_Flange (world_from_flange);
+  }
+  else
+  {
+    m_cartesian_pose_panel->Clear ( );
+  }
+}
+
+void Robot_Model_Panel::Apply_Flange_Drag_Result (
+  const robot_model::Robot_Position_IK_Result& result)
+{
+  if( result.status == robot_model::Robot_IK_Status::Invalid_Model )
+  {
+    m_status_text->SetLabel (wxString::FromUTF8 (u8"法兰拖拽失败：模型无效"));
+    return;
   }
 
-  if( m_view )
+  Sync_Joint_Controls_From_State ( );
+
+  m_status_text->SetLabel (wxString::Format (
+    result.Converged ( )
+      ? wxString::FromUTF8 (u8"法兰拖拽：IK 误差 %.2f mm")
+      : wxString::FromUTF8 (u8"法兰目标受限：当前误差 %.2f mm"),
+    result.position_error_mm));
+}
+
+void Robot_Model_Panel::Apply_Flange_Pose_Drag_Result (
+  const robot_model::Robot_Pose_IK_Result& result)
+{
+  if( result.status == robot_model::Robot_IK_Status::Invalid_Model )
   {
-    m_view->Set_Joint_State (m_joint_state);
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"法兰姿态拖拽失败：模型无效"));
+    return;
   }
+  Sync_Joint_Controls_From_State ( );
+  m_status_text->SetLabel (wxString::Format (
+    result.Converged ( )
+      ? wxString::FromUTF8 (u8"姿态拖拽：位置 %.2f mm，角度 %.2f°")
+      : wxString::FromUTF8 (u8"姿态目标受限：位置 %.2f mm，角度 %.2f°"),
+    result.position_error_mm,
+    result.orientation_error_deg));
 }
 
 void Robot_Model_Panel::Update_Joint_Value_Label (size_t index,
@@ -596,6 +890,10 @@ void Robot_Model_Panel::Update_Joint_Value_Label (size_t index,
 
 std::array<double, 6> Robot_Model_Panel::Read_Joint_Input_Angles ( ) const
 {
+  if( m_view && m_view->Has_Current_Model ( ) )
+  {
+    return m_view->Joint_State ( ).input_angles_deg;
+  }
   return m_joint_panel ? m_joint_panel->Read_Input_Angles ( )
                        : std::array<double, 6> {};
 }
@@ -608,7 +906,11 @@ void Robot_Model_Panel::Apply_Joint_Input_Angles_To_Sliders (
     m_joint_panel->Set_Input_Angles (input_angles_deg);
   }
 
-  Update_Joint_State_From_Sliders ( );
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+  const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
+    m_view->Kinematic_Params ( ), input_angles_deg);
+  m_view->Set_Joint_State (joint_state);
+  Sync_Joint_Controls_From_State ( );
 }
 
 void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
@@ -814,12 +1116,17 @@ bool Robot_Model_Panel::Load_Model (
     Stop_Trajectory_Playback ( );
   }
 
-  m_params = robot_model::Load_Robot_Kinematic_Params (
-    model.xml_path, model.display_name);
-  Apply_Joint_Limits (m_params);
-
   m_view->Load_Model (model);
-  m_view->Set_Joint_State (m_joint_state);
+  Apply_Joint_Limits (m_view->Kinematic_Params ( ));
+  if( m_point_cloud_overlay_controller.Has_Point_Cloud ( ) )
+  {
+    m_point_cloud_overlay_controller.Attach_Renderer (
+      m_view->Scene_Renderer ( ));
+  }
+  if( m_camera_pose_controller.Is_Visible ( ) )
+  {
+    m_camera_pose_controller.Attach_Renderer (m_view->Scene_Renderer ( ));
+  }
 
   m_current_model_id = model_id (model);
   m_model_name_text->SetLabel (

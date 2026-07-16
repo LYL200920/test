@@ -1,9 +1,12 @@
 #ifndef includeguard_point_cloud_renderer_h_includeguard
 #define includeguard_point_cloud_renderer_h_includeguard
 
+#include "pose_transform.h"
+
 #include <vtkActor.h>
 #include <vtkCellArray.h>
 #include <vtkDataArray.h>
+#include <vtkMatrix4x4.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkPLYReader.h>
@@ -32,10 +35,13 @@ public:
     const std::vector<float>& xyz,
     const std::vector<std::uint8_t>& rgb = {},
     std::string* error_message = nullptr);
+  void Set_World_From_Point_Cloud (
+    const robot_model::Matrix4& world_from_point_cloud);
   void Clear ( );
 
   bool Has_Point_Cloud ( ) const { return m_actor != nullptr; }
   std::size_t Point_Count ( ) const { return m_point_count; }
+  bool Get_World_Bounds (double bounds[6]) const;
 
 private:
   vtkSmartPointer<vtkPolyData> Build_Display_Data (vtkPolyData* input) const;
@@ -49,6 +55,7 @@ private:
   vtkSmartPointer<vtkVertexGlyphFilter> m_glyph_filter;
   vtkSmartPointer<vtkPolyDataMapper> m_mapper;
   vtkSmartPointer<vtkActor> m_actor;
+  vtkSmartPointer<vtkMatrix4x4> m_world_from_point_cloud;
   std::size_t m_point_count = 0;
 };
 

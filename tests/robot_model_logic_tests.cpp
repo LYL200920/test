@@ -1,6 +1,9 @@
 #include "robot_joint_state_builder.h"
+#include "eye_to_hand_calibration.h"
 #include "pose_point_io.h"
 #include "pose_transform.h"
+#include "robot_forward_kinematics.h"
+#include "robot_inverse_kinematics.h"
 #include "robot_trajectory_io.h"
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
@@ -236,6 +239,233 @@ void test_pose_point_file_io ( )
   std::filesystem::remove (path);
 }
 
+void test_eye_to_hand_calibration ( )
+{
+  const auto path = std::filesystem::temp_directory_path ( ) /
+    "test_eye_to_hand_calibration.txt";
+  {
+    std::ofstream file (path);
+    file << "RotMat_cam2robot = [\n";
+    file << "  0.0029242793573063426  0.92028524175874993 "
+            "-0.39123714632032508\n";
+    file << "  0.99998141562059728 -0.00059780162156294328 "
+            "0.0060681302921512387\n";
+    file << "  0.0053505264238772193 -0.39124761801406271 "
+            "-0.92026988215636063 ]\n";
+    file << "TranMat_cam2robot = [1225.5965333023571 "
+            "198.01430682455043 1177.1407695305254]\n";
+  }
+
+  robot_model::Eye_To_Hand_Calibration calibration;
+  std::string error;
+  require (robot_model::Load_Eye_To_Hand_Calibration (
+             path, &calibration, &error),
+           "Eye-to-hand calibration load failed: " + error);
+  const auto matrix = calibration.World_From_Camera ( );
+  require_near (matrix[0][0], 0.0029242793573063426,
+                "Eye-to-hand R00 mismatch");
+  require_near (matrix[0][1], 0.92028524175874993,
+                "Eye-to-hand R01 mismatch");
+  require_near (matrix[1][2], 0.0060681302921512387,
+                "Eye-to-hand R12 mismatch");
+  require_near (matrix[2][2], -0.92026988215636063,
+                "Eye-to-hand R22 mismatch");
+  require_near (matrix[0][3], 1225.5965333023571,
+                "Eye-to-hand matrix tx mismatch");
+  require_near (matrix[2][3], 1177.1407695305254,
+                "Eye-to-hand matrix tz mismatch");
+
+  const auto camera_origin = robot_model::Transform_Position (
+    matrix, { 0.0, 0.0, 0.0 });
+  require_near (camera_origin[0], 1225.5965333023571,
+                "Transformed camera origin X mismatch");
+  require_near (camera_origin[1], 198.01430682455043,
+                "Transformed camera origin Y mismatch");
+  require_near (camera_origin[2], 1177.1407695305254,
+                "Transformed camera origin Z mismatch");
+
+  const auto camera_x_axis_end = robot_model::Transform_Position (
+    matrix, { 300.0, 0.0, 0.0 });
+  require_near (camera_x_axis_end[0],
+                1225.5965333023571 + matrix[0][0] * 300.0,
+                "Camera X axis endpoint X mismatch");
+  require_near (camera_x_axis_end[1],
+                198.01430682455043 + matrix[1][0] * 300.0,
+                "Camera X axis endpoint Y mismatch");
+  require_near (camera_x_axis_end[2],
+                1177.1407695305254 + matrix[2][0] * 300.0,
+                "Camera X axis endpoint Z mismatch");
+
+  const auto scaled_matrix = calibration.World_From_Camera (0.001);
+  require_near (scaled_matrix[0][0], matrix[0][0] * 0.001,
+                "Scaled eye-to-hand R00 mismatch");
+  require_near (scaled_matrix[1][2], matrix[1][2] * 0.001,
+                "Scaled eye-to-hand R12 mismatch");
+  require_near (scaled_matrix[0][3], 1225.5965333023571,
+                "Scaled eye-to-hand translation X changed");
+  require_near (scaled_matrix[2][3], 1177.1407695305254,
+                "Scaled eye-to-hand translation Z changed");
+
+  const auto scaled_x_point = robot_model::Transform_Position (
+    scaled_matrix, { 1000.0, 0.0, 0.0 });
+  const auto one_mm_x_point = robot_model::Transform_Position (
+    matrix, { 1.0, 0.0, 0.0 });
+  require_near (scaled_x_point[0], one_mm_x_point[0],
+                "1000 raw units did not convert to 1 mm on X");
+  require_near (scaled_x_point[1], one_mm_x_point[1],
+                "Scaled X rotation contribution mismatch on Y");
+  require_near (scaled_x_point[2], one_mm_x_point[2],
+                "Scaled X rotation contribution mismatch on Z");
+
+  std::filesystem::remove (path);
+}
+
+robot_model::Matrix4 identity_matrix ( )
+{
+  robot_model::Matrix4 matrix = { };
+  for( std::size_t index = 0; index < 4; ++index )
+  {
+    matrix[index][index] = 1.0;
+  }
+  return matrix;
+}
+
+void test_forward_kinematics_flange_pose ( )
+{
+  robot_model::Robot_Forward_Kinematics_Model model;
+  model.joint_axes = {
+    robot_model::Point3 { 0.0, 0.0, 1.0 },
+    robot_model::Point3 { 1.0, 0.0, 0.0 },
+    robot_model::Point3 { 0.0, 1.0, 0.0 },
+    robot_model::Point3 { 1.0, 0.0, 0.0 },
+    robot_model::Point3 { 0.0, 1.0, 0.0 },
+    robot_model::Point3 { 1.0, 0.0, 0.0 }
+  };
+  model.neutral_world_from_parts.assign (7, identity_matrix ( ));
+  model.neutral_world_from_parts.back ( )[0][3] = 100.0;
+  model.flange_from_last_part = identity_matrix ( );
+  model.has_flange = true;
+
+  robot_model::Robot_Joint_State zero_state;
+  const auto zero_result = robot_model::Compute_Forward_Kinematics (
+    model, zero_state);
+  require (zero_result.has_flange, "Zero-state flange pose missing");
+  require_near (zero_result.world_from_flange[0][3], 100.0,
+                "Zero-state flange X mismatch");
+  require_near (zero_result.world_from_flange[1][3], 0.0,
+                "Zero-state flange Y mismatch");
+
+  robot_model::Robot_Joint_State rotated_state;
+  rotated_state.delta_angles_deg[0] = 90.0;
+  const auto rotated_result = robot_model::Compute_Forward_Kinematics (
+    model, rotated_state);
+  require_near (rotated_result.world_from_flange[0][3], 0.0,
+                "Rotated flange X mismatch");
+  require_near (rotated_result.world_from_flange[1][3], 100.0,
+                "Rotated flange Y mismatch");
+  require_near (rotated_result.joint_axes_world[1][0], 0.0,
+                "Child joint world axis X mismatch");
+  require_near (rotated_result.joint_axes_world[1][1], 1.0,
+                "Child joint world axis Y mismatch");
+}
+
+robot_model::Robot_Forward_Kinematics_Model build_planar_ik_test_model ( )
+{
+  robot_model::Robot_Forward_Kinematics_Model model;
+  model.joint_axes.fill ({ 0.0, 0.0, 1.0 });
+  model.neutral_world_from_parts.assign (7, identity_matrix ( ));
+  model.neutral_world_from_parts.back ( )[0][3] = 100.0;
+  model.flange_from_last_part = identity_matrix ( );
+  model.has_flange = true;
+  return model;
+}
+
+robot_model::Robot_Kinematic_Params build_planar_ik_test_params ( )
+{
+  robot_model::Robot_Kinematic_Params params;
+  params.joint_directions.assign (6, 1);
+  params.joint_offsets.assign (6, 0.0);
+  params.joint_mins = { -180.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+  params.joint_maxs = { 180.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+  return params;
+}
+
+void test_position_ik_converges ( )
+{
+  const auto model = build_planar_ik_test_model ( );
+  const auto params = build_planar_ik_test_params ( );
+  robot_model::Robot_Joint_State initial_state;
+  robot_model::Robot_Position_IK_Options options;
+  options.position_tolerance_mm = 1.0e-6;
+  options.damping_mm = 1.0;
+  options.max_joint_step_deg = 10.0;
+  options.max_iterations = 40;
+  const double coordinate = 100.0 / std::sqrt (2.0);
+
+  const auto result = robot_model::Solve_Flange_Position_IK (
+    model, params, initial_state, { coordinate, coordinate, 0.0 }, options);
+  require (result.Converged ( ), "Reachable position IK did not converge");
+  require (std::abs (result.joint_state.input_angles_deg[0] - 45.0) < 1.0e-5,
+           "Position IK joint angle mismatch");
+  require (result.position_error_mm <= options.position_tolerance_mm,
+           "Position IK final error exceeds tolerance");
+}
+
+void test_position_ik_respects_joint_limits ( )
+{
+  const auto model = build_planar_ik_test_model ( );
+  auto params = build_planar_ik_test_params ( );
+  params.joint_mins[0] = -30.0;
+  params.joint_maxs[0] = 30.0;
+  robot_model::Robot_Joint_State initial_state;
+  robot_model::Robot_Position_IK_Options options;
+  options.damping_mm = 1.0;
+  options.max_joint_step_deg = 10.0;
+  options.max_iterations = 20;
+
+  const auto result = robot_model::Solve_Flange_Position_IK (
+    model, params, initial_state, { 0.0, 100.0, 0.0 }, options);
+  require (!result.Converged ( ),
+           "Joint-limited unreachable IK unexpectedly converged");
+  require_near (result.joint_state.input_angles_deg[0], 30.0,
+                "Position IK did not stop at the upper joint limit");
+}
+
+void test_pose_ik_converges_orientation ( )
+{
+  auto model = build_planar_ik_test_model ( );
+  model.joint_pivots[5] = { 100.0, 0.0, 0.0 };
+  auto params = build_planar_ik_test_params ( );
+  params.joint_mins = { 0.0, 0.0, 0.0, 0.0, 0.0, -180.0 };
+  params.joint_maxs = { 0.0, 0.0, 0.0, 0.0, 0.0, 180.0 };
+  robot_model::Matrix4 target = identity_matrix ( );
+  const double radians = 45.0 * 3.14159265358979323846 / 180.0;
+  target[0][0] = std::cos (radians);
+  target[0][1] = -std::sin (radians);
+  target[1][0] = std::sin (radians);
+  target[1][1] = std::cos (radians);
+  target[0][3] = 100.0;
+
+  robot_model::Robot_Joint_State initial_state;
+  robot_model::Robot_Pose_IK_Options options;
+  options.position_tolerance_mm = 1.0e-6;
+  options.orientation_tolerance_deg = 1.0e-6;
+  options.orientation_weight_mm = 100.0;
+  options.damping_mm = 1.0;
+  options.max_joint_step_deg = 10.0;
+  options.max_iterations = 40;
+  const auto result = robot_model::Solve_Flange_Pose_IK (
+    model, params, initial_state, target, options);
+
+  require (result.Converged ( ), "Reachable pose IK did not converge");
+  require (std::abs (result.joint_state.input_angles_deg[5] - 45.0) < 1.0e-5,
+           "Pose IK wrist angle mismatch");
+  require (result.position_error_mm <= options.position_tolerance_mm,
+           "Pose IK changed the fixed flange position");
+  require (result.orientation_error_deg <= options.orientation_tolerance_deg,
+           "Pose IK orientation error exceeds tolerance");
+}
+
 } // namespace
 
 int main ( )
@@ -248,6 +478,11 @@ int main ( )
     test_trajectory_csv_io ( );
     test_pose_transform_logic ( );
     test_pose_point_file_io ( );
+    test_eye_to_hand_calibration ( );
+    test_forward_kinematics_flange_pose ( );
+    test_position_ik_converges ( );
+    test_position_ik_respects_joint_limits ( );
+    test_pose_ik_converges_orientation ( );
   }
   catch( const std::exception& e )
   {

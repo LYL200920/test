@@ -1,6 +1,7 @@
 #include "point_cloud_renderer.h"
 
 #include <vtkPointData.h>
+#include <vtkMatrix4x4.h>
 #include <vtkPoints.h>
 #include <vtkPolyData.h>
 #include <vtkProperty.h>
@@ -175,6 +176,29 @@ namespace point_cloud
     return true;
   }
 
+  void Point_Cloud_Renderer::Set_World_From_Point_Cloud(
+      const robot_model::Matrix4 &world_from_point_cloud)
+  {
+    if (!m_world_from_point_cloud)
+    {
+      m_world_from_point_cloud = vtkSmartPointer<vtkMatrix4x4>::New();
+    }
+    for (int row = 0; row < 4; ++row)
+    {
+      for (int column = 0; column < 4; ++column)
+      {
+        m_world_from_point_cloud->SetElement(
+          row, column, world_from_point_cloud[row][column]);
+      }
+    }
+    m_world_from_point_cloud->Modified();
+    if (m_actor)
+    {
+      m_actor->SetUserMatrix(m_world_from_point_cloud);
+      m_actor->Modified();
+    }
+  }
+
   void Point_Cloud_Renderer::Clear()
   {
     if (m_renderer && m_actor)
@@ -188,6 +212,16 @@ namespace point_cloud
     m_display_data = nullptr;
     m_reader = nullptr;
     m_point_count = 0;
+  }
+
+  bool Point_Cloud_Renderer::Get_World_Bounds(double bounds[6]) const
+  {
+    if (!m_actor || bounds == nullptr)
+    {
+      return false;
+    }
+    m_actor->GetBounds(bounds);
+    return true;
   }
 
   vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Display_Data(
@@ -271,6 +305,10 @@ namespace point_cloud
 
     m_actor = vtkSmartPointer<vtkActor>::New();
     m_actor->SetMapper(m_mapper);
+    if (m_world_from_point_cloud)
+    {
+      m_actor->SetUserMatrix(m_world_from_point_cloud);
+    }
     m_actor->GetProperty()->SetPointSize(kDefaultPointSize);
     m_actor->GetProperty()->SetColor(0.10, 0.70, 0.95);
     m_actor->GetProperty()->SetAmbient(0.65);

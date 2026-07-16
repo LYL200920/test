@@ -3,9 +3,12 @@
 
 #include "robot_model_data.h"
 #include "robot_model_view.h"
+#include "camera_pose_controller.h"
 #include "robot_trajectory_session.h"
 #include "joint_control_panel.h"
+#include "point_cloud_overlay_controller.h"
 #include "trajectory_control_panel.h"
+#include "cartesian_pose_panel.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -56,11 +59,25 @@ private:
   void On_Robot_Display (wxCommandEvent& event);
   void On_Camera_Image_Display (wxCommandEvent& event);
   void On_Point_Cloud_Display (wxCommandEvent& event);
+  void On_Load_Point_Cloud_Overlay (wxCommandEvent& event);
+  void On_Clear_Point_Cloud_Overlay (wxCommandEvent& event);
+  void On_Toggle_Camera_Pose (wxCommandEvent& event);
+  void On_Toggle_Flange_Frame (wxCommandEvent& event);
+  void On_Toggle_Flange_Free_Drag (wxCommandEvent& event);
+  void On_Toggle_Flange_6D (wxCommandEvent& event);
+  void Set_Flange_Interaction_Mode (
+    Robot_Model_View::Flange_Interaction_Mode mode);
   void Select_Display_Page (Main_Display_Page page);
   void Update_Display_Menu ( );
   wxPanel* Build_Robot_Tool_Page (wxWindow* parent);
   void Apply_Joint_Limits (const robot_model::Robot_Kinematic_Params& params);
   void Update_Joint_State_From_Sliders ( );
+  void Update_Cartesian_Pose ( );
+  void Apply_Flange_Drag_Result (
+    const robot_model::Robot_Position_IK_Result& result);
+  void Apply_Flange_Pose_Drag_Result (
+    const robot_model::Robot_Pose_IK_Result& result);
+  void Sync_Joint_Controls_From_State ( );
   void Update_Joint_Value_Label (size_t index, double input_angle,
                                  double effective_angle);
   std::array<double, 6> Read_Joint_Input_Angles ( ) const;
@@ -90,17 +107,22 @@ private:
   wxToggleButton* m_robot_display_button = nullptr;
   wxToggleButton* m_camera_display_button = nullptr;
   wxToggleButton* m_point_cloud_display_button = nullptr;
+  wxToggleButton* m_camera_pose_button = nullptr;
+  wxToggleButton* m_flange_frame_button = nullptr;
+  wxToggleButton* m_flange_free_drag_button = nullptr;
+  wxToggleButton* m_flange_6d_button = nullptr;
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel* m_right_tool_panel = nullptr;
   Camera_Control_Panel* m_camera_control_panel = nullptr;
   Joint_Control_Panel* m_joint_panel = nullptr;
+  Cartesian_Pose_Panel* m_cartesian_pose_panel = nullptr;
   Trajectory_Control_Panel* m_trajectory_panel = nullptr;
   wxTimer m_trajectory_timer;
-  robot_model::Robot_Kinematic_Params m_params;
-  robot_model::Robot_Joint_State m_joint_state;
   std::vector<robot_model::Robot_Model_Info> m_models;
   robot_model::Robot_Trajectory_Session m_trajectory_session;
   std::string m_current_model_id;
+  Point_Cloud_Overlay_Controller m_point_cloud_overlay_controller;
+  Camera_Pose_Controller m_camera_pose_controller;
 };
 
 #endif

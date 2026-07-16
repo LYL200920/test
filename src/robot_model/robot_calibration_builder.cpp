@@ -182,7 +182,7 @@ Robot_Assembly_Calibration Build_Assembly_Calibration (
     // - 4.stl 建模原点在旋转中心后方约 1089mm（异常大，需专用补偿）
     // - 5.stl 建模原点在旋转中心后方约 46mm
     // - 6.stl 建模原点在旋转中心前方约 23mm
-    // 基于实测 bounds 反推的校准（见 robot_scene_assembly.cpp 的 Dump_All_Parts_Info）
+    // 基于实测网格边界反推的装配校准。
     const double shoulder_z = l1;
     const double elbow_z = shoulder_z + l2;
     const double wrist_center = l4;
