@@ -2,8 +2,6 @@
 
 #include "pugixml.hpp"
 
-#include <Windows.h>
-
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -37,35 +35,6 @@ std::string item_value_as_string (pugi::xml_node root,
     return fallback;
   }
   return node.attribute ("value").as_string (fallback);
-}
-
-std::filesystem::path exe_dir ( )
-{
-  wchar_t buffer[MAX_PATH] = {};
-  const auto len = GetModuleFileNameW (nullptr, buffer, MAX_PATH);
-  if( len == 0 )
-  {
-    return {};
-  }
-  return std::filesystem::path (buffer).parent_path ( );
-}
-
-void append_robot_candidates (std::vector<std::filesystem::path>& out,
-                              const std::filesystem::path& base)
-{
-  if( base.empty ( ) )
-  {
-    return;
-  }
-
-  auto cur = base;
-  for( int i = 0; i < 6 && !cur.empty ( ); ++i )
-  {
-    out.push_back (cur / "Resource" / "Robot");
-    out.push_back (cur / "RelWithDebInfo" / "Resource" / "Robot");
-    out.push_back (cur / "build" / "RelWithDebInfo" / "Resource" / "Robot");
-    cur = cur.parent_path ( );
-  }
 }
 
 bool extension_equals (const std::filesystem::path& path,
@@ -224,23 +193,10 @@ bool contains_loadable_robot_model (
 
 std::filesystem::path Find_Robot_Root ( )
 {
-  std::vector<std::filesystem::path> candidates;
-  // Runtime resources beside the executable are authoritative. Visual Studio
-  // commonly starts with the CMake build directory as the working directory,
-  // where an empty source Resource/Robot directory can otherwise shadow them.
-  append_robot_candidates (candidates, exe_dir ( ));
-  append_robot_candidates (candidates, std::filesystem::current_path ( ));
-  append_robot_candidates (
-    candidates,
-    std::filesystem::path (__FILE__).parent_path ( ).parent_path ( ) /
-      "panel");
-
-  for( const auto& path : candidates )
+  const std::filesystem::path root (ROBOT_RESOURCE_ROOT);
+  if( contains_loadable_robot_model (root) )
   {
-    if( contains_loadable_robot_model (path) )
-    {
-      return path;
-    }
+    return root;
   }
 
   return {};

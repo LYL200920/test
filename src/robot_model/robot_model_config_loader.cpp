@@ -152,6 +152,26 @@ Robot_Kinematic_Params Load_Robot_Kinematic_Params (
     }
   }
 
+  params.has_neutral_flange_pose =
+    item_exists (root, "FlangePose_X") &&
+    item_exists (root, "FlangePose_Y") &&
+    item_exists (root, "FlangePose_Z");
+  if( params.has_neutral_flange_pose )
+  {
+    params.neutral_flange_pose[0] =
+      item_value_as_double (root, "FlangePose_X", 0.0);
+    params.neutral_flange_pose[1] =
+      item_value_as_double (root, "FlangePose_Y", 0.0);
+    params.neutral_flange_pose[2] =
+      item_value_as_double (root, "FlangePose_Z", 0.0);
+    params.neutral_flange_pose[3] =
+      item_value_as_double (root, "FlangePose_A", 0.0);
+    params.neutral_flange_pose[4] =
+      item_value_as_double (root, "FlangePose_B", 0.0);
+    params.neutral_flange_pose[5] =
+      item_value_as_double (root, "FlangePose_C", 0.0);
+  }
+
   for( int i = 0; i < 7; ++i )
   {
     const auto prefix = std::string ("Part_") + std::to_string (i);

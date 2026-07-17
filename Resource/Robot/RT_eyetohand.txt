@@ -3,3 +3,8 @@ RotMat_cam2robot = [ 0.0029242793573063426  0.92028524175874993  -0.391237146320
 										 0.0053505264238772193 -0.39124761801406271 -0.92026988215636063 ]
 
 TranMat_cam2robot = [1225.5965333023571 198.01430682455043 1177.1407695305254]
+
+# 1-Depth optical coordinates, 2-RGB optical coordinates.
+CameraCoordinateType = [1]
+# MV3D RGBD point-cloud coordinates are expressed in micrometers.
+PointCloudUnitToMm = [0.001]

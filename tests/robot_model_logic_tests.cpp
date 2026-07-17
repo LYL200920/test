@@ -5,10 +5,13 @@
 #include "pose_transform.h"
 #include "robot_forward_kinematics.h"
 #include "robot_inverse_kinematics.h"
+#include "robot_model_config_loader.h"
+#include "robot_model_repository.h"
 #include "robot_trajectory_io.h"
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -161,6 +164,196 @@ void test_trajectory_csv_io ( )
   std::filesystem::remove (path);
 }
 
+void test_robot_resources_use_source_directory ( )
+{
+  const auto actual_root = std::filesystem::weakly_canonical (
+    robot_model::Find_Robot_Root ( ));
+  const auto expected_root = std::filesystem::weakly_canonical (
+    std::filesystem::path (EXPECTED_ROBOT_RESOURCE_ROOT));
+
+  require (!actual_root.empty ( ), "Robot resource root was not found");
+  require (actual_root == expected_root,
+           "Robot resources are not loaded from source Resource/Robot");
+  require (std::filesystem::is_regular_file (actual_root / "point.txt"),
+           "Robot point.txt was not found in source Resource/Robot");
+  require (std::filesystem::is_regular_file (
+             actual_root / "RT_eyetohand.txt"),
+           "Robot calibration was not found in source Resource/Robot");
+
+  const auto models = robot_model::Scan_Models_In_Directory (actual_root);
+  require (!models.empty ( ), "No robot models were found in source resources");
+  for( const auto& model : models )
+  {
+    require (std::filesystem::weakly_canonical (model.model_dir.parent_path ( )) ==
+               actual_root,
+             "A robot model was loaded from outside source Resource/Robot");
+  }
+}
+
+void test_kr10_r1100_2_resource_config ( )
+{
+  const auto root = robot_model::Find_Robot_Root ( );
+  const auto models = robot_model::Scan_Models_In_Directory (root);
+  const auto model = std::find_if (
+    models.begin ( ), models.end ( ),
+    [] (const robot_model::Robot_Model_Info& info)
+    {
+      return info.model_dir.filename ( ) == "KR10_R1100_2";
+    });
+
+  require (model != models.end ( ), "KR10_R1100_2 model was not found");
+  require (model->stl_files.size ( ) == 7,
+           "KR10_R1100_2 must load all seven STL files");
+  const std::array<std::string, 7> expected_stl_order = {
+    "0.STL", "5.STL", "1.STL", "3.STL", "4.STL", "2.STL", "6.STL"
+  };
+  for( size_t index = 0; index < expected_stl_order.size ( ); ++index )
+  {
+    require (model->stl_files[index].filename ( ) == expected_stl_order[index],
+             "KR10_R1100_2 STL hierarchy order mismatch");
+  }
+  const auto params = robot_model::Load_Robot_Kinematic_Params (
+    model->xml_path, model->display_name);
+  require (params.model_name == "KR10_R1100_2",
+           "KR10_R1100_2 model name mismatch");
+  require (params.link_lengths.size ( ) == 6,
+           "KR10_R1100_2 link lengths were not parsed");
+  require_near (params.link_lengths[0], 400.0,
+                "KR10_R1100_2 base height mismatch");
+  require_near (params.link_lengths[1], 560.0,
+                "KR10_R1100_2 upper-arm length mismatch");
+  require_near (params.joint_mins[1], -190.0,
+                "KR10_R1100_2 A2 lower limit mismatch");
+  require_near (params.joint_maxs[2], 156.0,
+                "KR10_R1100_2 A3 upper limit mismatch");
+  require (params.joint_frames[0].has_pivot &&
+             params.joint_frames[0].has_axis,
+           "KR10_R1100_2 A1 frame was not parsed");
+  require_near (params.joint_frames[0].pivot[0], 0.0,
+                "KR10_R1100_2 A1 pivot X mismatch");
+  require_near (params.joint_frames[0].pivot[1], 0.0,
+                "KR10_R1100_2 A1 pivot Y mismatch");
+  require_near (params.joint_frames[0].pivot[2], 219.70,
+                "KR10_R1100_2 A1 pivot Z mismatch");
+  require_near (params.joint_frames[5].pivot[0], 611.89,
+                "KR10_R1100_2 A6 pivot mismatch");
+  require (params.has_neutral_flange_pose,
+           "KR10_R1100_2 neutral flange pose was not parsed");
+  require_near (params.neutral_flange_pose[0], 629.89,
+                "KR10_R1100_2 flange X mismatch");
+  require_near (params.neutral_flange_pose[1], 0.0,
+                "KR10_R1100_2 flange Y mismatch");
+  require_near (params.neutral_flange_pose[2], 985.0,
+                "KR10_R1100_2 flange Z mismatch");
+
+  const std::array<std::array<double, 3>, 7> expected_part_offsets = { {
+    { -383.44, -109.50, -2.83 },
+    { -113.09, -139.63, 0.0 },
+    { -83.15, -131.53, 0.0 },
+    { -62.38, -75.50, 0.0 },
+    { -0.11, -78.60, 0.0 },
+    { -0.11, -54.50, 0.0 },
+    { -0.11, -41.61, 0.0 }
+  } };
+  robot_model::Robot_Assembly_Calibration calibration;
+  for( size_t part = 0; part < expected_part_offsets.size ( ); ++part )
+  {
+    for( size_t axis = 0; axis < 3; ++axis )
+    {
+      require_near (params.manual_part_calibration[part].translate[axis],
+                    expected_part_offsets[part][axis],
+                    "KR10_R1100_2 part assembly offset mismatch");
+      calibration.parts[part].translate[axis] =
+        params.manual_part_calibration[part].translate[axis];
+    }
+  }
+
+  // Adjacent circular interfaces must share the same center line after the
+  // per-STL assembly translations are applied.
+  const auto assembled_center = [&calibration] (
+    size_t part, const std::array<double, 3>& local)
+  {
+    std::array<double, 3> result = local;
+    for( size_t axis = 0; axis < 3; ++axis )
+    {
+      result[axis] += calibration.parts[part].translate[axis];
+    }
+    return result;
+  };
+  const auto a1_parent = assembled_center (0, { 383.44, 109.50, 222.53 });
+  const auto a1_child = assembled_center (1, { 113.09, 139.63, 219.70 });
+  require_near (a1_parent[0], a1_child[0],
+                "KR10_R1100_2 A1 mesh centers do not align in X");
+  require_near (a1_parent[1], a1_child[1],
+                "KR10_R1100_2 A1 mesh centers do not align in Y");
+  require_near (a1_parent[2], a1_child[2],
+                "KR10_R1100_2 A1 mesh centers do not align in Z");
+  const auto a2_parent = assembled_center (1, { 138.00, 109.50, 400.00 });
+  const auto a2_child = assembled_center (2, { 108.06, 109.50, 400.00 });
+  require_near (a2_parent[0], a2_child[0],
+                "KR10_R1100_2 A2 mesh centers do not align");
+  require_near (a2_parent[2], a2_child[2],
+                "KR10_R1100_2 A2 mesh heights do not align");
+  const auto a3_parent = assembled_center (2, { 108.06, 109.50, 960.00 });
+  const auto a3_child = assembled_center (3, { 87.29, 109.50, 960.00 });
+  require_near (a3_parent[0], a3_child[0],
+                "KR10_R1100_2 A3 mesh centers do not align");
+  const auto a4_parent = assembled_center (3, { 109.50, 75.50, 985.00 });
+  const auto a4_child = assembled_center (4, { 109.50, 78.60, 985.00 });
+  require_near (a4_parent[1], a4_child[1],
+                "KR10_R1100_2 A4 mesh centers do not align");
+  const auto a5_parent = assembled_center (4, { 540.00, 109.50, 985.00 });
+  const auto a5_child = assembled_center (5, { 540.00, 109.50, 985.00 });
+  require_near (a5_parent[0], a5_child[0],
+                "KR10_R1100_2 A5 mesh centers do not align in X");
+  require_near (a5_parent[2], a5_child[2],
+                "KR10_R1100_2 A5 mesh centers do not align in Z");
+  const auto a6_parent = assembled_center (5, { 607.00, 54.50, 985.00 });
+  const auto a6_child = assembled_center (6, { 607.00, 41.61, 985.00 });
+  require_near (a6_parent[1], a6_child[1],
+                "KR10_R1100_2 A6 mesh centers do not align");
+
+  const auto forward_model = robot_model::Build_Forward_Kinematics_Model (
+    7, calibration, params);
+  const std::array<double, 6> neutral_input = {
+    0.0, -90.0, 90.0, 0.0, 0.0, 0.0
+  };
+  for( size_t index = 0; index < neutral_input.size ( ); ++index )
+  {
+    require_near (
+      robot_model::Neutral_Joint_Input_At (params, index),
+      neutral_input[index],
+      "KR10_R1100_2 reset input does not match its loaded neutral pose");
+  }
+  const auto neutral_state =
+    robot_model::Build_Joint_State_From_Input_Angles (
+      params, neutral_input);
+  const auto neutral_forward = robot_model::Compute_Forward_Kinematics (
+    forward_model, neutral_state);
+  require (neutral_forward.has_flange,
+           "KR10_R1100_2 flange transform was not built");
+  require_near (neutral_forward.world_from_flange[0][3], 629.89,
+                "KR10_R1100_2 neutral flange world X mismatch");
+  require_near (neutral_forward.world_from_flange[1][3], 0.0,
+                "KR10_R1100_2 neutral flange world Y mismatch");
+  require_near (neutral_forward.world_from_flange[2][3], 985.0,
+                "KR10_R1100_2 neutral flange world Z mismatch");
+
+  auto rotated_input = neutral_input;
+  rotated_input[0] = 90.0;
+  const auto rotated_state =
+    robot_model::Build_Joint_State_From_Input_Angles (
+      params, rotated_input);
+  const auto rotated_forward = robot_model::Compute_Forward_Kinematics (
+    forward_model, rotated_state);
+  require_near (rotated_forward.world_from_flange[0][3], 0.0,
+                "KR10_R1100_2 flange did not follow A1 in X");
+  require_near (rotated_forward.world_from_flange[1][3], -629.89,
+                "KR10_R1100_2 flange did not follow A1 in Y");
+  require_near (rotated_forward.world_from_flange[2][3], 985.0,
+                "KR10_R1100_2 flange did not preserve Z under A1");
+}
+
 void test_pose_transform_logic ( )
 {
   robot_model::XyzabcPose parsed_pose = { };
@@ -255,6 +448,8 @@ void test_eye_to_hand_calibration ( )
             "-0.92026988215636063 ]\n";
     file << "TranMat_cam2robot = [1225.5965333023571 "
             "198.01430682455043 1177.1407695305254]\n";
+    file << "CameraCoordinateType = [1]\n";
+    file << "PointCloudUnitToMm = [1.0]\n";
   }
 
   robot_model::Eye_To_Hand_Calibration calibration;
@@ -262,6 +457,10 @@ void test_eye_to_hand_calibration ( )
   require (robot_model::Load_Eye_To_Hand_Calibration (
              path, &calibration, &error),
            "Eye-to-hand calibration load failed: " + error);
+  require (calibration.camera_coordinate_type == 1,
+           "Eye-to-hand camera coordinate type mismatch");
+  require_near (calibration.point_cloud_unit_to_mm, 1.0,
+                "Eye-to-hand point-cloud unit mismatch");
   const auto matrix = calibration.World_From_Camera ( );
   require_near (matrix[0][0], 0.0029242793573063426,
                 "Eye-to-hand R00 mismatch");
@@ -297,26 +496,17 @@ void test_eye_to_hand_calibration ( )
                 1177.1407695305254 + matrix[2][0] * 300.0,
                 "Camera X axis endpoint Z mismatch");
 
-  const auto scaled_matrix = calibration.World_From_Camera (0.001);
-  require_near (scaled_matrix[0][0], matrix[0][0] * 0.001,
-                "Scaled eye-to-hand R00 mismatch");
-  require_near (scaled_matrix[1][2], matrix[1][2] * 0.001,
-                "Scaled eye-to-hand R12 mismatch");
-  require_near (scaled_matrix[0][3], 1225.5965333023571,
-                "Scaled eye-to-hand translation X changed");
-  require_near (scaled_matrix[2][3], 1177.1407695305254,
-                "Scaled eye-to-hand translation Z changed");
-
-  const auto scaled_x_point = robot_model::Transform_Position (
-    scaled_matrix, { 1000.0, 0.0, 0.0 });
-  const auto one_mm_x_point = robot_model::Transform_Position (
-    matrix, { 1.0, 0.0, 0.0 });
-  require_near (scaled_x_point[0], one_mm_x_point[0],
-                "1000 raw units did not convert to 1 mm on X");
-  require_near (scaled_x_point[1], one_mm_x_point[1],
-                "Scaled X rotation contribution mismatch on Y");
-  require_near (scaled_x_point[2], one_mm_x_point[2],
-                "Scaled X rotation contribution mismatch on Z");
+  const auto one_meter_camera_z = robot_model::Transform_Position (
+    matrix, { 0.0, 0.0, 1000.0 });
+  require_near (one_meter_camera_z[0],
+                1225.5965333023571 + matrix[0][2] * 1000.0,
+                "1000 mm camera Z was incorrectly rescaled in X");
+  require_near (one_meter_camera_z[1],
+                198.01430682455043 + matrix[1][2] * 1000.0,
+                "1000 mm camera Z was incorrectly rescaled in Y");
+  require_near (one_meter_camera_z[2],
+                1177.1407695305254 + matrix[2][2] * 1000.0,
+                "1000 mm camera Z was incorrectly rescaled in Z");
 
   std::filesystem::remove (path);
 }
@@ -527,6 +717,8 @@ int main ( )
 {
   try
   {
+    test_robot_resources_use_source_directory ( );
+    test_kr10_r1100_2_resource_config ( );
     test_joint_state_builder ( );
     test_trajectory_planner ( );
     test_trajectory_session ( );

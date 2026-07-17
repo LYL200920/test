@@ -11,6 +11,7 @@
 #include <wx/stdpaths.h>
 
 #include "pose_point_io.h"
+#include "robot_model_repository.h"
 
 #include <array>
 #include <cmath>
@@ -218,7 +219,10 @@ void Flow_Panel::Build_Ui()
   const wxString exe_dir =
     wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
   m_config_path = exe_dir + "/vtk_flow_config.ini";
-  m_point_file_path = exe_dir + "/Resource/Robot/point.txt";
+  const auto robot_root = robot_model::Find_Robot_Root ( );
+  m_point_file_path = robot_root.empty ( )
+    ? wxString ( )
+    : wxString (robot_root.wstring ( )) + "/point.txt";
 
   const wxString last_msg = Load_Config();
   Load_Point_File();

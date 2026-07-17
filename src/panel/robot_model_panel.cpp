@@ -11,6 +11,7 @@
 #include "net_panel.h"
 #include "flow_panel.h"
 #include "point_cloud_view.h"
+#include "point_cloud_overlay_toolbar.h"
 
 #include <wx/button.h>
 #include <wx/filedlg.h>
@@ -34,7 +35,7 @@ constexpr int TRAJECTORY_FRAME_COUNT = 120;
 constexpr int TRAJECTORY_TIMER_MS = 16;
 constexpr int TRAJECTORY_SPEED_DEFAULT_INDEX = 2;
 constexpr std::size_t ROBOT_JOINT_COUNT = 6;
-constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR210_R2700_2";
+constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR10_R1100_2";
 constexpr std::array<double, 5> TRAJECTORY_SPEED_SCALES = {
   0.25, 0.5, 1.0, 2.0, 4.0
 };
@@ -106,8 +107,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   wxWindow* parent,
   Camera_Service& camera_service,
   wxWindowID id)
-  : wxPanel (parent, id),
-    m_point_cloud_overlay_controller (camera_service)
+  : wxPanel (parent, id)
 {
   auto* title = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"显示区域"));
@@ -126,14 +126,6 @@ Robot_Model_Panel::Robot_Model_Panel (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Camera_Image_Display, this);
   m_point_cloud_display_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Point_Cloud_Display, this);
-  auto* load_overlay_button = new wxButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"加载点云叠加"));
-  auto* clear_overlay_button = new wxButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"清除点云叠加"));
-  load_overlay_button->Bind (
-    wxEVT_BUTTON, &Robot_Model_Panel::On_Load_Point_Cloud_Overlay, this);
-  clear_overlay_button->Bind (
-    wxEVT_BUTTON, &Robot_Model_Panel::On_Clear_Point_Cloud_Overlay, this);
   m_camera_pose_button = new wxToggleButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"显示相机位姿"));
   m_camera_pose_button->Bind (
@@ -152,6 +144,11 @@ Robot_Model_Panel::Robot_Model_Panel (
     this, wxID_ANY, wxString::FromUTF8 (u8"6D 操纵"));
   m_flange_6d_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Toggle_Flange_6D, this);
+  m_reset_robot_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"机械臂复位"));
+  m_reset_robot_button->Enable (false);
+  m_reset_robot_button->Bind (
+    wxEVT_BUTTON, &Robot_Model_Panel::On_Reset_Robot, this);
 
   m_display_book = new wxSimplebook (this, wxID_ANY);
   m_view = new Robot_Model_View (m_display_book);
@@ -169,6 +166,29 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_display_book, camera_service);
   m_point_cloud_view = new Point_Cloud_View (
     m_display_book, camera_service);
+  Point_Cloud_Overlay_Toolbar::Callbacks overlay_callbacks;
+  overlay_callbacks.renderer = [this]
+  {
+    return m_view ? m_view->Scene_Renderer ( ) : nullptr;
+  };
+  overlay_callbacks.robot_model_id = [this]
+  {
+    return m_current_model_id;
+  };
+  overlay_callbacks.show_robot_page = [this]
+  {
+    Select_Display_Page (Main_Display_Page::Robot);
+  };
+  overlay_callbacks.render_scene = [this]
+  {
+    if( m_view ) m_view->Render_Scene ( );
+  };
+  overlay_callbacks.set_status = [this] (const wxString& status)
+  {
+    if( m_status_text ) m_status_text->SetLabel (status);
+  };
+  m_point_cloud_overlay_toolbar = new Point_Cloud_Overlay_Toolbar (
+    this, camera_service, std::move (overlay_callbacks));
   m_display_book->AddPage (m_view, wxEmptyString, true);
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
@@ -205,9 +225,10 @@ Robot_Model_Panel::Robot_Model_Panel (
   toolbar_sizer->Add (
     m_point_cloud_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (
-    load_overlay_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  toolbar_sizer->Add (
-    clear_overlay_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+    m_point_cloud_overlay_toolbar,
+    0,
+    wxALIGN_CENTER_VERTICAL | wxRIGHT,
+    12);
   toolbar_sizer->Add (
     m_camera_pose_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (
@@ -216,6 +237,8 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_flange_free_drag_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
   toolbar_sizer->Add (
     m_flange_6d_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+  toolbar_sizer->Add (
+    m_reset_robot_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (m_model_name_text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (m_status_text, 1, wxALIGN_CENTER_VERTICAL);
 
@@ -249,32 +272,27 @@ void Robot_Model_Panel::On_Point_Cloud_Display (wxCommandEvent&)
   Select_Display_Page (Main_Display_Page::Point_Cloud);
 }
 
-void Robot_Model_Panel::On_Load_Point_Cloud_Overlay (wxCommandEvent&)
+void Robot_Model_Panel::On_Reset_Robot (wxCommandEvent&)
 {
-  const auto result = m_point_cloud_overlay_controller.Load_Latest (
-    m_view->Scene_Renderer ( ));
-  if( !result.success )
+  if( !m_view || !m_view->Has_Current_Model ( ) )
   {
-    wxMessageBox (
-      wxString::FromUTF8 (result.error_message.c_str ( )),
-      wxString::FromUTF8 (u8"点云叠加失败"),
-      wxOK | wxICON_ERROR,
-      this);
     return;
   }
+  if( Is_Trajectory_Active ( ) )
+  {
+    Stop_Trajectory_Playback ( );
+  }
 
+  std::array<double, 6> neutral_input_angles = {};
+  const auto& params = m_view->Kinematic_Params ( );
+  for( size_t index = 0; index < neutral_input_angles.size ( ); ++index )
+  {
+    neutral_input_angles[index] =
+      robot_model::Neutral_Joint_Input_At (params, index);
+  }
+  Apply_Joint_Input_Angles_To_Sliders (neutral_input_angles);
   Select_Display_Page (Main_Display_Page::Robot);
-  m_status_text->SetLabel (wxString::Format (
-    wxString::FromUTF8 (u8"点云已叠加：%zu 点"),
-    result.point_count));
-  m_view->Render_Scene ( );
-}
-
-void Robot_Model_Panel::On_Clear_Point_Cloud_Overlay (wxCommandEvent&)
-{
-  m_point_cloud_overlay_controller.Clear ( );
-  m_status_text->SetLabel (wxString::FromUTF8 (u8"点云叠加已清除"));
-  m_view->Render_Scene ( );
+  m_status_text->SetLabel (wxString::FromUTF8 (u8"机械臂已复位"));
 }
 
 void Robot_Model_Panel::On_Toggle_Camera_Pose (wxCommandEvent&)
@@ -1072,7 +1090,8 @@ void Robot_Model_Panel::Load_Default_Model ( )
   if( default_model == m_models.end ( ) )
   {
     m_status_text->SetLabel (
-      wxString::FromUTF8 (u8"默认机械臂 KR210_R2700_2 未找到"));
+      wxString::FromUTF8 (u8"默认机械臂 KR10_R1100_2 未找到"));
+    if( m_reset_robot_button ) m_reset_robot_button->Enable (false);
     m_right_tool_panel->Set_Robot_Tool_Enabled (false);
     return;
   }
@@ -1118,9 +1137,10 @@ bool Robot_Model_Panel::Load_Model (
 
   m_view->Load_Model (model);
   Apply_Joint_Limits (m_view->Kinematic_Params ( ));
-  if( m_point_cloud_overlay_controller.Has_Point_Cloud ( ) )
+  if( m_point_cloud_overlay_toolbar &&
+      m_point_cloud_overlay_toolbar->Has_Point_Cloud ( ) )
   {
-    m_point_cloud_overlay_controller.Attach_Renderer (
+    m_point_cloud_overlay_toolbar->Attach_Renderer (
       m_view->Scene_Renderer ( ));
   }
   if( m_camera_pose_controller.Is_Visible ( ) )
@@ -1133,6 +1153,7 @@ bool Robot_Model_Panel::Load_Model (
     wxString::FromUTF8 (u8"当前机械臂：") +
     wxString::FromUTF8 (model.display_name.c_str ( )));
   m_status_text->SetLabel (wxString::FromUTF8 (u8"模型加载成功"));
+  if( m_reset_robot_button ) m_reset_robot_button->Enable (true);
   m_right_tool_panel->Set_Robot_Tool_Enabled (true);
   Select_Display_Page (Main_Display_Page::Robot);
   return true;

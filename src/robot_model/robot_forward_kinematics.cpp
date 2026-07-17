@@ -182,6 +182,14 @@ Robot_Forward_Kinematics_Model Build_Forward_Kinematics_Model (
 
   model.flange_from_last_part = identity_matrix ( );
   model.has_flange = model.neutral_world_from_parts.size ( ) >= 7;
+  if( model.has_flange && params.has_neutral_flange_pose )
+  {
+    const auto neutral_world_from_flange =
+      Build_Zyx_Pose_Matrix (params.neutral_flange_pose);
+    model.flange_from_last_part = Multiply_Matrices (
+      Invert_Rigid_Matrix (model.neutral_world_from_parts.back ( )),
+      neutral_world_from_flange);
+  }
   return model;
 }
 

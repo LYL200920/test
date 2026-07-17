@@ -115,11 +115,16 @@ set(project_include_dirs
   "${CMAKE_CURRENT_SOURCE_DIR}/include/point_cloud"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
 
+add_library(point_cloud_core INTERFACE)
+target_include_directories(point_cloud_core INTERFACE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/point_cloud")
+
 file(GLOB camera_sources CONFIGURE_DEPENDS "src/camera/*.cpp")
 file(GLOB camera_headers CONFIGURE_DEPENDS "include/camera/*.h" "include/camera/*.hpp")
 add_library(camera STATIC ${camera_sources} ${camera_headers})
 target_include_directories(camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/camera")
-target_link_libraries(camera PUBLIC MV3DRGBD::SDK wx::base wx::core)
+target_link_libraries(camera PUBLIC
+  point_cloud_core MV3DRGBD::SDK wx::base wx::core)
 
 file(GLOB net_sources CONFIGURE_DEPENDS "src/net/*.cpp")
 file(GLOB net_headers CONFIGURE_DEPENDS "include/net/*.h" "include/net/*.hpp")
@@ -148,6 +153,8 @@ target_include_directories(robot_kinematics_core PUBLIC
 
 add_library(robot_model STATIC ${robot_model_sources} ${robot_model_headers})
 target_include_directories(robot_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
+target_compile_definitions(robot_model PRIVATE
+  ROBOT_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/Resource/Robot")
 target_link_libraries(robot_model PUBLIC
   robot_kinematics_core
   pugixml
@@ -161,7 +168,10 @@ file(GLOB point_cloud_headers CONFIGURE_DEPENDS
      "include/point_cloud/*.h" "include/point_cloud/*.hpp")
 add_library(point_cloud STATIC ${point_cloud_sources} ${point_cloud_headers})
 target_include_directories(point_cloud PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/point_cloud")
-target_link_libraries(point_cloud PUBLIC camera robot_model wx::base wx::core ${VTK_LIBRARIES})
+target_compile_definitions(point_cloud PRIVATE
+  POINT_CLOUD_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/Resource/PointCloud")
+target_link_libraries(point_cloud PUBLIC
+  point_cloud_core camera robot_model wx::base wx::core ${VTK_LIBRARIES})
 
 file(GLOB panel_sources CONFIGURE_DEPENDS "src/panel/*.cpp")
 file(GLOB panel_headers CONFIGURE_DEPENDS "include/panel/*.h" "include/panel/*.hpp")
@@ -198,9 +208,6 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${MV3DRGBD_RUNTIME_FILES}
             $<TARGET_FILE_DIR:test_app>
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/Resource"
-            "$<TARGET_FILE_DIR:test_app>/Resource"
     COMMAND_EXPAND_LISTS)
 endif()
 
@@ -216,6 +223,8 @@ if(BUILD_TESTING)
 
   add_project_test(robot_model_logic_tests robot_model_logic_tests.cpp)
   target_link_libraries(robot_model_logic_tests PRIVATE robot_model)
+  target_compile_definitions(robot_model_logic_tests PRIVATE
+    EXPECTED_ROBOT_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/Resource/Robot")
 
   add_project_test(robot_kinematics_core_tests robot_kinematics_core_tests.cpp)
   target_link_libraries(robot_kinematics_core_tests PRIVATE robot_kinematics_core)
@@ -237,6 +246,13 @@ if(BUILD_TESTING)
 
   add_project_test(camera_point_cloud_converter_tests camera_point_cloud_converter_tests.cpp)
   target_link_libraries(camera_point_cloud_converter_tests PRIVATE camera)
+
+  add_project_test(point_cloud_persistence_tests point_cloud_persistence_tests.cpp)
+  target_link_libraries(point_cloud_persistence_tests PRIVATE point_cloud)
+
+  add_project_test(robot_base_point_cloud_builder_tests
+                   robot_base_point_cloud_builder_tests.cpp)
+  target_link_libraries(robot_base_point_cloud_builder_tests PRIVATE point_cloud)
 endif()
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source Files" FILES

@@ -14,7 +14,8 @@ namespace point_cloud
   namespace
   {
 
-    constexpr double kDefaultPointSize = 2.0;
+    constexpr double kDefaultPointSize = 1.0;
+    constexpr double kDefaultOpacity = 0.35;
 
     bool point_is_valid(const double point[3])
     {
@@ -310,6 +311,7 @@ namespace point_cloud
       m_actor->SetUserMatrix(m_world_from_point_cloud);
     }
     m_actor->GetProperty()->SetPointSize(kDefaultPointSize);
+    m_actor->GetProperty()->SetOpacity(kDefaultOpacity);
     m_actor->GetProperty()->SetColor(0.10, 0.70, 0.95);
     m_actor->GetProperty()->SetAmbient(0.65);
     m_actor->GetProperty()->SetDiffuse(0.35);

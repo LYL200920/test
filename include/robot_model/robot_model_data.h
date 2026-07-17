@@ -55,6 +55,10 @@ struct Robot_Kinematic_Params
   std::vector<double> joint_mins;
   std::vector<double> joint_maxs;
   std::array<Robot_Joint_Frame_Config, 6> joint_frames;
+  std::array<double, 6> neutral_flange_pose = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  };
+  bool has_neutral_flange_pose = false;
   std::array<Robot_Part_Calibration, 7> manual_part_calibration;
 
   bool Has_Link_Lengths ( ) const { return link_lengths.size ( ) >= 6; }

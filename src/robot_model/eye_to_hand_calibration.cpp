@@ -123,19 +123,9 @@ bool is_rotation_matrix (const Matrix4& matrix)
 
 } // namespace
 
-Matrix4 Eye_To_Hand_Calibration::World_From_Camera (
-  double camera_coordinate_to_mm) const
+Matrix4 Eye_To_Hand_Calibration::World_From_Camera ( ) const
 {
-  auto matrix = camera_to_robot;
-  // Scale only source point coordinates. Translation is already in mm.
-  for( int row = 0; row < 3; ++row )
-  {
-    for( int column = 0; column < 3; ++column )
-    {
-      matrix[row][column] *= camera_coordinate_to_mm;
-    }
-  }
-  return matrix;
+  return camera_to_robot;
 }
 
 bool Load_Eye_To_Hand_Calibration (
@@ -172,6 +162,21 @@ bool Load_Eye_To_Hand_Calibration (
     return false;
   }
 
+  std::vector<double> coordinate_type;
+  if( text.find ("CameraCoordinateType") != std::string::npos &&
+      !values_for_key (text, "CameraCoordinateType", 1, &coordinate_type,
+                       error_message) )
+  {
+    return false;
+  }
+  std::vector<double> point_cloud_unit;
+  if( text.find ("PointCloudUnitToMm") != std::string::npos &&
+      !values_for_key (text, "PointCloudUnitToMm", 1, &point_cloud_unit,
+                       error_message) )
+  {
+    return false;
+  }
+
   Eye_To_Hand_Calibration parsed;
   for( int row = 0; row < 3; ++row )
   {
@@ -183,6 +188,27 @@ bool Load_Eye_To_Hand_Calibration (
     parsed.camera_to_robot[row][3] = translation[static_cast<std::size_t> (row)];
   }
   parsed.camera_to_robot[3][3] = 1.0;
+  if( !coordinate_type.empty ( ) )
+  {
+    const auto value = coordinate_type.front ( );
+    if( value != 1.0 && value != 2.0 )
+    {
+      set_error (error_message,
+                 "CameraCoordinateType must be 1 (Depth) or 2 (RGB)");
+      return false;
+    }
+    parsed.camera_coordinate_type = static_cast<std::uint32_t> (value);
+  }
+  if( !point_cloud_unit.empty ( ) )
+  {
+    const auto value = point_cloud_unit.front ( );
+    if( value <= 0.0 )
+    {
+      set_error (error_message, "PointCloudUnitToMm must be positive");
+      return false;
+    }
+    parsed.point_cloud_unit_to_mm = value;
+  }
 
   if( !is_rotation_matrix (parsed.camera_to_robot) )
   {

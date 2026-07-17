@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RobotTemplate>
+    <!-- KR 10 R1100-2 visual model files. The source meshes use millimeters.
+         Each moving link has its own CAD export origin, so the Part offsets
+         below assemble their measured circular mounting faces. -->
+    <VisualModels>
+        <Item keyname="ModelName" name="模型名称" valuetype="string" value="KR10_R1100_2" />
+        <Item keyname="DataType" name="数据类型" valuetype="int" value="1" />
+        <Item keyname="ModelNumber" name="模型数量" valuetype="int" value="7" />
+        <Item keyname="ModelScaleUnit" name="模型长度单位" valuetype="int" value="1"
+            help="1-Millimeter, 2-Meter" />
+        <Item keyname="Model_1" name="第一个模型文件名称" valuetype="string" value="0.STL" />
+        <Item keyname="Model_2" name="第二个模型文件名称" valuetype="string" value="5.STL" />
+        <Item keyname="Model_3" name="第三个模型文件名称" valuetype="string" value="1.STL" />
+        <Item keyname="Model_4" name="第四个模型文件名称" valuetype="string" value="3.STL" />
+        <Item keyname="Model_5" name="第五个模型文件名称" valuetype="string" value="4.STL" />
+        <Item keyname="Model_6" name="第六个模型文件名称" valuetype="string" value="2.STL" />
+        <Item keyname="Model_7" name="第七个模型文件名称" valuetype="string" value="6.STL" />
+    </VisualModels>
+
+    <!-- Neutral-pose mesh assembly in the STL coordinate system. Model order
+         is base, A1, A2, A3, A4, A5, A6. Rotations are not required. -->
+    <VisualAssembly>
+        <Item keyname="Part_0_OffsetX" name="0.STL X偏移" valuetype="float" value="-383.44" />
+        <Item keyname="Part_0_OffsetY" name="0.STL Y偏移" valuetype="float" value="-109.50" />
+        <Item keyname="Part_0_OffsetZ" name="0.STL Z偏移" valuetype="float" value="-2.83" />
+
+        <Item keyname="Part_1_OffsetX" name="5.STL X偏移" valuetype="float" value="-113.09" />
+        <Item keyname="Part_1_OffsetY" name="5.STL Y偏移" valuetype="float" value="-139.63" />
+        <Item keyname="Part_1_OffsetZ" name="5.STL Z偏移" valuetype="float" value="0" />
+
+        <Item keyname="Part_2_OffsetX" name="1.STL X偏移" valuetype="float" value="-83.15" />
+        <Item keyname="Part_2_OffsetY" name="1.STL Y偏移" valuetype="float" value="-131.53" />
+        <Item keyname="Part_2_OffsetZ" name="1.STL Z偏移" valuetype="float" value="0" />
+
+        <Item keyname="Part_3_OffsetX" name="3.STL X偏移" valuetype="float" value="-62.38" />
+        <Item keyname="Part_3_OffsetY" name="3.STL Y偏移" valuetype="float" value="-75.50" />
+        <Item keyname="Part_3_OffsetZ" name="3.STL Z偏移" valuetype="float" value="0" />
+
+        <Item keyname="Part_4_OffsetX" name="4.STL X偏移" valuetype="float" value="-0.11" />
+        <Item keyname="Part_4_OffsetY" name="4.STL Y偏移" valuetype="float" value="-78.60" />
+        <Item keyname="Part_4_OffsetZ" name="4.STL Z偏移" valuetype="float" value="0" />
+
+        <Item keyname="Part_5_OffsetX" name="2.STL X偏移" valuetype="float" value="-0.11" />
+        <Item keyname="Part_5_OffsetY" name="2.STL Y偏移" valuetype="float" value="-54.50" />
+        <Item keyname="Part_5_OffsetZ" name="2.STL Z偏移" valuetype="float" value="0" />
+
+        <Item keyname="Part_6_OffsetX" name="6.STL X偏移" valuetype="float" value="-0.11" />
+        <Item keyname="Part_6_OffsetY" name="6.STL Y偏移" valuetype="float" value="-41.61" />
+        <Item keyname="Part_6_OffsetZ" name="6.STL Z偏移" valuetype="float" value="0" />
+    </VisualAssembly>
+
+    <Manipulator>
+        <Item keyname="ManipulatorModel" name="机械臂型号" valuetype="string" value="KR10_R1100_2" />
+        <Item keyname="ManipulatorType" name="机械臂类型" valuetype="int" value="2"
+            help="1-六轴偏置腕机器人, 2-六轴球形腕机器人, 3-SCARA机器人, 4-4轴码垛机器人" />
+        <Item keyname="DefaultRotFormat" name="默认旋转格式" valuetype="int" value="5"
+            help="随动 ZYX 欧拉角" />
+
+        <!-- Simplified kinematic dimensions, in millimeters. -->
+        <Item keyname="LinkLength_1" name="基座至A2高度" valuetype="float" value="400" />
+        <Item keyname="LinkLength_2" name="A2至A3主臂长度" valuetype="float" value="560" />
+        <Item keyname="LinkLength_3" name="肘部侧向偏置" valuetype="float" value="25" />
+        <Item keyname="LinkLength_4" name="腕部主长度" valuetype="float" value="515" />
+        <Item keyname="LinkLength_5" name="腕部至法兰长度" valuetype="float" value="90" />
+        <Item keyname="LinkLength_6" name="腕部侧向偏置" valuetype="float" value="25" />
+        <Item keyname="LinkLength_7" name="第七连杆长度" valuetype="float" value="0" />
+        <Item keyname="LinkLength_8" name="第八连杆长度" valuetype="float" value="0" />
+
+        <!-- The shared STL neutral pose is A2=-90 degrees, A3=90 degrees. -->
+        <Item keyname="JointOffset_1" name="A1零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_2" name="A2零位偏置" valuetype="float" value="-90" />
+        <Item keyname="JointOffset_3" name="A3零位偏置" valuetype="float" value="90" />
+        <Item keyname="JointOffset_4" name="A4零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_5" name="A5零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_6" name="A6零位偏置" valuetype="float" value="0" />
+
+        <!-- Direction is paired with the axes below to match the verified
+             KUKA transform chain while retaining this project's convention. -->
+        <Item keyname="JointDirection_1" name="A1方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_2" name="A2方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_3" name="A3方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_4" name="A4方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_5" name="A5方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_6" name="A6方向" valuetype="int" value="-1" />
+
+        <!-- KUKA axis motion ranges, in degrees. -->
+        <Item keyname="JointMin_1" name="A1下限" valuetype="float" value="-170" />
+        <Item keyname="JointMin_2" name="A2下限" valuetype="float" value="-190" />
+        <Item keyname="JointMin_3" name="A3下限" valuetype="float" value="-120" />
+        <Item keyname="JointMin_4" name="A4下限" valuetype="float" value="-185" />
+        <Item keyname="JointMin_5" name="A5下限" valuetype="float" value="-120" />
+        <Item keyname="JointMin_6" name="A6下限" valuetype="float" value="-350" />
+        <Item keyname="JointMax_1" name="A1上限" valuetype="float" value="170" />
+        <Item keyname="JointMax_2" name="A2上限" valuetype="float" value="45" />
+        <Item keyname="JointMax_3" name="A3上限" valuetype="float" value="156" />
+        <Item keyname="JointMax_4" name="A4上限" valuetype="float" value="185" />
+        <Item keyname="JointMax_5" name="A5上限" valuetype="float" value="120" />
+        <Item keyname="JointMax_6" name="A6上限" valuetype="float" value="350" />
+
+        <!-- Global pivots measured from the assembled STL circular interfaces,
+             in millimeters. -->
+        <Item keyname="JointPivot_1_X" name="A1轴心X" valuetype="float" value="0" />
+        <Item keyname="JointPivot_1_Y" name="A1轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_1_Z" name="A1轴心Z" valuetype="float" value="219.70" />
+        <Item keyname="JointAxis_1_X" name="A1轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_1_Y" name="A1轴向Y" valuetype="float" value="0" />
+        <Item keyname="JointAxis_1_Z" name="A1轴向Z" valuetype="float" value="1" />
+
+        <Item keyname="JointPivot_2_X" name="A2轴心X" valuetype="float" value="24.91" />
+        <Item keyname="JointPivot_2_Y" name="A2轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_2_Z" name="A2轴心Z" valuetype="float" value="400" />
+        <Item keyname="JointAxis_2_X" name="A2轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_2_Y" name="A2轴向Y" valuetype="float" value="-1" />
+        <Item keyname="JointAxis_2_Z" name="A2轴向Z" valuetype="float" value="0" />
+
+        <Item keyname="JointPivot_3_X" name="A3轴心X" valuetype="float" value="24.91" />
+        <Item keyname="JointPivot_3_Y" name="A3轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_3_Z" name="A3轴心Z" valuetype="float" value="960" />
+        <Item keyname="JointAxis_3_X" name="A3轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_3_Y" name="A3轴向Y" valuetype="float" value="-1" />
+        <Item keyname="JointAxis_3_Z" name="A3轴向Z" valuetype="float" value="0" />
+
+        <Item keyname="JointPivot_4_X" name="A4轴心X" valuetype="float" value="239.89" />
+        <Item keyname="JointPivot_4_Y" name="A4轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_4_Z" name="A4轴心Z" valuetype="float" value="985" />
+        <Item keyname="JointAxis_4_X" name="A4轴向X" valuetype="float" value="1" />
+        <Item keyname="JointAxis_4_Y" name="A4轴向Y" valuetype="float" value="0" />
+        <Item keyname="JointAxis_4_Z" name="A4轴向Z" valuetype="float" value="0" />
+
+        <Item keyname="JointPivot_5_X" name="A5轴心X" valuetype="float" value="539.89" />
+        <Item keyname="JointPivot_5_Y" name="A5轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_5_Z" name="A5轴心Z" valuetype="float" value="985" />
+        <Item keyname="JointAxis_5_X" name="A5轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_5_Y" name="A5轴向Y" valuetype="float" value="-1" />
+        <Item keyname="JointAxis_5_Z" name="A5轴向Z" valuetype="float" value="0" />
+
+        <Item keyname="JointPivot_6_X" name="A6轴心X" valuetype="float" value="611.89" />
+        <Item keyname="JointPivot_6_Y" name="A6轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_6_Z" name="A6轴心Z" valuetype="float" value="985" />
+        <Item keyname="JointAxis_6_X" name="A6轴向X" valuetype="float" value="1" />
+        <Item keyname="JointAxis_6_Y" name="A6轴向Y" valuetype="float" value="0" />
+        <Item keyname="JointAxis_6_Z" name="A6轴向Z" valuetype="float" value="0" />
+
+        <!-- Neutral world pose of the mounting flange. Position is in
+             millimeters; A/B/C use the project's ZYX degree convention. -->
+        <Item keyname="FlangePose_X" name="中立法兰X" valuetype="float" value="629.89" />
+        <Item keyname="FlangePose_Y" name="中立法兰Y" valuetype="float" value="0" />
+        <Item keyname="FlangePose_Z" name="中立法兰Z" valuetype="float" value="985" />
+        <Item keyname="FlangePose_A" name="中立法兰A" valuetype="float" value="0" />
+        <Item keyname="FlangePose_B" name="中立法兰B" valuetype="float" value="0" />
+        <Item keyname="FlangePose_C" name="中立法兰C" valuetype="float" value="0" />
+
+        <Item keyname="BaseCsX" name="基坐标系X轴向" valuetype="int" value="4" />
+        <Item keyname="BaseCsZ" name="基坐标系Z轴向" valuetype="int" value="1" />
+        <Item keyname="ToolCsX" name="工具坐标系X轴向" valuetype="int" value="2" />
+        <Item keyname="ToolCsZ" name="工具坐标系Z轴向" valuetype="int" value="4" />
+
+        <!-- Verified maximum joint velocities, in degrees per second. -->
+        <Item keyname="JointVelocityMax_1" name="A1最大角速度" valuetype="int" value="300" />
+        <Item keyname="JointVelocityMax_2" name="A2最大角速度" valuetype="int" value="225" />
+        <Item keyname="JointVelocityMax_3" name="A3最大角速度" valuetype="int" value="330" />
+        <Item keyname="JointVelocityMax_4" name="A4最大角速度" valuetype="int" value="360" />
+        <Item keyname="JointVelocityMax_5" name="A5最大角速度" valuetype="int" value="360" />
+        <Item keyname="JointVelocityMax_6" name="A6最大角速度" valuetype="int" value="433" />
+
+        <Item keyname="AxisNum" name="轴数" valuetype="int" value="6" />
+        <!-- Rated payload is 10 kg; the KUKA maximum payload is 11.1 kg. -->
+        <Item keyname="MaxLoad" name="额定负载" valuetype="int" value="10" />
+        <Item keyname="WorkRange" name="最大工作范围" valuetype="int" value="1101" />
+        <Item keyname="System_type" name="控制器型号" valuetype="string" value="KR C5 micro" />
+    </Manipulator>
+</RobotTemplate>

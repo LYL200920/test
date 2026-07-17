@@ -6,7 +6,6 @@
 #include "camera_pose_controller.h"
 #include "robot_trajectory_session.h"
 #include "joint_control_panel.h"
-#include "point_cloud_overlay_controller.h"
 #include "trajectory_control_panel.h"
 #include "cartesian_pose_panel.h"
 
@@ -24,6 +23,8 @@ class Camera_Control_Panel;
 class Camera_Image_View;
 class Camera_Service;
 class Point_Cloud_View;
+class Point_Cloud_Overlay_Toolbar;
+class wxButton;
 class wxSimplebook;
 class wxToggleButton;
 
@@ -59,8 +60,7 @@ private:
   void On_Robot_Display (wxCommandEvent& event);
   void On_Camera_Image_Display (wxCommandEvent& event);
   void On_Point_Cloud_Display (wxCommandEvent& event);
-  void On_Load_Point_Cloud_Overlay (wxCommandEvent& event);
-  void On_Clear_Point_Cloud_Overlay (wxCommandEvent& event);
+  void On_Reset_Robot (wxCommandEvent& event);
   void On_Toggle_Camera_Pose (wxCommandEvent& event);
   void On_Toggle_Flange_Frame (wxCommandEvent& event);
   void On_Toggle_Flange_Free_Drag (wxCommandEvent& event);
@@ -103,6 +103,7 @@ private:
   Robot_Model_View* m_view = nullptr;
   Camera_Image_View* m_camera_image_view = nullptr;
   Point_Cloud_View* m_point_cloud_view = nullptr;
+  Point_Cloud_Overlay_Toolbar* m_point_cloud_overlay_toolbar = nullptr;
   wxSimplebook* m_display_book = nullptr;
   wxToggleButton* m_robot_display_button = nullptr;
   wxToggleButton* m_camera_display_button = nullptr;
@@ -111,6 +112,7 @@ private:
   wxToggleButton* m_flange_frame_button = nullptr;
   wxToggleButton* m_flange_free_drag_button = nullptr;
   wxToggleButton* m_flange_6d_button = nullptr;
+  wxButton* m_reset_robot_button = nullptr;
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel* m_right_tool_panel = nullptr;
   Camera_Control_Panel* m_camera_control_panel = nullptr;
@@ -121,7 +123,6 @@ private:
   std::vector<robot_model::Robot_Model_Info> m_models;
   robot_model::Robot_Trajectory_Session m_trajectory_session;
   std::string m_current_model_id;
-  Point_Cloud_Overlay_Controller m_point_cloud_overlay_controller;
   Camera_Pose_Controller m_camera_pose_controller;
 };
 
