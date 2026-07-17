@@ -12,15 +12,23 @@ enum class Robot_IK_Status
 {
   Converged,
   Maximum_Iterations,
+  Time_Budget_Exceeded,
   Invalid_Model
 };
 
-struct Robot_Position_IK_Options
+struct Robot_IK_Iteration_Options
 {
-  double position_tolerance_mm = 1.0;
   double damping_mm = 20.0;
   double max_joint_step_deg = 5.0;
   std::size_t max_iterations = 120;
+  // A positive value bounds synchronous interactive solving. Set to zero to
+  // disable the clock budget for deterministic offline calculations.
+  double time_budget_ms = 4.0;
+};
+
+struct Robot_Position_IK_Options : Robot_IK_Iteration_Options
+{
+  double position_tolerance_mm = 1.0;
 };
 
 struct Robot_Position_IK_Result
@@ -30,18 +38,18 @@ struct Robot_Position_IK_Result
   Point3 achieved_position_world = { };
   double position_error_mm = 0.0;
   std::size_t iterations = 0;
+  double solve_time_ms = 0.0;
 
   bool Converged ( ) const { return status == Robot_IK_Status::Converged; }
 };
 
-struct Robot_Pose_IK_Options
+struct Robot_Pose_IK_Options : Robot_IK_Iteration_Options
 {
   double position_tolerance_mm = 1.0;
   double orientation_tolerance_deg = 0.5;
   double orientation_weight_mm = 300.0;
-  double damping_mm = 20.0;
-  double max_joint_step_deg = 5.0;
-  std::size_t max_iterations = 160;
+
+  Robot_Pose_IK_Options ( ) { max_iterations = 160; }
 };
 
 struct Robot_Pose_IK_Result
@@ -52,6 +60,7 @@ struct Robot_Pose_IK_Result
   double position_error_mm = 0.0;
   double orientation_error_deg = 0.0;
   std::size_t iterations = 0;
+  double solve_time_ms = 0.0;
 
   bool Converged ( ) const { return status == Robot_IK_Status::Converged; }
 };

@@ -130,9 +130,26 @@ target_link_libraries(net PUBLIC asio)
 file(GLOB robot_model_sources CONFIGURE_DEPENDS "src/robot_model/*.cpp")
 file(GLOB robot_model_headers CONFIGURE_DEPENDS
      "include/robot_model/*.h" "include/robot_model/*.hpp")
+
+# Renderer-independent kinematics. Keeping this as a separate target prevents
+# VTK types from leaking back into FK/IK APIs and allows headless testing.
+set(robot_kinematics_core_sources
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/pose_transform.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/robot_forward_kinematics.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/robot_inverse_kinematics.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/robot_joint_state_builder.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/robot_kinematic_params.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/robot_model/robot_part_transform.cpp")
+list(REMOVE_ITEM robot_model_sources ${robot_kinematics_core_sources})
+
+add_library(robot_kinematics_core STATIC ${robot_kinematics_core_sources})
+target_include_directories(robot_kinematics_core PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
+
 add_library(robot_model STATIC ${robot_model_sources} ${robot_model_headers})
 target_include_directories(robot_model PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
 target_link_libraries(robot_model PUBLIC
+  robot_kinematics_core
   pugixml
   wx::base
   wx::core
@@ -168,7 +185,7 @@ target_link_libraries(test_app PRIVATE panel)
 vtk_module_autoinit(TARGETS test_app MODULES ${VTK_LIBRARIES})
 
 if(MSVC)
-  foreach(target camera net robot_model point_cloud panel test_app)
+  foreach(target camera net robot_kinematics_core robot_model point_cloud panel test_app)
     target_compile_options(${target} PRIVATE /FS /utf-8)
   endforeach()
 endif()
@@ -199,6 +216,9 @@ if(BUILD_TESTING)
 
   add_project_test(robot_model_logic_tests robot_model_logic_tests.cpp)
   target_link_libraries(robot_model_logic_tests PRIVATE robot_model)
+
+  add_project_test(robot_kinematics_core_tests robot_kinematics_core_tests.cpp)
+  target_link_libraries(robot_kinematics_core_tests PRIVATE robot_kinematics_core)
 
   add_project_test(camera_frame_buffer_tests camera_frame_buffer_tests.cpp)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)

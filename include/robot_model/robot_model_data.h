@@ -6,10 +6,6 @@
 #include <string>
 #include <vector>
 
-#include <vtkActor.h>
-#include <vtkSmartPointer.h>
-#include <vtkTransform.h>
-
 namespace robot_model
 {
 
@@ -62,15 +58,6 @@ struct Robot_Kinematic_Params
   std::array<Robot_Part_Calibration, 7> manual_part_calibration;
 
   bool Has_Link_Lengths ( ) const { return link_lengths.size ( ) >= 6; }
-};
-
-struct Robot_Visual_Part
-{
-  std::filesystem::path mesh_path;
-  vtkSmartPointer<vtkActor> actor;
-  vtkSmartPointer<vtkTransform> local_transform;
-  std::array<double, 6> raw_bounds = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
-  bool has_raw_bounds = false;
 };
 
 struct Robot_Assembly_Calibration

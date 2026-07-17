@@ -1,4 +1,5 @@
 #include "robot_calibration_builder.h"
+#include "robot_kinematic_params.h"
 
 #include <algorithm>
 #include <cmath>
@@ -6,17 +7,6 @@
 
 namespace robot_model
 {
-
-double link_length_at (const Robot_Kinematic_Params& params, size_t index,
-                       double fallback)
-{
-  if( index < params.link_lengths.size ( ) &&
-      std::fabs (params.link_lengths[index]) > 1.0e-6 )
-  {
-    return params.link_lengths[index];
-  }
-  return fallback;
-}
 
 namespace
 {

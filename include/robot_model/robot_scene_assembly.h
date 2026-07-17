@@ -2,6 +2,7 @@
 #define includeguard_robot_scene_assembly_h_includeguard
 
 #include "robot_model_data.h"
+#include "robot_visual_data.h"
 #include "robot_calibration_builder.h"
 #include "robot_forward_kinematics.h"
 #include "pose_transform.h"

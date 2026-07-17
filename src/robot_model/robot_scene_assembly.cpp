@@ -1,6 +1,7 @@
 #include "robot_scene_assembly.h"
 
 #include "robot_mesh_loader.h"
+#include "robot_kinematic_params.h"
 
 #include <vtkCubeSource.h>
 #include <vtkMatrix4x4.h>
@@ -87,7 +88,7 @@ void Robot_Scene_Assembly::Apply_Joint_State (
   const Robot_Joint_State& joint_state)
 {
   const auto model = Build_Forward_Kinematics_Model (
-    m_parts, calibration, params);
+    m_parts.size ( ), calibration, params);
   Apply_Forward_Kinematics (Compute_Forward_Kinematics (model, joint_state));
 }
 

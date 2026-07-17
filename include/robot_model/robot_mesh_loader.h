@@ -1,7 +1,7 @@
 #ifndef includeguard_robot_mesh_loader_h_includeguard
 #define includeguard_robot_mesh_loader_h_includeguard
 
-#include "robot_model_data.h"
+#include "robot_visual_data.h"
 
 #include <filesystem>
 

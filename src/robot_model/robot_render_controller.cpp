@@ -1,6 +1,7 @@
 #include "robot_render_controller.h"
 
 #include "robot_calibration_builder.h"
+#include "robot_kinematic_params.h"
 #include "robot_model_config_loader.h"
 #include "vtk_scene.h"
 
@@ -141,7 +142,7 @@ void Robot_Render_Controller::Rebuild_Current_Model ( )
       m_assembly.Parts ( ));
     robot_model_state.Set_Assembly_Calibration (assembly_calibration);
     m_forward_model = Build_Forward_Kinematics_Model (
-      m_assembly.Parts ( ),
+      m_assembly.Parts ( ).size ( ),
       robot_model_state.Assembly_Calibration ( ),
       robot_model_state.Params ( ));
     m_has_forward_model = m_forward_model.has_flange;

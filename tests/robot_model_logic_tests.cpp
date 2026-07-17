@@ -1,4 +1,5 @@
 #include "robot_joint_state_builder.h"
+#include "robot_part_transform.h"
 #include "eye_to_hand_calibration.h"
 #include "pose_point_io.h"
 #include "pose_transform.h"
@@ -369,6 +370,26 @@ void test_forward_kinematics_flange_pose ( )
                 "Child joint world axis Y mismatch");
 }
 
+void test_part_calibration_uses_pure_matrix_math ( )
+{
+  robot_model::Robot_Part_Calibration calibration;
+  calibration.rotate_xyz[0] = 90.0;
+  calibration.translate[1] = 10.0;
+
+  const auto matrix = robot_model::Build_Part_Calibration_Matrix (calibration);
+  const auto origin = robot_model::Transform_Position (
+    matrix, { 0.0, 0.0, 0.0 });
+  require_near (origin[0], 0.0, "Part calibration X mismatch");
+  require_near (origin[1], 0.0, "Part calibration Y mismatch");
+  require_near (origin[2], 10.0, "Part calibration rotation order mismatch");
+
+  const auto transformed = robot_model::Transform_Part_Point (
+    calibration, { 1.0, 2.0, 3.0 });
+  require_near (transformed[0], 1.0, "Part point X mismatch");
+  require_near (transformed[1], -3.0, "Part point Y mismatch");
+  require_near (transformed[2], 12.0, "Part point Z mismatch");
+}
+
 robot_model::Robot_Forward_Kinematics_Model build_planar_ik_test_model ( )
 {
   robot_model::Robot_Forward_Kinematics_Model model;
@@ -400,6 +421,7 @@ void test_position_ik_converges ( )
   options.damping_mm = 1.0;
   options.max_joint_step_deg = 10.0;
   options.max_iterations = 40;
+  options.time_budget_ms = 0.0;
   const double coordinate = 100.0 / std::sqrt (2.0);
 
   const auto result = robot_model::Solve_Flange_Position_IK (
@@ -422,6 +444,7 @@ void test_position_ik_respects_joint_limits ( )
   options.damping_mm = 1.0;
   options.max_joint_step_deg = 10.0;
   options.max_iterations = 20;
+  options.time_budget_ms = 0.0;
 
   const auto result = robot_model::Solve_Flange_Position_IK (
     model, params, initial_state, { 0.0, 100.0, 0.0 }, options);
@@ -454,6 +477,7 @@ void test_pose_ik_converges_orientation ( )
   options.damping_mm = 1.0;
   options.max_joint_step_deg = 10.0;
   options.max_iterations = 40;
+  options.time_budget_ms = 0.0;
   const auto result = robot_model::Solve_Flange_Pose_IK (
     model, params, initial_state, target, options);
 
@@ -464,6 +488,37 @@ void test_pose_ik_converges_orientation ( )
            "Pose IK changed the fixed flange position");
   require (result.orientation_error_deg <= options.orientation_tolerance_deg,
            "Pose IK orientation error exceeds tolerance");
+}
+
+void test_ik_realtime_budget ( )
+{
+  const auto model = build_planar_ik_test_model ( );
+  const auto params = build_planar_ik_test_params ( );
+  robot_model::Robot_Joint_State initial_state;
+
+  robot_model::Robot_Position_IK_Options position_options;
+  position_options.max_iterations = 100000;
+  position_options.time_budget_ms = 1.0e-9;
+  const auto position_result = robot_model::Solve_Flange_Position_IK (
+    model, params, initial_state, { 1000.0, 1000.0, 0.0 }, position_options);
+  require (
+    position_result.status == robot_model::Robot_IK_Status::Time_Budget_Exceeded,
+    "Position IK did not stop at its realtime budget");
+  require (std::isfinite (position_result.position_error_mm),
+           "Budgeted position IK did not preserve its best result");
+
+  auto target_pose = identity_matrix ( );
+  target_pose[0][3] = 1000.0;
+  robot_model::Robot_Pose_IK_Options pose_options;
+  pose_options.max_iterations = 100000;
+  pose_options.time_budget_ms = 1.0e-9;
+  const auto pose_result = robot_model::Solve_Flange_Pose_IK (
+    model, params, initial_state, target_pose, pose_options);
+  require (
+    pose_result.status == robot_model::Robot_IK_Status::Time_Budget_Exceeded,
+    "Pose IK did not stop at its realtime budget");
+  require (std::isfinite (pose_result.position_error_mm),
+           "Budgeted pose IK did not preserve its best result");
 }
 
 } // namespace
@@ -480,9 +535,11 @@ int main ( )
     test_pose_point_file_io ( );
     test_eye_to_hand_calibration ( );
     test_forward_kinematics_flange_pose ( );
+    test_part_calibration_uses_pure_matrix_math ( );
     test_position_ik_converges ( );
     test_position_ik_respects_joint_limits ( );
     test_pose_ik_converges_orientation ( );
+    test_ik_realtime_budget ( );
   }
   catch( const std::exception& e )
   {

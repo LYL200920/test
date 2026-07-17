@@ -5,6 +5,7 @@
 #include "robot_model_data.h"
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 namespace robot_model
@@ -31,7 +32,7 @@ struct Robot_Forward_Kinematics_Result
 };
 
 Robot_Forward_Kinematics_Model Build_Forward_Kinematics_Model (
-  const std::vector<Robot_Visual_Part>& parts,
+  std::size_t part_count,
   const Robot_Assembly_Calibration& calibration,
   const Robot_Kinematic_Params& params);
 

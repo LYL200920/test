@@ -1,0 +1,192 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<RobotTemplate>
+    <!--可视化模型文件-->
+    <VisualModels>
+        <!--模型名称，用于校验。理论上与文件夹同名。不匹配表示出错-->
+        <Item keyname="ModelName" name="模型名称" valuetype="string" value="KR210_R2700_2" />
+        <!--数据类型,
+        1 - 模型数据类型 2 - 参数数据类型-->
+        <Item keyname="DataType" name="数据类型" valuetype="int" value="1" />
+        <!--缩略图-->
+        <Item keyname="ThumbnailName" name="缩略图名称" valuetype="string" value="robot.png" />
+        <!--模型数量与Model_xx对应-->
+        <Item keyname="ModelNumber" name="模型数量" valuetype="int" value="7" />
+        <Item keyname="ModelScaleUnit" name="模型长度单位" valuetype="int" value="1"
+            help="1-Millimeter, 2-Meter" />
+        <Item keyname="Model_1" name="第一个模型文件名称" valuetype="string" value="0.stl" />
+        <Item keyname="Model_2" name="第二个模型文件名称" valuetype="string" value="1.stl" />
+        <Item keyname="Model_3" name="第三个模型文件名称" valuetype="string" value="2.stl" />
+        <Item keyname="Model_4" name="第四个模型文件名称" valuetype="string" value="3.stl" />
+        <Item keyname="Model_5" name="第五个模型文件名称" valuetype="string" value="4.stl" />
+        <Item keyname="Model_6" name="第六个模型文件名称" valuetype="string" value="5.stl" />
+        <Item keyname="Model_7" name="第七个模型文件名称" valuetype="string" value="6.stl" />
+    </VisualModels>
+    <!--手动装配微调。Offset
+    单位 mm，Rot 单位 degree。Part_0 对应 0.stl，依次类推。-->
+    <ManualPartCalibration>
+        <Item keyname="Part_0_OffsetX" name="0.stl X偏移" valuetype="float" value="0" />
+        <Item keyname="Part_0_OffsetY" name="0.stl Y偏移" valuetype="float" value="0" />
+        <Item keyname="Part_0_OffsetZ" name="0.stl Z偏移" valuetype="float" value="0" />
+        <Item keyname="Part_0_RotX" name="0.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_0_RotY" name="0.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_0_RotZ" name="0.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_1_OffsetX" name="1.stl X偏移" valuetype="float" value="0" />
+        <Item keyname="Part_1_OffsetY" name="1.stl Y偏移" valuetype="float" value="0" />
+        <Item keyname="Part_1_OffsetZ" name="1.stl Z偏移" valuetype="float" value="0" />
+        <Item keyname="Part_1_RotX" name="1.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_1_RotY" name="1.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_1_RotZ" name="1.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_2_OffsetX" name="2.stl X偏移" valuetype="float" value="330" />
+        <Item keyname="Part_2_OffsetY" name="2.stl Y偏移" valuetype="float" value="-110" />
+        <Item keyname="Part_2_OffsetZ" name="2.stl Z偏移" valuetype="float" value="0" />
+        <Item keyname="Part_2_RotX" name="2.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_2_RotY" name="2.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_2_RotZ" name="2.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_3_OffsetX" name="3.stl X偏移" valuetype="float" value="330" />
+        <Item keyname="Part_3_OffsetY" name="3.stl Y偏移" valuetype="float" value="20" />
+        <Item keyname="Part_3_OffsetZ" name="3.stl Z偏移" valuetype="float" value="0" />
+        <Item keyname="Part_3_RotX" name="3.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_3_RotY" name="3.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_3_RotZ" name="3.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_4_OffsetX" name="4.stl X偏移" valuetype="float" value="315" />
+        <Item keyname="Part_4_OffsetY" name="4.stl Y偏移" valuetype="float" value="85" />
+        <Item keyname="Part_4_OffsetZ" name="4.stl Z偏移" valuetype="float" value="55" />
+        <Item keyname="Part_4_RotX" name="4.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_4_RotY" name="4.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_4_RotZ" name="4.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_5_OffsetX" name="5.stl X偏移" valuetype="float" value="315" />
+        <Item keyname="Part_5_OffsetY" name="5.stl Y偏移" valuetype="float" value="115" />
+        <Item keyname="Part_5_OffsetZ" name="5.stl Z偏移" valuetype="float" value="55" />
+        <Item keyname="Part_5_RotX" name="5.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_5_RotY" name="5.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_5_RotZ" name="5.stl Z旋转" valuetype="float" value="0" />
+        <Item keyname="Part_6_OffsetX" name="6.stl X偏移" valuetype="float" value="290" />
+        <Item keyname="Part_6_OffsetY" name="6.stl Y偏移" valuetype="float" value="95" />
+        <Item keyname="Part_6_OffsetZ" name="6.stl Z偏移" valuetype="float" value="55" />
+        <Item keyname="Part_6_RotX" name="6.stl X旋转" valuetype="float" value="0" />
+        <Item keyname="Part_6_RotY" name="6.stl Y旋转" valuetype="float" value="0" />
+        <Item keyname="Part_6_RotZ" name="6.stl Z旋转" valuetype="float" value="0" />
+    </ManualPartCalibration>
+    <!--机械臂参数-->
+    <Manipulator>
+        <Item keyname="ManipulatorModel" name="机械臂型号" valuetype="string" value="KR210_R2700_2" />
+        <Item keyname="ManipulatorType" name="机械臂类型" valuetype="int" value="2"
+            help="1-六轴偏置腕机器人, 2-六轴球形腕机器人, 3-SCARA机器人, 4-4轴码垛机器人, " />
+        <Item keyname="DefaultRotFormat" name="默认旋转格式" valuetype="int" value="5"
+            help="1-固定XYZ欧拉角, 2-四元数, 3-旋转向量, 4-随动XYZ欧拉角, 5-随动ZYX欧拉角, 6-随动ZYZ欧拉角, 7-随动ZXZ欧拉角, 8-固定ZYX欧拉角" />
+        <!--连杆长度。最多8根连杆，浮点数-->
+        <Item keyname="LinkLength_1" name="第一个连杆长度" valuetype="float" value="645" help="单位-mm" />
+        <Item keyname="LinkLength_2" name="第二个连杆长度" valuetype="float" value="1150" />
+        <Item keyname="LinkLength_3" name="第三个连杆长度" valuetype="float" value="115" />
+        <Item keyname="LinkLength_4" name="第四个连杆长度" valuetype="float" value="1280" />
+        <Item keyname="LinkLength_5" name="第五个连杆长度" valuetype="float" value="215000" />
+        <Item keyname="LinkLength_6" name="第六个连杆长度" valuetype="float" value="330" />
+        <Item keyname="LinkLength_7" name="第七个连杆长度" valuetype="float" value="0" />
+        <Item keyname="LinkLength_8" name="第八个连杆长度" valuetype="float" value="0" />
+        <!--零位偏置。浮点数-->
+        <Item keyname="JointOffset_1" name="J1零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_2" name="J2零位偏置" valuetype="float" value="-90" />
+        <Item keyname="JointOffset_3" name="J3零位偏置" valuetype="float" value="90" />
+        <Item keyname="JointOffset_4" name="J4零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_5" name="J5零位偏置" valuetype="float" value="0" />
+        <Item keyname="JointOffset_6" name="J6零位偏置" valuetype="float" value="0" />
+        <!--轴向，整数-->
+        <Item keyname="JointDirection_1" name="一轴方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_2" name="二轴方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_3" name="三轴方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_4" name="四轴方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_5" name="五轴方向" valuetype="int" value="-1" />
+        <Item keyname="JointDirection_6" name="六轴方向" valuetype="int" value="-1" />
+        <!--轴下限，浮点数-->
+        <Item keyname="JointMin_1" name="J1下限" valuetype="float" value="-185" />
+        <Item keyname="JointMin_2" name="J2下限" valuetype="float" value="-140" />
+        <Item keyname="JointMin_3" name="J3下限" valuetype="float" value="-120" />
+        <Item keyname="JointMin_4" name="J4下限" valuetype="float" value="-350" />
+        <Item keyname="JointMin_5" name="J5下限" valuetype="float" value="-125" />
+        <Item keyname="JointMin_6" name="J6下限" valuetype="float" value="-350" />
+        <!--轴上限，浮点数-->
+        <Item keyname="JointMax_1" name="J1上限" valuetype="float" value="185" />
+        <Item keyname="JointMax_2" name="J2上限" valuetype="float" value="-5" />
+        <Item keyname="JointMax_3" name="J3上限" valuetype="float" value="168" />
+        <Item keyname="JointMax_4" name="J4上限" valuetype="float" value="350" />
+        <Item keyname="JointMax_5" name="J5上限" valuetype="float" value="125" />
+        <Item keyname="JointMax_6" name="J6上限" valuetype="float" value="350" />
+        <!--关节可视化旋转轴心/轴向微调模板。
+        单位 mm。未启用时程序会使用 LinkLength 与 STL bounds 自动估算。
+        如需启用某一轴，把对应 Item 从注释中复制到 Manipulator 正文。
+
+        <Item keyname="JointPivot_1_X" name="A1轴心X" valuetype="float" value="0" />
+        <Item keyname="JointPivot_1_Y" name="A1轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_1_Z" name="A1轴心Z" valuetype="float" value="0" />
+        <Item keyname="JointAxis_1_X" name="A1轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_1_Y" name="A1轴向Y" valuetype="float" value="0" />
+        <Item keyname="JointAxis_1_Z" name="A1轴向Z" valuetype="float" value="1" />
+
+        <Item keyname="JointPivot_2_X" name="A2轴心X" valuetype="float" value="0" />
+        <Item keyname="JointPivot_2_Y" name="A2轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_2_Z" name="A2轴心Z" valuetype="float" value="645" />
+        <Item keyname="JointAxis_2_X" name="A2轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_2_Y" name="A2轴向Y" valuetype="float" value="1" />
+        <Item keyname="JointAxis_2_Z" name="A2轴向Z" valuetype="float" value="0" />
+
+        <Item keyname="JointPivot_3_X" name="A3轴心X" valuetype="float" value="0" />
+        <Item keyname="JointPivot_3_Y" name="A3轴心Y" valuetype="float" value="0" />
+        <Item keyname="JointPivot_3_Z" name="A3轴心Z" valuetype="float" value="1795" />
+        <Item keyname="JointAxis_3_X" name="A3轴向X" valuetype="float" value="0" />
+        <Item keyname="JointAxis_3_Y" name="A3轴向Y" valuetype="float" value="1" />
+        <Item keyname="JointAxis_3_Z" name="A3轴向Z" valuetype="float" value="0" />
+        -->
+        <!--机械臂连杆凸包长方形的宽，浮点数-->
+        <Item keyname="LinkConvexHullWidth_1" name="一轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_2" name="二轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_3" name="三轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_4" name="四轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_5" name="五轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_6" name="六轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_7" name="七轴凸包宽" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullWidth_8" name="八轴凸包宽" valuetype="float" value="100" />
+        <!--机械臂连杆凸包长方形的长，浮点数-->
+        <Item keyname="LinkConvexHullLength_1" name="一轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_2" name="二轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_3" name="三轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_4" name="四轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_5" name="五轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_6" name="六轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_7" name="七轴凸包长" valuetype="float" value="100" />
+        <Item keyname="LinkConvexHullLength_8" name="八轴凸包长" valuetype="float" value="100" />
+        <!--基坐标系X轴向，整数。
+        1-向上；2-向下；3-向左；4-向右；5-向前；6-向右-->
+        <Item keyname="BaseCsX" name="基坐标系X轴向" valuetype="int" value="4"
+            help="1-向上；2-向下；3-向左；4-向右；5-向里；6-向外" />
+        <!--基坐标系Z轴向，整数-->
+        <Item keyname="BaseCsZ" name="基坐标系Z轴向" valuetype="int" value="1"
+            help="1-向上；2-向下；3-向左；4-向右；5-向里；6-向外" />
+        <!--工具坐标系X轴向，整数-->
+        <Item keyname="ToolCsX" name="工具坐标系X轴向" valuetype="int" value="2"
+            help="1-向上；2-向下；3-向左；4-向右；5-向里；6-向外" />
+        <!--工具坐标系Z轴向，整数-->
+        <Item keyname="ToolCsZ" name="工具坐标系Z轴向" valuetype="int" value="4"
+            help="1-向上；2-向下；3-向左；4-向右；5-向里；6-向外" />
+        <!--最大角速度，整数。度/秒，放大1000倍-->
+        <Item keyname="JointVelocityMax_1" name="J1最大角速度" valuetype="int" value="100" />
+        <Item keyname="JointVelocityMax_2" name="J2最大角速度" valuetype="int" value="100" />
+        <Item keyname="JointVelocityMax_3" name="J3最大角速度" valuetype="int" value="100" />
+        <Item keyname="JointVelocityMax_4" name="J4最大角速度" valuetype="int" value="100" />
+        <Item keyname="JointVelocityMax_5" name="J5最大角速度" valuetype="int" value="100" />
+        <Item keyname="JointVelocityMax_6" name="J6最大角速度" valuetype="int" value="100" />
+        <!--最大角加速度，整数。度/秒平方
+        放大1000倍-->
+        <Item keyname="JointAccelerationMax_1" name="J1最大角加速度" valuetype="int" value="100" />
+        <Item keyname="JointAccelerationMax_2" name="J2最大角加速度" valuetype="int" value="100" />
+        <Item keyname="JointAccelerationMax_3" name="J3最大角加速度" valuetype="int" value="100" />
+        <Item keyname="JointAccelerationMax_4" name="J4最大角加速度" valuetype="int" value="100" />
+        <Item keyname="JointAccelerationMax_5" name="J5最大角加速度" valuetype="int" value="100" />
+        <Item keyname="JointAccelerationMax_6" name="J6最大角加速度" valuetype="int" value="100" />
+        <Item keyname="AxisNum" name="轴数" valuetype="int" value="6" />
+        <Item keyname="MaxLoad" name="负载" valuetype="int" value="210" />
+        <Item keyname="WorkRange" name="最大工作范围" valuetype="int" value="2701" />
+        <Item keyname="DINum" name="数字量输入" valuetype="int" value="16" />
+        <Item keyname="DONum" name="数字量输出" valuetype="int" value="16" />
+        <Item keyname="System_type" name="控制器型号" valuetype="string" value="krc4" />
+    </Manipulator>
+</RobotTemplate>

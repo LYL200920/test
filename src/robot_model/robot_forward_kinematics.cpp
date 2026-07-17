@@ -1,7 +1,7 @@
 #include "robot_forward_kinematics.h"
 
-#include "robot_calibration_builder.h"
-#include "transform_utils.h"
+#include "robot_kinematic_params.h"
+#include "robot_part_transform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,23 +17,6 @@ Matrix4 identity_matrix ( )
   for( int i = 0; i < 4; ++i )
   {
     matrix[i][i] = 1.0;
-  }
-  return matrix;
-}
-
-Matrix4 matrix_from_vtk (vtkMatrix4x4* source)
-{
-  Matrix4 matrix = { };
-  if( !source )
-  {
-    return identity_matrix ( );
-  }
-  for( int row = 0; row < 4; ++row )
-  {
-    for( int column = 0; column < 4; ++column )
-    {
-      matrix[row][column] = source->GetElement (row, column);
-    }
   }
   return matrix;
 }
@@ -102,12 +85,12 @@ Matrix4 rotation_about_point (
 }
 
 Point3 part_origin_or (
-  const std::vector<Robot_Visual_Part>& parts,
+  std::size_t part_count,
   const Robot_Assembly_Calibration& calibration,
   std::size_t index,
   const Point3& fallback)
 {
-  if( index >= parts.size ( ) || index >= calibration.parts.size ( ) )
+  if( index >= part_count || index >= calibration.parts.size ( ) )
   {
     return fallback;
   }
@@ -151,7 +134,7 @@ double joint_delta_at (const Robot_Joint_State& state, std::size_t index)
 } // namespace
 
 Robot_Forward_Kinematics_Model Build_Forward_Kinematics_Model (
-  const std::vector<Robot_Visual_Part>& parts,
+  std::size_t part_count,
   const Robot_Assembly_Calibration& calibration,
   const Robot_Kinematic_Params& params)
 {
@@ -164,11 +147,13 @@ Robot_Forward_Kinematics_Model Build_Forward_Kinematics_Model (
   const Point3 elbow_fallback = { 0.0, 0.0, elbow_z };
   const Point3 wrist_fallback = { wrist_x, 0.0, elbow_z };
   const auto a2 = part_origin_or (
-    parts, calibration, 2, shoulder_fallback);
-  const auto a3 = part_origin_or (parts, calibration, 3, elbow_fallback);
-  const auto a4 = part_origin_or (parts, calibration, 4, wrist_fallback);
-  const auto a5 = part_origin_or (parts, calibration, 5, a4);
-  const auto a6 = part_origin_or (parts, calibration, 6, a5);
+    part_count, calibration, 2, shoulder_fallback);
+  const auto a3 = part_origin_or (
+    part_count, calibration, 3, elbow_fallback);
+  const auto a4 = part_origin_or (
+    part_count, calibration, 4, wrist_fallback);
+  const auto a5 = part_origin_or (part_count, calibration, 5, a4);
+  const auto a6 = part_origin_or (part_count, calibration, 6, a5);
 
   model.joint_pivots = {
     configured_pivot_or (params, 0, base_origin),
@@ -187,12 +172,12 @@ Robot_Forward_Kinematics_Model Build_Forward_Kinematics_Model (
     configured_axis_or (params, 5, { 1.0, 0.0, 0.0 })
   };
 
-  const auto count = std::min (parts.size ( ), calibration.parts.size ( ));
+  const auto count = std::min (part_count, calibration.parts.size ( ));
   model.neutral_world_from_parts.reserve (count);
   for( std::size_t i = 0; i < count; ++i )
   {
     model.neutral_world_from_parts.push_back (
-      matrix_from_vtk (Build_Static_Part_Matrix (calibration.parts[i])));
+      Build_Part_Calibration_Matrix (calibration.parts[i]));
   }
 
   model.flange_from_last_part = identity_matrix ( );
