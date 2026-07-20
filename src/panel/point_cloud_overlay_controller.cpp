@@ -140,7 +140,8 @@ Point_Cloud_Overlay_Result Point_Cloud_Overlay_Controller::Load_Latest (
 }
 
 Point_Cloud_Save_Result
-Point_Cloud_Overlay_Controller::Save_Latest_To_Resource (
+Point_Cloud_Overlay_Controller::Save_Latest_To_File (
+  const std::filesystem::path& path,
   const std::string& robot_model_id)
 {
   Point_Cloud_Save_Result result;
@@ -149,8 +150,8 @@ Point_Cloud_Overlay_Controller::Save_Latest_To_Resource (
   {
     return result;
   }
-  const auto saved = point_cloud::Save_Robot_Base_Point_Cloud_To_Resource (
-    cloud.data, robot_model_id, cloud.source_frame_number);
+  const auto saved = point_cloud::Save_Robot_Base_Point_Cloud_To_File (
+    path, cloud.data, robot_model_id, cloud.source_frame_number);
   if( !saved.success )
   {
     result.error_message = saved.error_message;

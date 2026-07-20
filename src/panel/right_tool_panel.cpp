@@ -31,6 +31,9 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_camera_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"相机"),
     wxDefaultPosition, wxSize (68, 40));
+  m_point_cloud_button = new wxButton (
+    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"点云"),
+    wxDefaultPosition, wxSize (68, 40));
   m_robot_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"机械臂"),
     wxDefaultPosition, wxSize (68, 40));
@@ -47,6 +50,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     wxEVT_BUTTON, &Right_Tool_Panel::On_Flow_Click, this);
   m_camera_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_Click, this);
+  m_point_cloud_button->Bind (
+    wxEVT_BUTTON, &Right_Tool_Panel::On_Point_Cloud_Click, this);
   m_robot_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Robot_Click, this);
 
@@ -54,6 +59,7 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   rail_sizer->Add (m_tcp_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_flow_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_button, 0, wxEXPAND | wxBOTTOM, 4);
+  rail_sizer->Add (m_point_cloud_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_robot_button, 0, wxEXPAND);
   rail_sizer->AddStretchSpacer (1);
   rail_panel->SetSizer (rail_sizer);
@@ -147,6 +153,11 @@ void Right_Tool_Panel::On_Camera_Click (wxCommandEvent&)
   Toggle_Page (Right_Tool_Page::Camera);
 }
 
+void Right_Tool_Panel::On_Point_Cloud_Click (wxCommandEvent&)
+{
+  Toggle_Page (Right_Tool_Page::PointCloud);
+}
+
 void Right_Tool_Panel::On_Robot_Click (wxCommandEvent&)
 {
   Toggle_Page (Right_Tool_Page::Robot);
@@ -218,6 +229,13 @@ void Right_Tool_Panel::Update_Button_Labels ( )
       !m_collapsed && m_active_page == Right_Tool_Page::Robot
         ? wxString::FromUTF8 (u8"机械臂 <")
         : wxString::FromUTF8 (u8"机械臂"));
+  }
+  if( m_point_cloud_button )
+  {
+    m_point_cloud_button->SetLabel (
+      !m_collapsed && m_active_page == Right_Tool_Page::PointCloud
+        ? wxString::FromUTF8 (u8"点云 <")
+        : wxString::FromUTF8 (u8"点云"));
   }
   if( m_camera_button )
   {

@@ -10,6 +10,7 @@
 #include "robot_trajectory_io.h"
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
+#include "robot_teach_point_store.h"
 
 #include <algorithm>
 #include <array>
@@ -162,6 +163,40 @@ void test_trajectory_csv_io ( )
            "Invalid CSV should fail");
 
   std::filesystem::remove (path);
+}
+
+void test_teach_point_store ( )
+{
+  robot_model::Robot_Teach_Point_Store store;
+  const std::array<double, 6> joints_a = { 1, 2, 3, 4, 5, 6 };
+  const robot_model::XyzabcPose pose_a = { 10, 20, 30, 40, 50, 60 };
+  const auto first = store.Add_Point ("robot-a", joints_a, pose_a);
+  require (first.id == 1, "First teach point id mismatch");
+  require (robot_model::Format_Teach_Point_Name (first.id) == "P[1]",
+           "Teach point name format mismatch");
+  require (robot_model::Format_Teach_Point_Name (101) == "P[101]",
+           "Three-digit teach point name format mismatch");
+  require (first.joint_angles_deg == joints_a,
+           "Teach point joint state mismatch");
+  require (first.world_pose == pose_a && first.has_world_pose,
+           "Teach point world pose mismatch");
+
+  store.Add_Point ("robot-a", joints_a, pose_a);
+  require (store.Delete_Point ("robot-a", 0),
+           "Teach point deletion failed");
+  const auto third = store.Add_Point ("robot-a", joints_a, pose_a);
+  require (third.id == 3,
+           "Deleted teach point id was unexpectedly reused");
+  store.Clear_Points ("robot-a");
+  const auto fourth = store.Add_Point ("robot-a", joints_a, pose_a);
+  require (fourth.id == 4,
+           "Cleared teach point id was unexpectedly reused");
+
+  store.Add_Point ("robot-b", joints_a, pose_a);
+  require (store.Point_Count ("robot-a") == 1,
+           "Robot A teach point count mismatch");
+  require (store.Point_Count ("robot-b") == 1,
+           "Teach points were not isolated by robot model");
 }
 
 void test_robot_resources_use_source_directory ( )
@@ -743,6 +778,7 @@ int main ( )
     test_joint_state_builder ( );
     test_trajectory_planner ( );
     test_trajectory_session ( );
+    test_teach_point_store ( );
     test_trajectory_csv_io ( );
     test_pose_transform_logic ( );
     test_pose_point_file_io ( );

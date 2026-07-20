@@ -9,7 +9,6 @@
 #include <vector>
 
 class wxButton;
-class wxListBox;
 class wxSlider;
 class wxStaticText;
 
@@ -18,7 +17,6 @@ class Trajectory_Control_Panel : public wxPanel
 public:
   struct Callbacks
   {
-    std::function<void ( )> add_point;
     std::function<void ( )> clear_points;
     std::function<void ( )> go_to_point;
     std::function<void ( )> delete_point;
@@ -28,7 +26,6 @@ public:
     std::function<void ( )> pause_resume;
     std::function<void ( )> stop;
     std::function<void ( )> speed_changed;
-    std::function<void ( )> selection_changed;
   };
 
   Trajectory_Control_Panel (wxWindow* parent,
@@ -37,10 +34,6 @@ public:
 
   void Set_Callbacks (Callbacks callbacks);
 
-  int Selected_Point_Index ( ) const;
-  void Set_Point_Labels (const std::vector<wxString>& labels);
-  void Set_Point_Selection (int selection);
-
   int Speed_Index ( ) const;
   void Set_Speed_Label (const wxString& label);
   void Set_Status_Text (const wxString& label);
@@ -48,7 +41,8 @@ public:
   void Refresh_Command_State (bool active,
                               bool paused,
                               bool playing,
-                              size_t point_count);
+                              size_t point_count,
+                              bool has_selected_point);
 
 private:
   void Bind_Button (wxButton* button, const std::function<void ( )>& callback);
@@ -56,7 +50,6 @@ private:
 private:
   Callbacks m_callbacks;
 
-  wxButton* m_add_point_button = nullptr;
   wxButton* m_clear_points_button = nullptr;
   wxButton* m_go_to_point_button = nullptr;
   wxButton* m_delete_point_button = nullptr;
@@ -68,7 +61,6 @@ private:
   wxSlider* m_speed_slider = nullptr;
   wxStaticText* m_speed_label = nullptr;
   wxStaticText* m_status_text = nullptr;
-  wxListBox* m_point_list = nullptr;
 };
 
 #endif

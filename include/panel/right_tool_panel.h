@@ -13,7 +13,8 @@ enum class Right_Tool_Page
   Tcp = 0,
   Flow = 1,
   Camera = 2,
-  Robot = 3
+  PointCloud = 3,
+  Robot = 4
 };
 
 class Right_Tool_Panel : public wxPanel
@@ -32,6 +33,7 @@ private:
   void On_Tcp_Click (wxCommandEvent& event);
   void On_Flow_Click (wxCommandEvent& event);
   void On_Camera_Click (wxCommandEvent& event);
+  void On_Point_Cloud_Click (wxCommandEvent& event);
   void On_Robot_Click (wxCommandEvent& event);
   void Toggle_Page (Right_Tool_Page page);
   void Set_Collapsed (bool collapsed);
@@ -41,6 +43,7 @@ private:
   wxButton* m_tcp_button = nullptr;
   wxButton* m_flow_button = nullptr;
   wxButton* m_camera_button = nullptr;
+  wxButton* m_point_cloud_button = nullptr;
   wxButton* m_robot_button = nullptr;
   wxSimplebook* m_page_book = nullptr;
   Right_Tool_Page m_active_page = Right_Tool_Page::Tcp;

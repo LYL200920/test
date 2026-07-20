@@ -7,6 +7,7 @@
 #include <wx/filedlg.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
+#include <wx/stattext.h>
 
 #include <filesystem>
 #include <utility>
@@ -20,30 +21,41 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
     m_callbacks (std::move (callbacks))
 {
   SetBackgroundColour (parent->GetBackgroundColour ( ));
-  auto* load_latest = new wxButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"加载点云叠加"));
-  auto* save_latest = new wxButton (
+  auto* title = new wxStaticText (
+    this, wxID_ANY, wxString::FromUTF8 (u8"点云工具"));
+  m_load_latest_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"叠加当前点云"));
+  m_save_latest_button = new wxButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"保存当前点云"));
   auto* load_file = new wxButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"加载文件叠加"));
+    this, wxID_ANY, wxString::FromUTF8 (u8"加载点云文件"));
   auto* clear = new wxButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"清除点云叠加"));
+    this, wxID_ANY, wxString::FromUTF8 (u8"清除点云"));
+  m_camera_pose_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"显示相机位姿"));
 
-  load_latest->Bind (
+  m_load_latest_button->Bind (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Load_Latest, this);
-  save_latest->Bind (
+  m_save_latest_button->Bind (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Save_Latest, this);
   load_file->Bind (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Load_File, this);
   clear->Bind (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Clear, this);
+  m_camera_pose_button->Bind (
+    wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Toggle_Camera_Pose, this);
 
-  auto* sizer = new wxBoxSizer (wxHORIZONTAL);
-  sizer->Add (load_latest, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  sizer->Add (save_latest, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  sizer->Add (load_file, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  sizer->Add (clear, 0, wxALIGN_CENTER_VERTICAL);
-  SetSizerAndFit (sizer);
+  auto* sizer = new wxBoxSizer (wxVERTICAL);
+  sizer->Add (title, 0, wxEXPAND | wxALL, 8);
+  sizer->Add (m_load_latest_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add (m_save_latest_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add (load_file, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add (clear, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add (m_camera_pose_button, 0,
+              wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->AddStretchSpacer (1);
+  SetSizer (sizer);
+  Set_Camera_Connected (false);
 }
 
 void Point_Cloud_Overlay_Toolbar::Attach_Renderer (vtkRenderer* renderer)
@@ -54,6 +66,12 @@ void Point_Cloud_Overlay_Toolbar::Attach_Renderer (vtkRenderer* renderer)
 bool Point_Cloud_Overlay_Toolbar::Has_Point_Cloud ( ) const
 {
   return m_controller.Has_Point_Cloud ( );
+}
+
+void Point_Cloud_Overlay_Toolbar::Set_Camera_Connected (bool connected)
+{
+  if( m_load_latest_button ) m_load_latest_button->Enable (connected);
+  if( m_save_latest_button ) m_save_latest_button->Enable (connected);
 }
 
 void Point_Cloud_Overlay_Toolbar::On_Load_Latest (wxCommandEvent&)
@@ -80,8 +98,20 @@ void Point_Cloud_Overlay_Toolbar::On_Load_Latest (wxCommandEvent&)
 
 void Point_Cloud_Overlay_Toolbar::On_Save_Latest (wxCommandEvent&)
 {
-  const auto result = m_controller.Save_Latest_To_Resource (
-    Robot_Model_Id ( ));
+  const auto resource_root = point_cloud::Point_Cloud_Resource_Root ( );
+  wxFileDialog dialog (
+    this,
+    wxString::FromUTF8 (u8"保存当前点云"),
+    wxString (resource_root.wstring ( )),
+    "point_cloud.ply",
+    "PLY point cloud (*.ply)|*.ply",
+    wxFD_SAVE);
+  if( dialog.ShowModal ( ) != wxID_OK ) return;
+
+  std::filesystem::path selected_path (dialog.GetPath ( ).ToStdWstring ( ));
+  selected_path.replace_extension (".ply");
+  const auto result = m_controller.Save_Latest_To_File (
+    selected_path, Robot_Model_Id ( ));
   if( !result.success )
   {
     Report_Error (wxString::FromUTF8 (u8"保存点云失败"),
@@ -133,6 +163,17 @@ void Point_Cloud_Overlay_Toolbar::On_Clear (wxCommandEvent&)
   m_controller.Clear ( );
   Set_Status (wxString::FromUTF8 (u8"点云叠加已清除"));
   if( m_callbacks.render_scene ) m_callbacks.render_scene ( );
+}
+
+void Point_Cloud_Overlay_Toolbar::On_Toggle_Camera_Pose (wxCommandEvent&)
+{
+  const bool show = !m_camera_pose_visible;
+  const bool applied = m_callbacks.set_camera_pose_visible &&
+    m_callbacks.set_camera_pose_visible (show);
+  if( !applied || !m_camera_pose_button ) return;
+  m_camera_pose_visible = show;
+  m_camera_pose_button->SetLabel (wxString::FromUTF8 (
+    show ? u8"隐藏相机位姿" : u8"显示相机位姿"));
 }
 
 void Point_Cloud_Overlay_Toolbar::Report_Error (

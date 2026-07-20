@@ -89,6 +89,30 @@ void test_plain_ply_is_rejected_for_overlay ( )
   std::filesystem::remove (path);
 }
 
+void test_repository_saves_to_user_selected_path ( )
+{
+  const auto path = temporary_ply_path ("custom_point_cloud_name_");
+  point_cloud::Point_Cloud_Data source;
+  source.xyz = { 10.0f, 20.0f, 30.0f };
+
+  const auto saved = point_cloud::Save_Robot_Base_Point_Cloud_To_File (
+    path, source, "TEST_ROBOT", 42);
+  require (saved.success, "Repository custom-path save failed: " +
+                          saved.error_message);
+  require (saved.path == path, "Repository changed the selected save path");
+
+  point_cloud::Point_Cloud_Data loaded;
+  point_cloud::Point_Cloud_File_Metadata metadata;
+  std::string error;
+  require (point_cloud::Load_Robot_Base_Point_Cloud_For_Model (
+             path, "TEST_ROBOT", &loaded, &metadata, &error),
+           "Custom-path point cloud could not be loaded: " + error);
+  require (loaded.xyz == source.xyz, "Custom-path point cloud data mismatch");
+  require (metadata.source_frame_number == 42,
+           "Custom-path point cloud frame metadata mismatch");
+  std::filesystem::remove (path);
+}
+
 } // namespace
 
 int main ( )
@@ -97,6 +121,7 @@ int main ( )
   {
     test_binary_ply_round_trip ( );
     test_plain_ply_is_rejected_for_overlay ( );
+    test_repository_saves_to_user_selected_path ( );
   }
   catch( const std::exception& error )
   {

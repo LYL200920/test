@@ -41,7 +41,8 @@ public:
   ~Point_Cloud_Overlay_Controller ( );
 
   Point_Cloud_Overlay_Result Load_Latest (vtkRenderer* renderer);
-  Point_Cloud_Save_Result Save_Latest_To_Resource (
+  Point_Cloud_Save_Result Save_Latest_To_File (
+    const std::filesystem::path& path,
     const std::string& robot_model_id);
   Point_Cloud_Overlay_Result Load_File (
     const std::filesystem::path& path,

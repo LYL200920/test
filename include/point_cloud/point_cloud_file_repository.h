@@ -20,6 +20,12 @@ struct Point_Cloud_File_Save_Result
 
 std::filesystem::path Point_Cloud_Resource_Root ( );
 
+Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_File (
+  const std::filesystem::path& path,
+  const Point_Cloud_Data& cloud,
+  const std::string& robot_model_id,
+  std::uint32_t source_frame_number);
+
 Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_Resource (
   const Point_Cloud_Data& cloud,
   const std::string& robot_model_id,

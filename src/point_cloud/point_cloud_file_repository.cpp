@@ -43,6 +43,49 @@ std::filesystem::path Point_Cloud_Resource_Root ( )
   return std::filesystem::path (POINT_CLOUD_RESOURCE_ROOT);
 }
 
+Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_File (
+  const std::filesystem::path& path,
+  const Point_Cloud_Data& cloud,
+  const std::string& robot_model_id,
+  std::uint32_t source_frame_number)
+{
+  Point_Cloud_File_Save_Result result;
+  if( path.empty ( ) )
+  {
+    result.error_message = "Point-cloud save path is empty";
+    return result;
+  }
+
+  std::error_code directory_error;
+  if( !path.parent_path ( ).empty ( ) )
+  {
+    std::filesystem::create_directories (path.parent_path ( ), directory_error);
+  }
+  if( directory_error )
+  {
+    result.error_message = "Unable to create point-cloud directory: " +
+      directory_error.message ( );
+    return result;
+  }
+
+  Point_Cloud_File_Metadata metadata;
+  metadata.coordinate_frame = "robot_base";
+  metadata.unit = "millimeter";
+  metadata.robot_model = robot_model_id;
+  metadata.source_frame_number = source_frame_number;
+  metadata.saved_unix_milliseconds =
+    std::chrono::duration_cast<std::chrono::milliseconds> (
+      std::chrono::system_clock::now ( ).time_since_epoch ( )).count ( );
+  if( !Save_Robot_Base_Point_Cloud_Ply (
+        path, cloud, metadata, &result.error_message) )
+  {
+    return result;
+  }
+  result.success = true;
+  result.path = path;
+  return result;
+}
+
 Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_Resource (
   const Point_Cloud_Data& cloud,
   const std::string& robot_model_id,
@@ -70,22 +113,8 @@ Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_Resource (
       ( base_name + "_" + std::to_string (suffix) + ".ply" );
   }
 
-  Point_Cloud_File_Metadata metadata;
-  metadata.coordinate_frame = "robot_base";
-  metadata.unit = "millimeter";
-  metadata.robot_model = robot_model_id;
-  metadata.source_frame_number = source_frame_number;
-  metadata.saved_unix_milliseconds =
-    std::chrono::duration_cast<std::chrono::milliseconds> (
-      now.time_since_epoch ( )).count ( );
-  if( !Save_Robot_Base_Point_Cloud_Ply (
-        path, cloud, metadata, &result.error_message) )
-  {
-    return result;
-  }
-  result.success = true;
-  result.path = path;
-  return result;
+  return Save_Robot_Base_Point_Cloud_To_File (
+    path, cloud, robot_model_id, source_frame_number);
 }
 
 bool Load_Robot_Base_Point_Cloud_For_Model (

@@ -1,7 +1,6 @@
 #include "trajectory_control_panel.h"
 
 #include <wx/button.h>
-#include <wx/listbox.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
 #include <wx/stattext.h>
@@ -15,7 +14,6 @@ Trajectory_Control_Panel::Trajectory_Control_Panel (
   int speed_max_index)
   : wxPanel (parent, wxID_ANY)
 {
-  m_add_point_button = new wxButton (this, wxID_ANY, "Add Point");
   m_clear_points_button = new wxButton (this, wxID_ANY, "Clear");
   m_go_to_point_button = new wxButton (this, wxID_ANY, "Go To");
   m_delete_point_button = new wxButton (this, wxID_ANY, "Delete");
@@ -29,15 +27,10 @@ Trajectory_Control_Panel::Trajectory_Control_Panel (
     this, wxID_ANY, speed_default_index, 0, speed_max_index,
     wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL);
   m_status_text = new wxStaticText (this, wxID_ANY, "Points: 0 / need 2");
-  m_point_list = new wxListBox (this, wxID_ANY);
-  m_point_list->SetMinSize (wxSize (-1, 120));
 
   auto* sizer = new wxBoxSizer (wxVERTICAL);
 
-  auto* point_buttons = new wxBoxSizer (wxHORIZONTAL);
-  point_buttons->Add (m_add_point_button, 1, wxRIGHT, 4);
-  point_buttons->Add (m_delete_point_button, 1, wxLEFT, 4);
-  sizer->Add (point_buttons, 0, wxEXPAND | wxTOP, 14);
+  sizer->Add (m_delete_point_button, 0, wxEXPAND | wxTOP, 14);
 
   auto* edit_buttons = new wxBoxSizer (wxHORIZONTAL);
   edit_buttons->Add (m_go_to_point_button, 1, wxRIGHT, 4);
@@ -59,7 +52,6 @@ Trajectory_Control_Panel::Trajectory_Control_Panel (
   sizer->Add (m_speed_label, 0, wxEXPAND | wxTOP, 10);
   sizer->Add (m_speed_slider, 0, wxEXPAND | wxTOP, 2);
   sizer->Add (m_status_text, 0, wxEXPAND | wxTOP, 6);
-  sizer->Add (m_point_list, 0, wxEXPAND | wxTOP, 4);
   SetSizer (sizer);
 }
 
@@ -67,7 +59,6 @@ void Trajectory_Control_Panel::Set_Callbacks (Callbacks callbacks)
 {
   m_callbacks = std::move (callbacks);
 
-  Bind_Button (m_add_point_button, m_callbacks.add_point);
   Bind_Button (m_clear_points_button, m_callbacks.clear_points);
   Bind_Button (m_go_to_point_button, m_callbacks.go_to_point);
   Bind_Button (m_delete_point_button, m_callbacks.delete_point);
@@ -90,58 +81,6 @@ void Trajectory_Control_Panel::Set_Callbacks (Callbacks callbacks)
       });
   }
 
-  if( m_point_list )
-  {
-    m_point_list->Bind (
-      wxEVT_LISTBOX,
-      [this] (wxCommandEvent&)
-      {
-        if( m_callbacks.selection_changed )
-        {
-          m_callbacks.selection_changed ( );
-        }
-      });
-  }
-}
-
-int Trajectory_Control_Panel::Selected_Point_Index ( ) const
-{
-  return m_point_list ? m_point_list->GetSelection ( ) : wxNOT_FOUND;
-}
-
-void Trajectory_Control_Panel::Set_Point_Labels (
-  const std::vector<wxString>& labels)
-{
-  if( !m_point_list )
-  {
-    return;
-  }
-
-  const int old_selection = m_point_list->GetSelection ( );
-  m_point_list->Clear ( );
-
-  for( const auto& label : labels )
-  {
-    m_point_list->Append (label);
-  }
-
-  if( labels.empty ( ) )
-  {
-    return;
-  }
-
-  const int selection = old_selection == wxNOT_FOUND ?
-    static_cast<int> (labels.size ( ) - 1) :
-    std::min (old_selection, static_cast<int> (labels.size ( ) - 1));
-  m_point_list->SetSelection (selection);
-}
-
-void Trajectory_Control_Panel::Set_Point_Selection (int selection)
-{
-  if( m_point_list && selection != wxNOT_FOUND )
-  {
-    m_point_list->SetSelection (selection);
-  }
 }
 
 int Trajectory_Control_Panel::Speed_Index ( ) const
@@ -169,14 +108,9 @@ void Trajectory_Control_Panel::Refresh_Command_State (
   bool active,
   bool paused,
   bool playing,
-  size_t point_count)
+  size_t point_count,
+  bool has_selected_point)
 {
-  const bool has_selected_point = Selected_Point_Index ( ) != wxNOT_FOUND;
-
-  if( m_add_point_button )
-  {
-    m_add_point_button->Enable (!active);
-  }
   if( m_clear_points_button )
   {
     m_clear_points_button->Enable (!active && point_count > 0);
@@ -196,10 +130,6 @@ void Trajectory_Control_Panel::Refresh_Command_State (
   if( m_load_button )
   {
     m_load_button->Enable (!active);
-  }
-  if( m_point_list )
-  {
-    m_point_list->Enable (!active);
   }
   if( m_play_button )
   {

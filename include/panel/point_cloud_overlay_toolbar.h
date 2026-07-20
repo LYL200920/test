@@ -11,6 +11,7 @@
 
 class Camera_Service;
 class vtkRenderer;
+class wxButton;
 
 class Point_Cloud_Overlay_Toolbar : public wxPanel
 {
@@ -22,6 +23,7 @@ public:
     std::function<void ( )> show_robot_page;
     std::function<void ( )> render_scene;
     std::function<void (const wxString&)> set_status;
+    std::function<bool (bool)> set_camera_pose_visible;
   };
 
   Point_Cloud_Overlay_Toolbar (
@@ -31,12 +33,14 @@ public:
 
   void Attach_Renderer (vtkRenderer* renderer);
   bool Has_Point_Cloud ( ) const;
+  void Set_Camera_Connected (bool connected);
 
 private:
   void On_Load_Latest (wxCommandEvent& event);
   void On_Save_Latest (wxCommandEvent& event);
   void On_Load_File (wxCommandEvent& event);
   void On_Clear (wxCommandEvent& event);
+  void On_Toggle_Camera_Pose (wxCommandEvent& event);
   void Report_Error (const wxString& title, const std::string& message);
   vtkRenderer* Renderer ( ) const;
   std::string Robot_Model_Id ( ) const;
@@ -46,6 +50,10 @@ private:
 private:
   Point_Cloud_Overlay_Controller m_controller;
   Callbacks m_callbacks;
+  wxButton* m_load_latest_button = nullptr;
+  wxButton* m_save_latest_button = nullptr;
+  wxButton* m_camera_pose_button = nullptr;
+  bool m_camera_pose_visible = false;
 };
 
 #endif

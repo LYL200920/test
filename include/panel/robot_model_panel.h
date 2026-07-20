@@ -5,6 +5,7 @@
 #include "robot_model_view.h"
 #include "camera_pose_controller.h"
 #include "robot_trajectory_session.h"
+#include "robot_teach_point_store.h"
 #include "joint_control_panel.h"
 #include "trajectory_control_panel.h"
 #include "cartesian_pose_panel.h"
@@ -24,6 +25,8 @@ class Camera_Image_View;
 class Camera_Service;
 class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
+class Teach_Point_Command_Panel;
+class Teach_Point_List_Panel;
 class wxButton;
 class wxSimplebook;
 class wxSplitterWindow;
@@ -62,7 +65,7 @@ private:
   void On_Camera_Image_Display (wxCommandEvent& event);
   void On_Point_Cloud_Display (wxCommandEvent& event);
   void On_Reset_Robot (wxCommandEvent& event);
-  void On_Toggle_Camera_Pose (wxCommandEvent& event);
+  bool Set_Camera_Pose_Visible (bool visible);
   void On_Toggle_Flange_Frame (wxCommandEvent& event);
   void On_Toggle_Flange_Free_Drag (wxCommandEvent& event);
   void On_Toggle_Flange_6D (wxCommandEvent& event);
@@ -90,13 +93,14 @@ private:
   void Update_Trajectory_Status ( );
   void Update_Trajectory_Speed_Label ( );
   void Update_Trajectory_Point_List ( );
-  wxString Format_Trajectory_Point_Label (
-    size_t index, const std::array<double, 6>& point) const;
+  void Sync_Trajectory_From_Teach_Points ( );
+  int Selected_Teach_Point_Index ( ) const;
   double Get_Trajectory_Speed_Scale ( ) const;
   int Get_Trajectory_Timer_Interval_Ms ( ) const;
   bool Is_Trajectory_Active ( ) const;
   void Stop_Trajectory_Playback ( );
   void Resize_Right_Tool (bool collapsed);
+  void Resize_Teach_Point_List (bool collapsed);
   void Load_Model_List ( );
   void Load_Default_Model ( );
   bool Load_Model (size_t model_index, std::string* error_message = nullptr);
@@ -109,11 +113,11 @@ private:
   Point_Cloud_View* m_point_cloud_view = nullptr;
   Point_Cloud_Overlay_Toolbar* m_point_cloud_overlay_toolbar = nullptr;
   wxSimplebook* m_display_book = nullptr;
+  wxSplitterWindow* m_workspace_splitter = nullptr;
   wxSplitterWindow* m_content_splitter = nullptr;
   wxToggleButton* m_robot_display_button = nullptr;
   wxToggleButton* m_camera_display_button = nullptr;
   wxToggleButton* m_point_cloud_display_button = nullptr;
-  wxToggleButton* m_camera_pose_button = nullptr;
   wxToggleButton* m_flange_frame_button = nullptr;
   wxToggleButton* m_flange_free_drag_button = nullptr;
   wxToggleButton* m_flange_6d_button = nullptr;
@@ -123,13 +127,17 @@ private:
   Camera_Control_Panel* m_camera_control_panel = nullptr;
   Joint_Control_Panel* m_joint_panel = nullptr;
   Cartesian_Pose_Panel* m_cartesian_pose_panel = nullptr;
+  Teach_Point_Command_Panel* m_teach_point_command_panel = nullptr;
+  Teach_Point_List_Panel* m_teach_point_list_panel = nullptr;
   Trajectory_Control_Panel* m_trajectory_panel = nullptr;
   wxTimer m_trajectory_timer;
   std::vector<robot_model::Robot_Model_Info> m_models;
   robot_model::Robot_Trajectory_Session m_trajectory_session;
+  robot_model::Robot_Teach_Point_Store m_teach_point_store;
   std::string m_current_model_id;
   Camera_Pose_Controller m_camera_pose_controller;
   int m_expanded_right_tool_width = 476;
+  int m_expanded_teach_point_width = 240;
 };
 
 #endif
