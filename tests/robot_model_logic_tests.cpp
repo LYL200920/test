@@ -396,6 +396,17 @@ void test_pose_transform_logic ( )
   require_near (rotated[3], 90.0, "Rotated pose A mismatch");
   require_near (rotated[4], 0.0, "Rotated pose B mismatch");
   require_near (rotated[5], 0.0, "Rotated pose C mismatch");
+
+  const robot_model::XyzabcPose cartesian_target =
+    { 520.0, -135.0, 880.0, 35.0, -20.0, 70.0 };
+  const auto cartesian_matrix = robot_model::Build_Zyx_Pose_Matrix (
+    cartesian_target);
+  const auto cartesian_round_trip =
+    robot_model::Build_Xyzabc_From_Zyx_Matrix (cartesian_matrix);
+  require_point_near (
+    cartesian_round_trip,
+    cartesian_target,
+    "Cartesian XYZABC target round-trip mismatch");
 }
 
 void test_pose_point_file_io ( )
@@ -678,6 +689,16 @@ void test_pose_ik_converges_orientation ( )
            "Pose IK changed the fixed flange position");
   require (result.orientation_error_deg <= options.orientation_tolerance_deg,
            "Pose IK orientation error exceeds tolerance");
+
+  const auto micro_target = robot_model::Build_Zyx_Pose_Matrix (
+    { 100.0, 0.0, 0.0, 0.01, 0.0, 0.0 });
+  const auto micro_result = robot_model::Solve_Flange_Pose_IK (
+    model, params, initial_state, micro_target, options);
+  require (micro_result.Converged ( ),
+           "Pose IK did not converge for a 0.01 degree fine adjustment");
+  require (
+    std::abs (micro_result.joint_state.input_angles_deg[5] - 0.01) < 1.0e-5,
+    "Pose IK lost the 0.01 degree fine adjustment");
 }
 
 void test_ik_realtime_budget ( )

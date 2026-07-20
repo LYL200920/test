@@ -93,7 +93,8 @@ Robot_Position_IK_Result Robot_Render_Controller::Move_Flange_To (
 }
 
 Robot_Pose_IK_Result Robot_Render_Controller::Move_Flange_To_Pose (
-  const Matrix4& target_world_from_flange)
+  const Matrix4& target_world_from_flange,
+  const Robot_Pose_IK_Options& options)
 {
   Robot_Pose_IK_Result result;
   auto& model_state = m_state.Robot_Model ( );
@@ -105,7 +106,8 @@ Robot_Pose_IK_Result Robot_Render_Controller::Move_Flange_To_Pose (
     m_forward_model,
     model_state.Params ( ),
     model_state.Joint_State ( ),
-    target_world_from_flange);
+    target_world_from_flange,
+    options);
   if( result.status != Robot_IK_Status::Invalid_Model &&
       std::isfinite (result.position_error_mm) &&
       std::isfinite (result.orientation_error_deg) )

@@ -4,6 +4,8 @@
 #include <wx/simplebook.h>
 #include <wx/sizer.h>
 
+#include <utility>
+
 namespace
 {
 constexpr int TOOL_RAIL_WIDTH = 72;
@@ -124,6 +126,12 @@ void Right_Tool_Panel::Set_Camera_Tool_Enabled (bool enabled)
   }
 }
 
+void Right_Tool_Panel::Set_On_Collapsed_Changed (
+  std::function<void (bool)> callback)
+{
+  m_on_collapsed_changed = std::move (callback);
+}
+
 void Right_Tool_Panel::On_Tcp_Click (wxCommandEvent&)
 {
   Toggle_Page (Right_Tool_Page::Tcp);
@@ -187,6 +195,7 @@ void Right_Tool_Panel::Set_Collapsed (bool collapsed)
   {
     GetParent ( )->Layout ( );
   }
+  if( m_on_collapsed_changed ) m_on_collapsed_changed (collapsed);
 }
 
 void Right_Tool_Panel::Update_Button_Labels ( )

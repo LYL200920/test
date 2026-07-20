@@ -18,6 +18,7 @@
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/simplebook.h>
+#include <wx/splitter.h>
 #include <wx/tglbtn.h>
 #include <wx/utils.h>
 
@@ -35,6 +36,9 @@ constexpr int TRAJECTORY_FRAME_COUNT = 120;
 constexpr int TRAJECTORY_TIMER_MS = 16;
 constexpr int TRAJECTORY_SPEED_DEFAULT_INDEX = 2;
 constexpr std::size_t ROBOT_JOINT_COUNT = 6;
+constexpr int RIGHT_TOOL_COLLAPSED_WIDTH = 72;
+constexpr int RIGHT_TOOL_DEFAULT_EXPANDED_WIDTH = 476;
+constexpr int DISPLAY_MINIMUM_WIDTH = 300;
 constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR10_R1100_2";
 constexpr std::array<double, 5> TRAJECTORY_SPEED_SCALES = {
   0.25, 0.5, 1.0, 2.0, 4.0
@@ -101,6 +105,18 @@ bool validate_model_files (
   return true;
 }
 
+int cartesian_position_limit_mm (
+  const robot_model::Robot_Kinematic_Params& params)
+{
+  double estimated_reach = 0.0;
+  for( const double length : params.link_lengths )
+  {
+    estimated_reach += std::abs (length);
+  }
+  const double limit = std::max (1000.0, estimated_reach * 1.25);
+  return static_cast<int> (std::ceil (limit / 100.0) * 100.0);
+}
+
 } // namespace
 
 Robot_Model_Panel::Robot_Model_Panel (
@@ -150,7 +166,18 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_reset_robot_button->Bind (
     wxEVT_BUTTON, &Robot_Model_Panel::On_Reset_Robot, this);
 
-  m_display_book = new wxSimplebook (this, wxID_ANY);
+  m_content_splitter = new wxSplitterWindow (
+    this,
+    wxID_ANY,
+    wxDefaultPosition,
+    wxDefaultSize,
+    wxSP_LIVE_UPDATE | wxSP_3DSASH | wxBORDER_NONE);
+  m_content_splitter->SetMinimumPaneSize (RIGHT_TOOL_COLLAPSED_WIDTH);
+  m_content_splitter->SetSashGravity (1.0);
+  m_content_splitter->SetSashSize (6);
+
+  m_display_book = new wxSimplebook (m_content_splitter, wxID_ANY);
+  m_display_book->SetMinSize (wxSize (DISPLAY_MINIMUM_WIDTH, -1));
   m_view = new Robot_Model_View (m_display_book);
   m_view->Set_On_Flange_Dragged (
     [this] (const robot_model::Robot_Position_IK_Result& result)
@@ -192,7 +219,9 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_display_book->AddPage (m_view, wxEmptyString, true);
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
-  m_right_tool_panel = new Right_Tool_Panel (this);
+  m_right_tool_panel = new Right_Tool_Panel (m_content_splitter);
+  m_right_tool_panel->Set_On_Collapsed_Changed (
+    [this] (bool collapsed) { Resize_Right_Tool (collapsed); });
 
   auto* tcp_panel = new Net_Panel (m_right_tool_panel->Page_Parent ( ));
   auto* flow_panel = new Flow_Panel (m_right_tool_panel->Page_Parent ( ));
@@ -211,6 +240,10 @@ Robot_Model_Panel::Robot_Model_Panel (
       m_right_tool_panel->Set_Camera_Tool_Enabled (enabled);
     });
   m_right_tool_panel->Set_Robot_Tool_Enabled (false);
+  m_content_splitter->SplitVertically (
+    m_display_book,
+    m_right_tool_panel,
+    -RIGHT_TOOL_COLLAPSED_WIDTH);
 
   m_trajectory_timer.SetOwner (this);
   Bind (wxEVT_TIMER, &Robot_Model_Panel::On_Trajectory_Timer, this,
@@ -242,13 +275,13 @@ Robot_Model_Panel::Robot_Model_Panel (
   toolbar_sizer->Add (m_model_name_text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->Add (m_status_text, 1, wxALIGN_CENTER_VERTICAL);
 
-  auto* content_sizer = new wxBoxSizer (wxHORIZONTAL);
-  content_sizer->Add (m_display_book, 1, wxEXPAND | wxRIGHT, 4);
-  content_sizer->Add (m_right_tool_panel, 0, wxEXPAND);
-
   auto* sizer = new wxBoxSizer (wxVERTICAL);
   sizer->Add (toolbar_sizer, 0, wxEXPAND | wxALL, 6);
-  sizer->Add (content_sizer, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+  sizer->Add (
+    m_content_splitter,
+    1,
+    wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+    6);
   SetSizer (sizer);
 
   Select_Display_Page (Main_Display_Page::Robot);
@@ -749,6 +782,11 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
     {
       if( m_view ) m_view->Set_World_Frame_Visible (visible);
     });
+  m_cartesian_pose_panel->Set_On_Pose_Changed (
+    [this] (const robot_model::XyzabcPose& target_pose)
+    {
+      Apply_Cartesian_Pose_Target (target_pose);
+    });
 
   m_trajectory_panel = new Trajectory_Control_Panel (
     panel,
@@ -860,6 +898,40 @@ void Robot_Model_Panel::Update_Cartesian_Pose ( )
   }
 }
 
+void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
+  const robot_model::XyzabcPose& target_pose)
+{
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+  if( Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
+
+  Select_Display_Page (Main_Display_Page::Robot);
+  robot_model::Robot_Pose_IK_Options options;
+  options.position_tolerance_mm = 0.001;
+  options.orientation_tolerance_deg = 0.001;
+  options.damping_mm = 1.0;
+  options.max_iterations = 100;
+  options.time_budget_ms = 8.0;
+  const auto result = m_view->Move_Flange_To_Pose (
+    robot_model::Build_Zyx_Pose_Matrix (target_pose),
+    options);
+  if( result.status == robot_model::Robot_IK_Status::Invalid_Model )
+  {
+    m_status_text->SetLabel (wxString::FromUTF8 (
+      u8"世界坐标位姿控制失败：模型无效"));
+    return;
+  }
+
+  Sync_Joint_Controls_From_State ( );
+  m_status_text->SetLabel (wxString::Format (
+    result.Converged ( )
+      ? wxString::FromUTF8 (
+          u8"世界坐标位姿：位置误差 %.2f mm，姿态误差 %.2f°")
+      : wxString::FromUTF8 (
+          u8"世界坐标目标受限：位置误差 %.2f mm，姿态误差 %.2f°"),
+    result.position_error_mm,
+    result.orientation_error_deg));
+}
+
 void Robot_Model_Panel::Apply_Flange_Drag_Result (
   const robot_model::Robot_Position_IK_Result& result)
 {
@@ -936,6 +1008,10 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
   if( m_joint_panel )
   {
     m_joint_panel->Set_Joint_Controls_Enabled (enabled);
+  }
+  if( m_cartesian_pose_panel )
+  {
+    m_cartesian_pose_panel->Set_Pose_Controls_Enabled (enabled);
   }
 }
 
@@ -1054,6 +1130,37 @@ void Robot_Model_Panel::Stop_Trajectory_Playback ( )
   Update_Trajectory_Status ( );
 }
 
+void Robot_Model_Panel::Resize_Right_Tool (bool collapsed)
+{
+  if( !m_content_splitter || !m_right_tool_panel ||
+      !m_content_splitter->IsSplit ( ) ) return;
+
+  const int total_width = m_content_splitter->GetClientSize ( ).x;
+  if( total_width <= RIGHT_TOOL_COLLAPSED_WIDTH ) return;
+
+  if( collapsed )
+  {
+    const int current_width = m_right_tool_panel->GetSize ( ).x;
+    if( current_width > RIGHT_TOOL_COLLAPSED_WIDTH + 40 )
+    {
+      m_expanded_right_tool_width = current_width;
+    }
+  }
+
+  const int maximum_right_width = std::max (
+    RIGHT_TOOL_COLLAPSED_WIDTH,
+    total_width - DISPLAY_MINIMUM_WIDTH);
+  const int requested_width = collapsed
+    ? RIGHT_TOOL_COLLAPSED_WIDTH
+    : std::max (m_expanded_right_tool_width,
+                RIGHT_TOOL_DEFAULT_EXPANDED_WIDTH);
+  const int right_width = std::clamp (
+    requested_width,
+    RIGHT_TOOL_COLLAPSED_WIDTH,
+    maximum_right_width);
+  m_content_splitter->SetSashPosition (total_width - right_width, true);
+}
+
 void Robot_Model_Panel::Load_Model_List ( )
 {
   const auto root = robot_model::Find_Robot_Root ( );
@@ -1137,6 +1244,11 @@ bool Robot_Model_Panel::Load_Model (
 
   m_view->Load_Model (model);
   Apply_Joint_Limits (m_view->Kinematic_Params ( ));
+  if( m_cartesian_pose_panel )
+  {
+    m_cartesian_pose_panel->Set_Position_Range (
+      cartesian_position_limit_mm (m_view->Kinematic_Params ( )));
+  }
   if( m_point_cloud_overlay_toolbar &&
       m_point_cloud_overlay_toolbar->Has_Point_Cloud ( ) )
   {

@@ -26,6 +26,7 @@ class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class wxButton;
 class wxSimplebook;
+class wxSplitterWindow;
 class wxToggleButton;
 
 enum class Main_Display_Page
@@ -73,6 +74,8 @@ private:
   void Apply_Joint_Limits (const robot_model::Robot_Kinematic_Params& params);
   void Update_Joint_State_From_Sliders ( );
   void Update_Cartesian_Pose ( );
+  void Apply_Cartesian_Pose_Target (
+    const robot_model::XyzabcPose& target_pose);
   void Apply_Flange_Drag_Result (
     const robot_model::Robot_Position_IK_Result& result);
   void Apply_Flange_Pose_Drag_Result (
@@ -93,6 +96,7 @@ private:
   int Get_Trajectory_Timer_Interval_Ms ( ) const;
   bool Is_Trajectory_Active ( ) const;
   void Stop_Trajectory_Playback ( );
+  void Resize_Right_Tool (bool collapsed);
   void Load_Model_List ( );
   void Load_Default_Model ( );
   bool Load_Model (size_t model_index, std::string* error_message = nullptr);
@@ -105,6 +109,7 @@ private:
   Point_Cloud_View* m_point_cloud_view = nullptr;
   Point_Cloud_Overlay_Toolbar* m_point_cloud_overlay_toolbar = nullptr;
   wxSimplebook* m_display_book = nullptr;
+  wxSplitterWindow* m_content_splitter = nullptr;
   wxToggleButton* m_robot_display_button = nullptr;
   wxToggleButton* m_camera_display_button = nullptr;
   wxToggleButton* m_point_cloud_display_button = nullptr;
@@ -124,6 +129,7 @@ private:
   robot_model::Robot_Trajectory_Session m_trajectory_session;
   std::string m_current_model_id;
   Camera_Pose_Controller m_camera_pose_controller;
+  int m_expanded_right_tool_width = 476;
 };
 
 #endif

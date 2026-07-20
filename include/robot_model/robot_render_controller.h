@@ -28,7 +28,8 @@ public:
   const Matrix4& World_From_Flange ( ) const;
   Robot_Position_IK_Result Move_Flange_To (const Point3& target_world);
   Robot_Pose_IK_Result Move_Flange_To_Pose (
-    const Matrix4& target_world_from_flange);
+    const Matrix4& target_world_from_flange,
+    const Robot_Pose_IK_Options& options = { });
 
 private:
   void Rebuild_Current_Model ( );

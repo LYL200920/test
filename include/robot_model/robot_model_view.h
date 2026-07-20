@@ -37,6 +37,9 @@ public:
   void Set_Flange_Frame_Visible (bool visible);
   bool Has_Flange_Pose ( ) const;
   bool Get_World_From_Flange (robot_model::Matrix4* pose) const;
+  robot_model::Robot_Pose_IK_Result Move_Flange_To_Pose (
+    const robot_model::Matrix4& target_world_from_flange,
+    const robot_model::Robot_Pose_IK_Options& options = { });
   void Set_World_Frame_Visible (bool visible);
   void Set_Flange_Interaction_Mode (Flange_Interaction_Mode mode);
   void Set_On_Flange_Dragged (

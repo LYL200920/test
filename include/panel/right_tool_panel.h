@@ -3,6 +3,8 @@
 
 #include <wx/panel.h>
 
+#include <functional>
+
 class wxButton;
 class wxSimplebook;
 
@@ -23,6 +25,8 @@ public:
   void Add_Page (Right_Tool_Page page, wxWindow* window);
   void Set_Camera_Tool_Enabled (bool enabled);
   void Set_Robot_Tool_Enabled (bool enabled);
+  void Set_On_Collapsed_Changed (
+    std::function<void (bool)> callback);
 
 private:
   void On_Tcp_Click (wxCommandEvent& event);
@@ -43,6 +47,7 @@ private:
   bool m_collapsed = true;
   bool m_camera_tool_enabled = false;
   bool m_robot_tool_enabled = false;
+  std::function<void (bool)> m_on_collapsed_changed;
 };
 
 #endif

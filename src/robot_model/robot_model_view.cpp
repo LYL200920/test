@@ -113,6 +113,19 @@ bool Robot_Model_View::Get_World_From_Flange (
   return true;
 }
 
+robot_model::Robot_Pose_IK_Result Robot_Model_View::Move_Flange_To_Pose (
+  const robot_model::Matrix4& target_world_from_flange,
+  const robot_model::Robot_Pose_IK_Options& options)
+{
+  const auto result = m_render_controller.Move_Flange_To_Pose (
+    target_world_from_flange,
+    options);
+  Update_Flange_Frame ( );
+  Render ( );
+  Refresh (false);
+  return result;
+}
+
 void Robot_Model_View::Set_World_Frame_Visible (bool visible)
 {
   Ensure_VTK ( );
