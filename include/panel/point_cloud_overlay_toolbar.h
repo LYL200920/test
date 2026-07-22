@@ -8,10 +8,13 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 class Camera_Service;
 class vtkRenderer;
 class wxButton;
+class wxCheckBox;
+class wxSpinCtrlDouble;
 
 class Point_Cloud_Overlay_Toolbar : public wxPanel
 {
@@ -24,6 +27,14 @@ public:
     std::function<void ( )> render_scene;
     std::function<void (const wxString&)> set_status;
     std::function<bool (bool)> set_camera_pose_visible;
+    std::function<bool (
+      std::shared_ptr<const std::vector<float>>, std::string*)>
+      set_collision_obstacle_points;
+    std::function<void ( )> clear_collision_obstacle_points;
+    std::function<bool ( )> collision_rebuild_in_progress;
+    std::function<bool (
+      double, double, double, bool,
+      std::size_t*, std::size_t*, std::string*)> apply_collision_settings;
   };
 
   Point_Cloud_Overlay_Toolbar (
@@ -34,6 +45,7 @@ public:
   void Attach_Renderer (vtkRenderer* renderer);
   bool Has_Point_Cloud ( ) const;
   void Set_Camera_Connected (bool connected);
+  void Set_Interactive_LOD (bool enabled);
 
 private:
   void On_Load_Latest (wxCommandEvent& event);
@@ -41,11 +53,13 @@ private:
   void On_Load_File (wxCommandEvent& event);
   void On_Clear (wxCommandEvent& event);
   void On_Toggle_Camera_Pose (wxCommandEvent& event);
+  void On_Apply_Collision_Settings (wxCommandEvent& event);
   void Report_Error (const wxString& title, const std::string& message);
   vtkRenderer* Renderer ( ) const;
   std::string Robot_Model_Id ( ) const;
   void Show_And_Render ( );
   void Set_Status (const wxString& status);
+  bool Sync_Collision_Obstacle_Points (std::string* error_message);
 
 private:
   Point_Cloud_Overlay_Controller m_controller;
@@ -53,6 +67,10 @@ private:
   wxButton* m_load_latest_button = nullptr;
   wxButton* m_save_latest_button = nullptr;
   wxButton* m_camera_pose_button = nullptr;
+  wxSpinCtrlDouble* m_clearance_ctrl = nullptr;
+  wxSpinCtrlDouble* m_voxel_size_ctrl = nullptr;
+  wxSpinCtrlDouble* m_robot_exclusion_ctrl = nullptr;
+  wxCheckBox* m_exclude_robot_points = nullptr;
   bool m_camera_pose_visible = false;
 };
 

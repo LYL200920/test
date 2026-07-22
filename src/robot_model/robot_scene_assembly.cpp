@@ -2,8 +2,10 @@
 
 #include "robot_mesh_loader.h"
 #include "robot_kinematic_params.h"
+#include "robot_collision_detector.h"
 
 #include <vtkCubeSource.h>
+#include <vtkLineSource.h>
 #include <vtkMatrix4x4.h>
 #include <vtkPolyData.h>
 #include <vtkPolyDataMapper.h>
@@ -19,6 +21,7 @@ void Robot_Scene_Assembly::Load_Mesh (const Robot_Model_Info& model,
                                       vtkRenderer* renderer)
 {
   Clear ( );
+  m_renderer = renderer;
 
   for( size_t i = 0; i < model.stl_files.size ( ); ++i )
   {
@@ -35,6 +38,8 @@ void Robot_Scene_Assembly::Build_Fallback_Demo (
   const Robot_Kinematic_Params& params,
   vtkRenderer* renderer)
 {
+  Clear ( );
+  m_renderer = renderer;
   auto effective_params = params;
   if( effective_params.link_lengths.empty ( ) )
   {
@@ -125,11 +130,154 @@ void Robot_Scene_Assembly::Apply_Forward_Kinematics (
   }
 }
 
+bool Robot_Scene_Assembly::Show_Collision (
+  const Robot_Collision_Result& collision)
+{
+  if( !collision.collided || collision.robot_part_index >= m_parts.size ( ) ||
+      !m_renderer )
+  {
+    return false;
+  }
+
+  const bool has_other_part =
+    collision.type == Robot_Collision_Type::Self_Collision &&
+    collision.other_robot_part_index < m_parts.size ( );
+  const int collision_type = static_cast<int> (collision.type);
+  if( m_collision_visible &&
+      m_collision_part_index == collision.robot_part_index &&
+      m_collision_type == collision_type &&
+      m_has_other_collision_part == has_other_part &&
+      ( !has_other_part || m_other_collision_part_index ==
+          collision.other_robot_part_index ) )
+  {
+    return false;
+  }
+
+  Clear_Collision ( );
+  m_collision_part_index = collision.robot_part_index;
+  m_collision_type = collision_type;
+  m_has_other_collision_part = has_other_part;
+  m_other_collision_part_index = collision.other_robot_part_index;
+  auto& collision_part = m_parts[m_collision_part_index];
+  if( collision_part.actor )
+  {
+    collision_part.actor->GetProperty ( )->SetColor (1.0, 0.08, 0.04);
+  }
+  if( m_has_other_collision_part )
+  {
+    auto& other_part = m_parts[m_other_collision_part_index];
+    if( other_part.actor )
+    {
+      other_part.actor->GetProperty ( )->SetColor (1.0, 0.08, 0.04);
+    }
+  }
+
+  if( !m_robot_contact_source )
+  {
+    m_robot_contact_source = vtkSmartPointer<vtkSphereSource>::New ( );
+    m_robot_contact_source->SetRadius (10.0);
+    m_robot_contact_source->SetThetaResolution (20);
+    m_robot_contact_source->SetPhiResolution (12);
+    auto robot_mapper = vtkSmartPointer<vtkPolyDataMapper>::New ( );
+    robot_mapper->SetInputConnection (m_robot_contact_source->GetOutputPort ( ));
+    m_robot_contact_actor = vtkSmartPointer<vtkActor>::New ( );
+    m_robot_contact_actor->SetMapper (robot_mapper);
+    m_robot_contact_actor->GetProperty ( )->SetColor (1.0, 0.1, 0.05);
+
+    m_obstacle_contact_source = vtkSmartPointer<vtkSphereSource>::New ( );
+    m_obstacle_contact_source->SetRadius (10.0);
+    m_obstacle_contact_source->SetThetaResolution (20);
+    m_obstacle_contact_source->SetPhiResolution (12);
+    auto obstacle_mapper = vtkSmartPointer<vtkPolyDataMapper>::New ( );
+    obstacle_mapper->SetInputConnection (
+      m_obstacle_contact_source->GetOutputPort ( ));
+    m_obstacle_contact_actor = vtkSmartPointer<vtkActor>::New ( );
+    m_obstacle_contact_actor->SetMapper (obstacle_mapper);
+    m_obstacle_contact_actor->GetProperty ( )->SetColor (1.0, 0.9, 0.05);
+
+    m_contact_line_source = vtkSmartPointer<vtkLineSource>::New ( );
+    auto line_mapper = vtkSmartPointer<vtkPolyDataMapper>::New ( );
+    line_mapper->SetInputConnection (m_contact_line_source->GetOutputPort ( ));
+    m_contact_line_actor = vtkSmartPointer<vtkActor>::New ( );
+    m_contact_line_actor->SetMapper (line_mapper);
+    m_contact_line_actor->GetProperty ( )->SetColor (1.0, 0.9, 0.05);
+    m_contact_line_actor->GetProperty ( )->SetLineWidth (3.0);
+
+    m_renderer->AddActor (m_robot_contact_actor);
+    m_renderer->AddActor (m_obstacle_contact_actor);
+    m_renderer->AddActor (m_contact_line_actor);
+  }
+
+  m_robot_contact_source->SetCenter (
+    collision.robot_closest_point_world.data ( ));
+  m_obstacle_contact_source->SetCenter (
+    collision.obstacle_point_world.data ( ));
+  m_contact_line_source->SetPoint1 (
+    collision.robot_closest_point_world.data ( ));
+  m_contact_line_source->SetPoint2 (
+    collision.obstacle_point_world.data ( ));
+  m_robot_contact_actor->SetVisibility (true);
+  m_obstacle_contact_actor->SetVisibility (true);
+  m_contact_line_actor->SetVisibility (true);
+  m_collision_visible = true;
+  return true;
+}
+
+bool Robot_Scene_Assembly::Clear_Collision ( )
+{
+  if( !m_collision_visible ) return false;
+
+  if( m_collision_part_index < m_parts.size ( ) )
+  {
+    auto& part = m_parts[m_collision_part_index];
+    if( part.actor )
+    {
+      part.actor->GetProperty ( )->SetColor (part.base_color.data ( ));
+    }
+  }
+  if( m_has_other_collision_part &&
+      m_other_collision_part_index < m_parts.size ( ) )
+  {
+    auto& part = m_parts[m_other_collision_part_index];
+    if( part.actor )
+    {
+      part.actor->GetProperty ( )->SetColor (part.base_color.data ( ));
+    }
+  }
+  if( m_robot_contact_actor ) m_robot_contact_actor->SetVisibility (false);
+  if( m_obstacle_contact_actor )
+  {
+    m_obstacle_contact_actor->SetVisibility (false);
+  }
+  if( m_contact_line_actor ) m_contact_line_actor->SetVisibility (false);
+  m_collision_visible = false;
+  m_has_other_collision_part = false;
+  m_collision_type = 0;
+  return true;
+}
+
 void Robot_Scene_Assembly::Clear ( )
 {
+  Clear_Collision ( );
+  if( m_renderer )
+  {
+    if( m_robot_contact_actor ) m_renderer->RemoveActor (m_robot_contact_actor);
+    if( m_obstacle_contact_actor )
+    {
+      m_renderer->RemoveActor (m_obstacle_contact_actor);
+    }
+    if( m_contact_line_actor ) m_renderer->RemoveActor (m_contact_line_actor);
+  }
   m_parts.clear ( );
   m_world_from_flange = { };
   m_has_flange_pose = false;
+  m_renderer = nullptr;
+  m_robot_contact_source = nullptr;
+  m_obstacle_contact_source = nullptr;
+  m_contact_line_source = nullptr;
+  m_robot_contact_actor = nullptr;
+  m_obstacle_contact_actor = nullptr;
+  m_contact_line_actor = nullptr;
 }
 
 void Robot_Scene_Assembly::Add_Link (double x_length, double y_length,

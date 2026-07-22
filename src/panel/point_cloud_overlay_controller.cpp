@@ -72,7 +72,7 @@ public:
   }
 
   Point_Cloud_Overlay_Result Render (
-    const point_cloud::Robot_Base_Point_Cloud& cloud,
+    point_cloud::Robot_Base_Point_Cloud cloud,
     vtkRenderer* vtk_renderer)
   {
     Point_Cloud_Overlay_Result result;
@@ -111,11 +111,15 @@ public:
     copy_statistics (cloud, &result);
     result.point_count = renderer.Point_Count ( );
     result.world_bounds_mm = rendered_bounds;
+    collision_obstacle_xyz =
+      std::make_shared<std::vector<float>> (std::move (cloud.data.xyz));
     return result;
   }
 
   Camera_Service& camera_service;
   point_cloud::Point_Cloud_Renderer renderer;
+  std::shared_ptr<const std::vector<float>> collision_obstacle_xyz =
+    std::make_shared<const std::vector<float>> ( );
 };
 
 Point_Cloud_Overlay_Controller::Point_Cloud_Overlay_Controller (
@@ -136,7 +140,7 @@ Point_Cloud_Overlay_Result Point_Cloud_Overlay_Controller::Load_Latest (
   {
     return result;
   }
-  return m_implementation->Render (cloud, renderer);
+  return m_implementation->Render (std::move (cloud), renderer);
 }
 
 Point_Cloud_Save_Result
@@ -193,7 +197,7 @@ Point_Cloud_Overlay_Result Point_Cloud_Overlay_Controller::Load_File (
       result.error_message = "文件点云的机器人基坐标范围无效或超过 50 米";
     return result;
   }
-  return m_implementation->Render (cloud, renderer);
+  return m_implementation->Render (std::move (cloud), renderer);
 }
 
 void Point_Cloud_Overlay_Controller::Attach_Renderer (vtkRenderer* renderer)
@@ -204,9 +208,32 @@ void Point_Cloud_Overlay_Controller::Attach_Renderer (vtkRenderer* renderer)
 void Point_Cloud_Overlay_Controller::Clear ( )
 {
   m_implementation->renderer.Clear ( );
+  m_implementation->collision_obstacle_xyz =
+    std::make_shared<const std::vector<float>> ( );
 }
 
 bool Point_Cloud_Overlay_Controller::Has_Point_Cloud ( ) const
 {
   return m_implementation->renderer.Has_Point_Cloud ( );
+}
+
+void Point_Cloud_Overlay_Controller::Set_Interactive_LOD (bool enabled)
+{
+  m_implementation->renderer.Set_Interactive_LOD (enabled);
+}
+
+std::size_t Point_Cloud_Overlay_Controller::Displayed_Point_Count ( ) const
+{
+  return m_implementation->renderer.Displayed_Point_Count ( );
+}
+
+std::size_t Point_Cloud_Overlay_Controller::Interaction_Point_Count ( ) const
+{
+  return m_implementation->renderer.Interaction_Point_Count ( );
+}
+
+std::shared_ptr<const std::vector<float>>
+Point_Cloud_Overlay_Controller::Collision_Obstacle_Xyz ( ) const
+{
+  return m_implementation->collision_obstacle_xyz;
 }

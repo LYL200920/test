@@ -126,6 +126,31 @@ int cartesian_position_limit_mm (
   return static_cast<int> (std::ceil (limit / 100.0) * 100.0);
 }
 
+wxString collision_summary (
+  const robot_model::Robot_Collision_Result& collision)
+{
+  switch( collision.type )
+  {
+    case robot_model::Robot_Collision_Type::Self_Collision:
+      return wxString::Format (
+        wxString::FromUTF8 (u8"部件 %zu 与部件 %zu 自碰撞"),
+        collision.robot_part_index,
+        collision.other_robot_part_index);
+    case robot_model::Robot_Collision_Type::Ground:
+      return wxString::Format (
+        wxString::FromUTF8 (u8"部件 %zu 接近地面，距离 %.2f mm"),
+        collision.robot_part_index,
+        collision.minimum_distance_mm);
+    case robot_model::Robot_Collision_Type::Obstacle_Point:
+      return wxString::Format (
+        wxString::FromUTF8 (u8"部件 %zu 与点云碰撞，距离 %.2f mm"),
+        collision.robot_part_index,
+        collision.minimum_distance_mm);
+    default:
+      return wxString::FromUTF8 (u8"检测到碰撞");
+  }
+}
+
 } // namespace
 
 Robot_Model_Panel::Robot_Model_Panel (
@@ -195,6 +220,27 @@ Robot_Model_Panel::Robot_Model_Panel (
   display_sizer->Add (status_panel, 0, wxEXPAND | wxTOP, 4);
   display_panel->SetSizer (display_sizer);
   m_view = new Robot_Model_View (m_display_book);
+  m_view->Set_On_Collision_Rebuild_Completed (
+    [this] (
+      bool success,
+      const robot_model::Robot_Collision_Point_Cloud_Stats& stats,
+      const std::string& error_message)
+    {
+      if( !m_status_text ) return;
+      if( !success )
+      {
+        m_status_text->SetLabel (
+          wxString::FromUTF8 (u8"碰撞索引后台构建失败：") +
+          wxString::FromUTF8 (error_message.c_str ( )));
+        return;
+      }
+      m_status_text->SetLabel (wxString::Format (
+        wxString::FromUTF8 (
+          u8"碰撞索引已更新：剔除本体点 %zu，碰撞点 %zu，耗时 %.0f ms"),
+        stats.excluded_robot_point_count,
+        stats.collision_point_count,
+        stats.build_time_ms));
+    });
   m_view->Set_On_Flange_Dragged (
     [this] (const robot_model::Robot_Position_IK_Result& result)
     {
@@ -234,6 +280,62 @@ Robot_Model_Panel::Robot_Model_Panel (
   {
     return Set_Camera_Pose_Visible (visible);
   };
+  overlay_callbacks.set_collision_obstacle_points =
+    [this] (std::shared_ptr<const std::vector<float>> xyz,
+            std::string* error_message)
+    {
+      if( !m_view )
+      {
+        if( error_message ) *error_message = "Robot model view is unavailable";
+        return false;
+      }
+      return m_view->Set_Collision_Obstacle_Points (xyz, error_message);
+    };
+  overlay_callbacks.clear_collision_obstacle_points = [this]
+  {
+    if( m_view ) m_view->Clear_Collision_Obstacle_Points ( );
+  };
+  overlay_callbacks.collision_rebuild_in_progress = [this]
+  {
+    return m_view && m_view->Collision_Rebuild_In_Progress ( );
+  };
+  overlay_callbacks.apply_collision_settings =
+    [this] (double clearance_mm,
+            double voxel_size_mm,
+            double robot_exclusion_distance_mm,
+            bool exclude_robot_points,
+            std::size_t* excluded_robot_point_count,
+            std::size_t* collision_point_count,
+            std::string* error_message)
+    {
+      if( !m_view )
+      {
+        if( error_message ) *error_message = "Robot model view is unavailable";
+        return false;
+      }
+
+      auto settings = m_view->Collision_Settings ( );
+      settings.clearance_mm = clearance_mm;
+      settings.point_cloud.voxel_size_mm = voxel_size_mm;
+      settings.point_cloud.robot_exclusion_distance_mm =
+        robot_exclusion_distance_mm;
+      settings.point_cloud.exclude_robot_points = exclude_robot_points;
+      if( !m_view->Set_Collision_Settings (settings, error_message) )
+      {
+        return false;
+      }
+
+      const auto& stats = m_view->Collision_Point_Cloud_Stats ( );
+      if( excluded_robot_point_count )
+      {
+        *excluded_robot_point_count = stats.excluded_robot_point_count;
+      }
+      if( collision_point_count )
+      {
+        *collision_point_count = stats.collision_point_count;
+      }
+      return true;
+    };
   m_display_book->AddPage (m_view, wxEmptyString, true);
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
@@ -249,6 +351,33 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_right_tool_panel->Page_Parent ( ),
     camera_service,
     std::move (overlay_callbacks));
+  m_view->Set_On_Flange_Drag_State_Changed ([this] (bool dragging)
+  {
+    if( m_point_cloud_overlay_toolbar )
+      m_point_cloud_overlay_toolbar->Set_Interactive_LOD (dragging);
+  });
+  m_view->Set_On_Flange_Drag_Performance (
+    [this] (const Robot_Drag_Performance_Stats& stats)
+    {
+      if( !m_status_text || stats.update_count == 0 ) return;
+      const double count = static_cast<double> (stats.update_count);
+      m_status_text->SetLabel (wxString::Format (
+        wxString::FromUTF8 (
+          u8"拖动性能：更新 %zu，平均 %.2f ms，最大 %.2f ms；IK %.2f，碰撞 %.2f，渲染 %.2f ms；姿态 %zu，候选/距离=%zu/%zu，精确网格 %zu；阻挡 点云/自碰/地面=%zu/%zu/%zu"),
+        stats.update_count,
+        stats.total_update_time_ms / count,
+        stats.maximum_update_time_ms,
+        stats.total_ik_time_ms / count,
+        stats.total_collision_time_ms / count,
+        stats.total_render_time_ms / count,
+        stats.checked_pose_count,
+        stats.obstacle_candidate_points,
+        stats.obstacle_distance_queries,
+        stats.self_exact_pair_queries,
+        stats.obstacle_blocked_update_count,
+        stats.self_blocked_update_count,
+        stats.ground_blocked_update_count));
+    });
   auto* robot_tool_page = Build_Robot_Tool_Page (
     m_right_tool_panel->Page_Parent ( ));
   m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, tcp_panel);
@@ -729,7 +858,18 @@ void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
     return;
   }
 
-  Apply_Joint_Input_Angles_To_Sliders (m_trajectory_session.Points ( ).front ( ));
+  const auto start_result = Apply_Joint_Input_Angles_To_Sliders (
+    m_trajectory_session.Points ( ).front ( ));
+  if( !start_result.accepted && start_result.collision.collided )
+  {
+    m_trajectory_session.Pause ( );
+    Set_Joint_Controls_Enabled (true);
+    Update_Trajectory_Status ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"轨迹已暂停：起始段，") +
+      collision_summary (start_result.collision));
+    return;
+  }
   Set_Joint_Controls_Enabled (false);
   m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   Update_Trajectory_Status ( );
@@ -750,6 +890,7 @@ void Robot_Model_Panel::On_Pause_Resume_Trajectory (wxCommandEvent&)
   else if( m_trajectory_session.Is_Paused ( ) )
   {
     m_trajectory_session.Resume ( );
+    Set_Joint_Controls_Enabled (false);
     m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   }
 
@@ -779,7 +920,19 @@ void Robot_Model_Panel::On_Trajectory_Timer (wxTimerEvent&)
     return;
   }
 
-  Apply_Joint_Input_Angles_To_Sliders (*frame);
+  const auto apply_result = Apply_Joint_Input_Angles_To_Sliders (*frame);
+  if( !apply_result.accepted && apply_result.collision.collided )
+  {
+    m_trajectory_timer.Stop ( );
+    m_trajectory_session.Pause ( );
+    Set_Joint_Controls_Enabled (true);
+    Update_Trajectory_Status ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"轨迹已暂停：") +
+      collision_summary (apply_result.collision) +
+      wxString::FromUTF8 (u8"，已停在最后安全姿态"));
+    return;
+  }
 
   if( m_trajectory_session.Is_Finished ( ) )
   {
@@ -917,8 +1070,35 @@ void Robot_Model_Panel::Update_Joint_State_From_Sliders ( )
   if( !m_view || !m_view->Has_Current_Model ( ) || !m_joint_panel ) return;
   const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
     m_view->Kinematic_Params ( ), m_joint_panel->Read_Input_Angles ( ));
-  m_view->Set_Joint_State (joint_state);
+  const auto apply_result = m_view->Try_Set_Joint_State (joint_state);
   Sync_Joint_Controls_From_State ( );
+  if( !apply_result.accepted && apply_result.collision.collided &&
+      m_status_text )
+  {
+    auto status =
+      wxString::FromUTF8 (u8"关节运动已阻止：") +
+      collision_summary (apply_result.collision);
+    if( apply_result.collision.type !=
+        robot_model::Robot_Collision_Type::Self_Collision )
+    {
+      status += wxString::Format (
+        wxString::FromUTF8 (u8"，安全距离 %.1f mm"),
+        apply_result.clearance_mm);
+    }
+    m_status_text->SetLabel (status);
+  }
+  else if( apply_result.accepted && apply_result.recovery_motion &&
+           m_status_text )
+  {
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"已允许脱离碰撞方向的恢复运动"));
+  }
+  else if( apply_result.accepted && apply_result.collision_checked &&
+           m_status_text )
+  {
+    m_status_text->SetLabel (wxString::FromUTF8 (
+      u8"关节运动已应用：碰撞安全检测通过"));
+  }
 }
 
 void Robot_Model_Panel::Sync_Joint_Controls_From_State ( )
@@ -977,6 +1157,15 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
   }
 
   Sync_Joint_Controls_From_State ( );
+  const auto& apply_result = m_view->Last_Joint_State_Apply_Result ( );
+  if( !apply_result.accepted && apply_result.collision.collided )
+  {
+    if( apply_result.state_changed ) Sync_Joint_Controls_From_State ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"世界坐标运动已阻止：") +
+      collision_summary (apply_result.collision));
+    return;
+  }
   m_status_text->SetLabel (wxString::Format (
     result.Converged ( )
       ? wxString::FromUTF8 (
@@ -996,6 +1185,16 @@ void Robot_Model_Panel::Apply_Flange_Drag_Result (
     return;
   }
 
+  const auto& apply_result = m_view->Last_Joint_State_Apply_Result ( );
+  if( !apply_result.accepted && apply_result.collision.collided )
+  {
+    if( apply_result.state_changed ) Sync_Joint_Controls_From_State ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"法兰拖拽已阻止：") +
+      collision_summary (apply_result.collision));
+    return;
+  }
+
   Sync_Joint_Controls_From_State ( );
 
   m_status_text->SetLabel (wxString::Format (
@@ -1012,6 +1211,15 @@ void Robot_Model_Panel::Apply_Flange_Pose_Drag_Result (
   {
     m_status_text->SetLabel (
       wxString::FromUTF8 (u8"法兰姿态拖拽失败：模型无效"));
+    return;
+  }
+  const auto& apply_result = m_view->Last_Joint_State_Apply_Result ( );
+  if( !apply_result.accepted && apply_result.collision.collided )
+  {
+    if( apply_result.state_changed ) Sync_Joint_Controls_From_State ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"姿态拖拽已阻止：") +
+      collision_summary (apply_result.collision));
     return;
   }
   Sync_Joint_Controls_From_State ( );
@@ -1043,7 +1251,8 @@ std::array<double, 6> Robot_Model_Panel::Read_Joint_Input_Angles ( ) const
                        : std::array<double, 6> {};
 }
 
-void Robot_Model_Panel::Apply_Joint_Input_Angles_To_Sliders (
+robot_model::Robot_Joint_State_Apply_Result
+Robot_Model_Panel::Apply_Joint_Input_Angles_To_Sliders (
   const std::array<double, 6>& input_angles_deg)
 {
   if( m_joint_panel )
@@ -1051,11 +1260,12 @@ void Robot_Model_Panel::Apply_Joint_Input_Angles_To_Sliders (
     m_joint_panel->Set_Input_Angles (input_angles_deg);
   }
 
-  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return { };
   const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
     m_view->Kinematic_Params ( ), input_angles_deg);
-  m_view->Set_Joint_State (joint_state);
+  const auto result = m_view->Try_Set_Joint_State (joint_state);
   Sync_Joint_Controls_From_State ( );
+  return result;
 }
 
 void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)

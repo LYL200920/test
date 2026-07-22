@@ -1,4 +1,5 @@
 #include "robot_joint_state_builder.h"
+#include "robot_joint_sweep.h"
 #include "robot_part_transform.h"
 #include "eye_to_hand_calibration.h"
 #include "pose_point_io.h"
@@ -165,6 +166,36 @@ void test_trajectory_csv_io ( )
   std::filesystem::remove (path);
 }
 
+void test_robot_joint_sweep ( )
+{
+  robot_model::Robot_Joint_State start;
+  robot_model::Robot_Joint_State target;
+  target.input_angles_deg[0] = 1.2;
+  target.effective_angles_deg[0] = 2.4;
+  target.delta_angles_deg[0] = -1.2;
+
+  require (
+    robot_model::Calculate_Robot_Joint_Sweep_Step_Count (
+      start, target, 0.5) == 3,
+    "Joint sweep did not split a large angle into safe samples");
+  const auto midpoint = robot_model::Interpolate_Robot_Joint_State (
+    start, target, 0.5);
+  require_near (midpoint.input_angles_deg[0], 0.6,
+                "Joint sweep input interpolation mismatch");
+  require_near (midpoint.effective_angles_deg[0], 1.2,
+                "Joint sweep effective interpolation mismatch");
+  require_near (midpoint.delta_angles_deg[0], -0.6,
+                "Joint sweep delta interpolation mismatch");
+
+  const std::array<double, 6> influence_radii = {
+    1000.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  };
+  require (
+    robot_model::Calculate_Robot_Joint_Sweep_Step_Count (
+      start, target, 2.0, influence_radii, 5.0) == 5,
+    "Spatial sweep did not refine a long-link joint motion");
+}
+
 void test_teach_point_store ( )
 {
   robot_model::Robot_Teach_Point_Store store;
@@ -280,6 +311,13 @@ void test_kr10_r1100_2_resource_config ( )
                 "KR10_R1100_2 flange Y mismatch");
   require_near (params.neutral_flange_pose[2], 985.0,
                 "KR10_R1100_2 flange Z mismatch");
+  require_near (params.self_collision_clearance_mm, 3.0,
+                "KR10_R1100_2 self-collision clearance mismatch");
+  require (params.self_collision_pairs.size ( ) == 15,
+           "KR10_R1100_2 self-collision pair list mismatch");
+  require (params.ground_collision_parts ==
+             std::vector<std::size_t> ({ 2, 3, 4, 5, 6 }),
+           "KR10_R1100_2 ground collision part list mismatch");
 
   const std::array<std::array<double, 3>, 7> expected_part_offsets = { {
     { -383.44, -109.50, -2.83 },
@@ -776,6 +814,7 @@ int main ( )
     test_robot_resources_use_source_directory ( );
     test_kr10_r1100_2_resource_config ( );
     test_joint_state_builder ( );
+    test_robot_joint_sweep ( );
     test_trajectory_planner ( );
     test_trajectory_session ( );
     test_teach_point_store ( );

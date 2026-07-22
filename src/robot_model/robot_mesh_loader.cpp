@@ -44,8 +44,10 @@ Robot_Visual_Part Create_STL_Part (const std::filesystem::path& stl_path,
 
   Robot_Visual_Part part;
   part.mesh_path = stl_path;
+  part.mesh_data = reader->GetOutput ( );
   part.actor = actor;
   part.local_transform = local_transform;
+  part.base_color = { color[0], color[1], color[2] };
   if( auto* output = reader->GetOutput ( ) )
   {
     output->GetBounds (part.raw_bounds.data ( ));

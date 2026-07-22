@@ -54,6 +54,52 @@ std::string item_value_as_string (pugi::xml_node root,
   return node.attribute ("value").as_string (fallback);
 }
 
+std::vector<std::size_t> parse_index_list (const std::string& text)
+{
+  std::vector<std::size_t> result;
+  std::istringstream stream (text);
+  std::string token;
+  while( std::getline (stream, token, ',') )
+  {
+    try
+    {
+      const auto value = std::stoul (token);
+      result.push_back (static_cast<std::size_t> (value));
+    }
+    catch( const std::exception& )
+    {
+    }
+  }
+  return result;
+}
+
+std::vector<std::array<std::size_t, 2>> parse_part_pairs (
+  const std::string& text)
+{
+  std::vector<std::array<std::size_t, 2>> result;
+  std::istringstream stream (text);
+  std::string token;
+  while( std::getline (stream, token, ',') )
+  {
+    const auto separator = token.find ('-');
+    if( separator == std::string::npos ) continue;
+    try
+    {
+      auto first = static_cast<std::size_t> (
+        std::stoul (token.substr (0, separator)));
+      auto second = static_cast<std::size_t> (
+        std::stoul (token.substr (separator + 1)));
+      if( first == second ) continue;
+      if( first > second ) std::swap (first, second);
+      result.push_back ({ first, second });
+    }
+    catch( const std::exception& )
+    {
+    }
+  }
+  return result;
+}
+
 } // namespace
 
 Robot_Kinematic_Params Load_Robot_Kinematic_Params (
@@ -83,6 +129,12 @@ Robot_Kinematic_Params Load_Robot_Kinematic_Params (
   params.base_cs_z = item_value_as_int (root, "BaseCsZ", 1);
   params.tool_cs_x = item_value_as_int (root, "ToolCsX", 2);
   params.tool_cs_z = item_value_as_int (root, "ToolCsZ", 4);
+  params.self_collision_clearance_mm = item_value_as_double (
+    root, "SelfCollisionClearance", 3.0);
+  params.self_collision_pairs = parse_part_pairs (item_value_as_string (
+    root, "SelfCollisionPairs", ""));
+  params.ground_collision_parts = parse_index_list (item_value_as_string (
+    root, "GroundCollisionParts", ""));
 
   params.link_lengths.clear ( );
   for( int i = 1; i <= 6; ++i )

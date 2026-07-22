@@ -2,6 +2,7 @@
 #define includeguard_robot_model_data_h_includeguard
 
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -60,6 +61,9 @@ struct Robot_Kinematic_Params
   };
   bool has_neutral_flange_pose = false;
   std::array<Robot_Part_Calibration, 7> manual_part_calibration;
+  double self_collision_clearance_mm = 3.0;
+  std::vector<std::array<std::size_t, 2>> self_collision_pairs;
+  std::vector<std::size_t> ground_collision_parts;
 
   bool Has_Link_Lengths ( ) const { return link_lengths.size ( ) >= 6; }
 };

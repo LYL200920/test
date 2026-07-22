@@ -87,7 +87,8 @@ private:
   void Update_Joint_Value_Label (size_t index, double input_angle,
                                  double effective_angle);
   std::array<double, 6> Read_Joint_Input_Angles ( ) const;
-  void Apply_Joint_Input_Angles_To_Sliders (
+  robot_model::Robot_Joint_State_Apply_Result
+  Apply_Joint_Input_Angles_To_Sliders (
     const std::array<double, 6>& input_angles_deg);
   void Set_Joint_Controls_Enabled (bool enabled);
   void Update_Trajectory_Status ( );

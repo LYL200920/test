@@ -1,4 +1,5 @@
 #include "point_cloud_file_repository.h"
+#include "point_cloud_renderer.h"
 
 #include <chrono>
 #include <cmath>
@@ -113,6 +114,35 @@ void test_repository_saves_to_user_selected_path ( )
   std::filesystem::remove (path);
 }
 
+void test_interactive_render_lod ( )
+{
+  constexpr std::size_t point_count = 200001;
+  std::vector<float> xyz;
+  xyz.reserve (point_count * 3);
+  for( std::size_t index = 0; index < point_count; ++index )
+  {
+    xyz.push_back (static_cast<float> (index + 1));
+    xyz.push_back (1.0f);
+    xyz.push_back (2.0f);
+  }
+
+  point_cloud::Point_Cloud_Renderer renderer;
+  std::string error;
+  require (renderer.Set_Point_Data (xyz, { }, &error),
+           "LOD point cloud was rejected: " + error);
+  require (renderer.Displayed_Point_Count ( ) == point_count,
+           "Full point count was not initially displayed");
+  renderer.Set_Interactive_LOD (true);
+  require (renderer.Interactive_LOD_Enabled ( ),
+           "Interactive point-cloud LOD was not enabled");
+  require (renderer.Displayed_Point_Count ( ) <= 100000 &&
+           renderer.Displayed_Point_Count ( ) < point_count,
+           "Interactive point-cloud LOD did not reduce display points");
+  renderer.Set_Interactive_LOD (false);
+  require (renderer.Displayed_Point_Count ( ) == point_count,
+           "Full point cloud was not restored after interaction");
+}
+
 } // namespace
 
 int main ( )
@@ -122,6 +152,7 @@ int main ( )
     test_binary_ply_round_trip ( );
     test_plain_ply_is_rejected_for_overlay ( );
     test_repository_saves_to_user_selected_path ( );
+    test_interactive_render_lod ( );
   }
   catch( const std::exception& error )
   {

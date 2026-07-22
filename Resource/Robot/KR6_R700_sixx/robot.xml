@@ -22,7 +22,10 @@
 	</VisualModels>
 	
 	<!--机械臂参数-->
-	<Manipulator>
+    <Manipulator>
+        <Item keyname="SelfCollisionClearance" valuetype="float" value="3" />
+        <Item keyname="SelfCollisionPairs" valuetype="string" value="0-2,0-3,0-4,0-5,0-6,1-3,1-4,1-5,1-6,2-4,2-5,2-6,3-5,3-6,4-6" />
+        <Item keyname="GroundCollisionParts" valuetype="string" value="2,3,4,5,6" />
 		<Item keyname="ManipulatorModel" name="机械臂型号" 		valuetype="string" 	value="KR6_R700_sixx"/>
 		<Item keyname="ManipulatorType"  name="机械臂类型" 		valuetype="int" 	value="2" help="1-六轴偏置腕机器人, 2-六轴球形腕机器人, 3-SCARA机器人, 4-4轴码垛机器人, "/>
 		<Item keyname="DefaultRotFormat" name="默认旋转格式"   valuetype="int" 	value="5" help="1-固定XYZ欧拉角, 2-四元数, 3-旋转向量, 4-随动XYZ欧拉角, 5-随动ZYX欧拉角, 6-随动ZYZ欧拉角, 7-随动ZXZ欧拉角, 8-固定ZYX欧拉角"/>
@@ -114,4 +117,3 @@
 	</Manipulator>
 	
 </RobotTemplate>
-

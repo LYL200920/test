@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 class Camera_Service;
 class vtkRenderer;
@@ -51,6 +52,10 @@ public:
   void Attach_Renderer (vtkRenderer* renderer);
   void Clear ( );
   bool Has_Point_Cloud ( ) const;
+  void Set_Interactive_LOD (bool enabled);
+  std::size_t Displayed_Point_Count ( ) const;
+  std::size_t Interaction_Point_Count ( ) const;
+  std::shared_ptr<const std::vector<float>> Collision_Obstacle_Xyz ( ) const;
 
 private:
   class Implementation;

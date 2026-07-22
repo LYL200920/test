@@ -7,6 +7,7 @@
 #include <vtkProperty.h>
 #include <vtkUnsignedCharArray.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace point_cloud
@@ -16,6 +17,7 @@ namespace point_cloud
 
     constexpr double kDefaultPointSize = 1.0;
     constexpr double kDefaultOpacity = 0.35;
+    constexpr vtkIdType kMaximumInteractivePointCount = 100000;
 
     bool point_is_valid(const double point[3])
     {
@@ -200,6 +202,27 @@ namespace point_cloud
     }
   }
 
+  void Point_Cloud_Renderer::Set_Interactive_LOD(bool enabled)
+  {
+    const bool use_interaction_data = enabled &&
+      m_interaction_glyph_filter &&
+      m_interaction_point_count < m_point_count;
+    if (m_interactive_lod == use_interaction_data)
+    {
+      return;
+    }
+    m_interactive_lod = use_interaction_data;
+    if (!m_mapper)
+    {
+      return;
+    }
+    m_mapper->SetInputConnection(
+      m_interactive_lod
+        ? m_interaction_glyph_filter->GetOutputPort()
+        : m_glyph_filter->GetOutputPort());
+    m_mapper->Modified();
+  }
+
   void Point_Cloud_Renderer::Clear()
   {
     if (m_renderer && m_actor)
@@ -210,9 +233,18 @@ namespace point_cloud
     m_actor = nullptr;
     m_mapper = nullptr;
     m_glyph_filter = nullptr;
+    m_interaction_glyph_filter = nullptr;
+    m_interaction_display_data = nullptr;
     m_display_data = nullptr;
     m_reader = nullptr;
     m_point_count = 0;
+    m_interaction_point_count = 0;
+    m_interactive_lod = false;
+  }
+
+  std::size_t Point_Cloud_Renderer::Displayed_Point_Count() const
+  {
+    return m_interactive_lod ? m_interaction_point_count : m_point_count;
   }
 
   bool Point_Cloud_Renderer::Get_World_Bounds(double bounds[6]) const
@@ -278,6 +310,50 @@ namespace point_cloud
     return output;
   }
 
+  vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Interaction_Data(
+      vtkPolyData *input) const
+  {
+    if (!input || input->GetNumberOfPoints() <= 0)
+    {
+      return nullptr;
+    }
+    const vtkIdType input_count = input->GetNumberOfPoints();
+    if (input_count <= kMaximumInteractivePointCount)
+    {
+      return input;
+    }
+
+    const vtkIdType stride = std::max<vtkIdType>(
+      1, (input_count + kMaximumInteractivePointCount - 1) /
+        kMaximumInteractivePointCount);
+    auto points = vtkSmartPointer<vtkPoints>::New();
+    points->SetDataType(input->GetPoints()->GetDataType());
+    points->Allocate((input_count + stride - 1) / stride);
+
+    auto *input_scalars = input->GetPointData()
+      ? input->GetPointData()->GetScalars() : nullptr;
+    vtkSmartPointer<vtkDataArray> colors;
+    if (input_scalars)
+    {
+      colors.TakeReference(input_scalars->NewInstance());
+      colors->SetName(input_scalars->GetName());
+      colors->SetNumberOfComponents(input_scalars->GetNumberOfComponents());
+      colors->Allocate((input_count + stride - 1) / stride);
+    }
+
+    double point[3] = {};
+    for (vtkIdType index = 0; index < input_count; index += stride)
+    {
+      input->GetPoint(index, point);
+      points->InsertNextPoint(point);
+      if (colors) colors->InsertNextTuple(index, input_scalars);
+    }
+    auto output = vtkSmartPointer<vtkPolyData>::New();
+    output->SetPoints(points);
+    if (colors) output->GetPointData()->SetScalars(colors);
+    return output;
+  }
+
   void Point_Cloud_Renderer::Add_Actor_To_Renderer()
   {
     if (m_renderer && m_actor)
@@ -296,6 +372,19 @@ namespace point_cloud
     m_glyph_filter = vtkSmartPointer<vtkVertexGlyphFilter>::New();
     m_glyph_filter->SetInputData(m_display_data);
     m_glyph_filter->Update();
+
+    m_interaction_display_data = Build_Interaction_Data(m_display_data);
+    m_interaction_point_count = m_interaction_display_data
+      ? static_cast<std::size_t>(
+          m_interaction_display_data->GetNumberOfPoints())
+      : m_point_count;
+    if (m_interaction_point_count < m_point_count)
+    {
+      m_interaction_glyph_filter =
+        vtkSmartPointer<vtkVertexGlyphFilter>::New();
+      m_interaction_glyph_filter->SetInputData(m_interaction_display_data);
+      m_interaction_glyph_filter->Update();
+    }
 
     m_mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
     m_mapper->SetInputConnection(m_glyph_filter->GetOutputPort());

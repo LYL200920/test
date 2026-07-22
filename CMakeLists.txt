@@ -96,6 +96,7 @@ find_package(VTK REQUIRED COMPONENTS
   CommonCore
   CommonDataModel
   FiltersCore
+  FiltersModeling
   FiltersSources
   IOGeometry
   IOPLY
@@ -228,6 +229,12 @@ if(BUILD_TESTING)
 
   add_project_test(robot_kinematics_core_tests robot_kinematics_core_tests.cpp)
   target_link_libraries(robot_kinematics_core_tests PRIVATE robot_kinematics_core)
+
+  add_project_test(robot_collision_detector_tests
+                   robot_collision_detector_tests.cpp)
+  target_link_libraries(robot_collision_detector_tests PRIVATE robot_model)
+  vtk_module_autoinit(TARGETS robot_collision_detector_tests
+                      MODULES ${VTK_LIBRARIES})
 
   add_project_test(camera_frame_buffer_tests camera_frame_buffer_tests.cpp)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)

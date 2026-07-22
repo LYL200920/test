@@ -69,6 +69,9 @@
     </ManualPartCalibration>
     <!--机械臂参数-->
     <Manipulator>
+        <Item keyname="SelfCollisionClearance" valuetype="float" value="3" />
+        <Item keyname="SelfCollisionPairs" valuetype="string" value="0-2,0-3,0-4,0-5,0-6,1-3,1-4,1-5,1-6,2-4,2-5,2-6,3-5,3-6,4-6" />
+        <Item keyname="GroundCollisionParts" valuetype="string" value="2,3,4,5,6" />
         <Item keyname="ManipulatorModel" name="机械臂型号" valuetype="string" value="KR210_R2700_2" />
         <Item keyname="ManipulatorType" name="机械臂类型" valuetype="int" value="2"
             help="1-六轴偏置腕机器人, 2-六轴球形腕机器人, 3-SCARA机器人, 4-4轴码垛机器人, " />

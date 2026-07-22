@@ -8,9 +8,13 @@
 #include "pose_transform.h"
 
 #include <vtkRenderer.h>
+#include <vtkLineSource.h>
+#include <vtkSphereSource.h>
 
 namespace robot_model
 {
+
+struct Robot_Collision_Result;
 
 class Robot_Scene_Assembly
 {
@@ -25,6 +29,9 @@ public:
                           const Robot_Joint_State& joint_state);
   void Apply_Forward_Kinematics (
     const Robot_Forward_Kinematics_Result& transforms);
+
+  bool Show_Collision (const Robot_Collision_Result& collision);
+  bool Clear_Collision ( );
 
   void Clear ( );
 
@@ -43,6 +50,18 @@ private:
   std::vector<Robot_Visual_Part> m_parts;
   Matrix4 m_world_from_flange = { };
   bool m_has_flange_pose = false;
+  vtkRenderer* m_renderer = nullptr;
+  vtkSmartPointer<vtkSphereSource> m_robot_contact_source;
+  vtkSmartPointer<vtkSphereSource> m_obstacle_contact_source;
+  vtkSmartPointer<vtkLineSource> m_contact_line_source;
+  vtkSmartPointer<vtkActor> m_robot_contact_actor;
+  vtkSmartPointer<vtkActor> m_obstacle_contact_actor;
+  vtkSmartPointer<vtkActor> m_contact_line_actor;
+  std::size_t m_collision_part_index = 0;
+  std::size_t m_other_collision_part_index = 0;
+  bool m_has_other_collision_part = false;
+  int m_collision_type = 0;
+  bool m_collision_visible = false;
 };
 
 } // namespace robot_model
