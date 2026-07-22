@@ -12,10 +12,14 @@
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
 #include "robot_teach_point_store.h"
+#include "flange_drag_update_coordinator.h"
+#include "flange_drag_motion_executor.h"
+#include "robot_drag_performance_collector.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -805,6 +809,180 @@ void test_ik_realtime_budget ( )
            "Budgeted pose IK did not preserve its best result");
 }
 
+void test_flange_drag_update_coordinator ( )
+{
+  using Coordinator = robot_model::Flange_Drag_Update_Coordinator;
+  const auto start = Coordinator::Clock::time_point (
+    std::chrono::milliseconds (100));
+
+  Coordinator coordinator (std::chrono::milliseconds (16));
+  coordinator.Begin ( );
+  auto schedule = coordinator.Queue_At (10, 20, start);
+  require (schedule.process_now,
+           "First drag update was not scheduled immediately");
+
+  robot_model::Flange_Drag_Pointer pointer;
+  require (coordinator.Take_Pending (&pointer),
+           "First drag update was not retained");
+  require (pointer.display_x == 10 && pointer.display_y == 20,
+           "First drag coordinates changed");
+  coordinator.Mark_Processed_At (start);
+
+  schedule = coordinator.Queue_At (
+    30, 40, start + std::chrono::milliseconds (5));
+  require (!schedule.process_now && schedule.timer_delay_ms == 11,
+           "Throttled drag update used the wrong delay");
+  schedule = coordinator.Queue_At (
+    50, 60, start + std::chrono::milliseconds (7));
+  require (!schedule.process_now && schedule.timer_delay_ms == 9,
+           "Replacement drag update used the wrong delay");
+  require (coordinator.Take_Pending (&pointer),
+           "Latest throttled drag update was not retained");
+  require (pointer.display_x == 50 && pointer.display_y == 60,
+           "Drag coalescing did not preserve the latest coordinates");
+
+  coordinator.Set_Final (70, 80);
+  require (coordinator.Take_Pending (&pointer),
+           "Final drag update was not retained");
+  require (pointer.display_x == 70 && pointer.display_y == 80,
+           "Final drag coordinates changed");
+  coordinator.Queue_At (90, 100, start + std::chrono::milliseconds (20));
+  coordinator.Cancel ( );
+  require (!coordinator.Take_Pending (&pointer),
+           "Cancelled drag retained a pending update");
+}
+
+void test_flange_drag_motion_executor ( )
+{
+  robot_model::Flange_Drag_Motion_Executor executor;
+  std::size_t position_calls = 0;
+  std::size_t pose_calls = 0;
+  auto move_position = [&] (const robot_model::Point3& target)
+  {
+    ++position_calls;
+    require_near (target[0], 10.0, "Position drag target X changed");
+    robot_model::Flange_Position_Motion_Outcome outcome;
+    outcome.ik_result.solve_time_ms = 2.5;
+    outcome.apply_result.collision.collided = true;
+    outcome.apply_result.collision.type =
+      robot_model::Robot_Collision_Type::Obstacle_Point;
+    return outcome;
+  };
+  auto move_pose = [&] (const robot_model::Matrix4& target)
+  {
+    ++pose_calls;
+    require_near (target[1][3], 25.0, "Pose drag target Y changed");
+    robot_model::Flange_Pose_Motion_Outcome outcome;
+    outcome.ik_result.solve_time_ms = 3.5;
+    outcome.apply_result.scene_changed = true;
+    outcome.apply_result.collision.collided = true;
+    outcome.apply_result.collision.type =
+      robot_model::Robot_Collision_Type::Self_Collision;
+    return outcome;
+  };
+
+  robot_model::Flange_Drag_Update position_update;
+  position_update.target_type =
+    robot_model::Flange_Drag_Update::Target_Type::Position;
+  position_update.target_position_world = { 10.0, 20.0, 30.0 };
+  const auto position_execution = executor.Execute (
+    position_update, move_position, move_pose);
+  require (position_execution.handled && position_calls == 1 &&
+           pose_calls == 0,
+           "Position drag was dispatched to the wrong mover");
+  require (!position_execution.pose_changed &&
+           !position_execution.notify_result,
+           "Fully blocked position drag incorrectly requested a callback");
+  require_near (position_execution.ik_time_ms, 2.5,
+                "Position drag IK time was not propagated");
+
+  robot_model::Flange_Drag_Update pose_update;
+  pose_update.target_type =
+    robot_model::Flange_Drag_Update::Target_Type::Pose;
+  pose_update.target_world_from_flange = identity_matrix ( );
+  pose_update.target_world_from_flange[1][3] = 25.0;
+  const auto pose_execution = executor.Execute (
+    pose_update, move_position, move_pose);
+  require (pose_execution.handled && position_calls == 1 &&
+           pose_calls == 1,
+           "Pose drag was dispatched to the wrong mover");
+  require (pose_execution.pose_changed && pose_execution.notify_result,
+           "Scene-changing pose drag did not request a callback");
+  require_near (pose_execution.ik_time_ms, 3.5,
+                "Pose drag IK time was not propagated");
+
+  const robot_model::Flange_Drag_Update empty_update;
+  const auto empty_execution = executor.Execute (
+    empty_update, move_position, move_pose);
+  require (!empty_execution.handled && position_calls == 1 &&
+           pose_calls == 1,
+           "Empty drag update invoked a motion handler");
+}
+
+void test_robot_drag_performance_collector ( )
+{
+  robot_model::Robot_Drag_Performance_Collector collector;
+  collector.Begin ( );
+
+  robot_model::Robot_Drag_Performance_Sample safe;
+  safe.accepted = true;
+  safe.checked_pose_count = 3;
+  safe.collision_query_stats.obstacle_candidate_points = 20;
+  safe.collision_query_stats.obstacle_distance_queries = 5;
+  safe.collision_query_stats.self_exact_pair_queries = 2;
+  safe.update_time_ms = 10.0;
+  safe.ik_time_ms = 1.0;
+  safe.collision_time_ms = 7.0;
+  safe.render_time_ms = 2.0;
+  safe.rendered = true;
+  collector.Record (safe);
+
+  for( const auto type : {
+         robot_model::Robot_Collision_Type::Obstacle_Point,
+         robot_model::Robot_Collision_Type::Self_Collision,
+         robot_model::Robot_Collision_Type::Ground } )
+  {
+    robot_model::Robot_Drag_Performance_Sample blocked;
+    blocked.collision.collided = true;
+    blocked.collision.type = type;
+    blocked.checked_pose_count = 1;
+    blocked.update_time_ms = 4.0;
+    blocked.ik_time_ms = 0.5;
+    blocked.collision_time_ms = 3.0;
+    blocked.render_time_ms = 100.0;
+    blocked.rendered = false;
+    collector.Record (blocked);
+  }
+
+  robot_model::Robot_Drag_Performance_Stats stats;
+  require (collector.Finish (&stats),
+           "Active performance collection did not finish");
+  require (stats.update_count == 4 && stats.blocked_update_count == 3,
+           "Drag update totals are incorrect");
+  require (stats.obstacle_blocked_update_count == 1 &&
+           stats.self_blocked_update_count == 1 &&
+           stats.ground_blocked_update_count == 1,
+           "Blocked drag updates were classified incorrectly");
+  require (stats.checked_pose_count == 6,
+           "Checked pose total is incorrect");
+  require (stats.obstacle_candidate_points == 20 &&
+           stats.obstacle_distance_queries == 5 &&
+           stats.self_exact_pair_queries == 2,
+           "Collision query totals are incorrect");
+  require_near (stats.total_update_time_ms, 22.0,
+                "Total drag update time is incorrect");
+  require_near (stats.maximum_update_time_ms, 10.0,
+                "Maximum drag update time is incorrect");
+  require_near (stats.total_ik_time_ms, 2.5,
+                "Total drag IK time is incorrect");
+  require_near (stats.total_collision_time_ms, 16.0,
+                "Total drag collision time is incorrect");
+  require_near (stats.total_render_time_ms, 2.0,
+                "Non-rendered samples affected render time");
+  require (!collector.Finish (&stats),
+           "Performance collection finished more than once");
+}
+
 } // namespace
 
 int main ( )
@@ -828,6 +1006,9 @@ int main ( )
     test_position_ik_respects_joint_limits ( );
     test_pose_ik_converges_orientation ( );
     test_ik_realtime_budget ( );
+    test_flange_drag_update_coordinator ( );
+    test_flange_drag_motion_executor ( );
+    test_robot_drag_performance_collector ( );
   }
   catch( const std::exception& e )
   {

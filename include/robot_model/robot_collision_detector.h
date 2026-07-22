@@ -13,6 +13,30 @@
 namespace robot_model
 {
 
+class Robot_Collision_Detector;
+
+// Immutable point-cloud data and spatial index. A completed snapshot can be
+// built off the UI thread and installed without rebuilding robot geometry.
+class Point_Cloud_Collision_Snapshot
+{
+public:
+  Point_Cloud_Collision_Snapshot ( );
+  ~Point_Cloud_Collision_Snapshot ( );
+
+  Point_Cloud_Collision_Snapshot (
+    const Point_Cloud_Collision_Snapshot&) = delete;
+  Point_Cloud_Collision_Snapshot& operator= (
+    const Point_Cloud_Collision_Snapshot&) = delete;
+
+  std::size_t Point_Count ( ) const;
+  bool Has_Points ( ) const { return Point_Count ( ) > 0; }
+
+private:
+  class Implementation;
+  std::unique_ptr<Implementation> m_implementation;
+  friend class Robot_Collision_Detector;
+};
+
 enum class Robot_Collision_Type
 {
   None,
@@ -97,6 +121,8 @@ public:
     Robot_Collision_Detector&&) noexcept;
 
   void Set_Robot_Parts (const std::vector<Robot_Visual_Part>& parts);
+  void Set_Robot_Parts_For_Obstacle_Filtering (
+    const std::vector<Robot_Visual_Part>& parts);
   void Set_Scene_Collision_Options (
     const Robot_Scene_Collision_Options& options);
   const Robot_Scene_Collision_Options& Scene_Collision_Options ( ) const;
@@ -111,6 +137,10 @@ public:
     std::string* error_message = nullptr,
     const std::atomic_bool* cancel_requested = nullptr);
   void Clear_Obstacle_Points ( );
+  void Set_Obstacle_Snapshot (
+    std::shared_ptr<const Point_Cloud_Collision_Snapshot> snapshot);
+  std::shared_ptr<const Point_Cloud_Collision_Snapshot>
+  Obstacle_Snapshot ( ) const;
   void Clear ( );
 
   bool Has_Robot_Geometry ( ) const;
@@ -123,6 +153,9 @@ public:
     double clearance_mm) const;
 
 private:
+  void Set_Robot_Parts_Internal (
+    const std::vector<Robot_Visual_Part>& parts,
+    bool build_pose_query_geometry);
   class Implementation;
   std::unique_ptr<Implementation> m_implementation;
 };

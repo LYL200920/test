@@ -1,13 +1,12 @@
 #include "robot_render_controller.h"
 
+#include "collision_index_build_service.h"
 #include "robot_calibration_builder.h"
 #include "robot_kinematic_params.h"
-#include "robot_joint_sweep.h"
 #include "robot_model_config_loader.h"
 #include "vtk_scene.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 
 namespace robot_model
@@ -44,32 +43,6 @@ bool valid_collision_settings (
   return true;
 }
 
-void accumulate_query_stats (
-  const Robot_Collision_Query_Stats& source,
-  Robot_Collision_Query_Stats* target)
-{
-  if( !target ) return;
-  target->ground_sample_queries += source.ground_sample_queries;
-  target->self_broad_phase_pairs += source.self_broad_phase_pairs;
-  target->self_obb_phase_pairs += source.self_obb_phase_pairs;
-  target->self_distance_sample_queries +=
-    source.self_distance_sample_queries;
-  target->self_exact_pair_queries += source.self_exact_pair_queries;
-  target->obstacle_candidate_points += source.obstacle_candidate_points;
-  target->obstacle_distance_queries += source.obstacle_distance_queries;
-  if( source.minimum_self_sample_distance_mm > 0.0 &&
-      std::isfinite (source.minimum_self_sample_distance_mm) )
-  {
-    if( target->minimum_self_sample_distance_mm <= 0.0 )
-      target->minimum_self_sample_distance_mm =
-        source.minimum_self_sample_distance_mm;
-    else
-      target->minimum_self_sample_distance_mm = std::min (
-        target->minimum_self_sample_distance_mm,
-        source.minimum_self_sample_distance_mm);
-  }
-}
-
 double position_distance (const Point3& lhs, const Point3& rhs)
 {
   const double dx = lhs[0] - rhs[0];
@@ -92,52 +65,6 @@ double orientation_distance_degrees (
   }
   const double cosine = std::clamp (( trace - 1.0 ) * 0.5, -1.0, 1.0);
   return std::acos (cosine) * 180.0 / 3.14159265358979323846;
-}
-
-std::array<double, 6> collision_influence_radii (
-  const std::vector<Robot_Visual_Part>& parts,
-  const Robot_Forward_Kinematics_Result& start,
-  const Robot_Forward_Kinematics_Result& target)
-{
-  std::array<double, 6> radii = { };
-  const auto accumulate_pose = [&] (
-    const Robot_Forward_Kinematics_Result& pose)
-  {
-    for( std::size_t joint = 0;
-         joint < pose.joint_positions_world.size ( ); ++joint )
-    {
-      const auto& pivot = pose.joint_positions_world[joint];
-      for( std::size_t part_index = joint + 1;
-           part_index < parts.size ( ) &&
-             part_index < pose.world_from_parts.size ( ); ++part_index )
-      {
-        const auto& part = parts[part_index];
-        if( !part.has_raw_bounds ) continue;
-        for( int x_side = 0; x_side < 2; ++x_side )
-        {
-          for( int y_side = 0; y_side < 2; ++y_side )
-          {
-            for( int z_side = 0; z_side < 2; ++z_side )
-            {
-              const auto corner = Transform_Position (
-                pose.world_from_parts[part_index],
-                { part.raw_bounds[x_side],
-                  part.raw_bounds[2 + y_side],
-                  part.raw_bounds[4 + z_side] });
-              const double dx = corner[0] - pivot[0];
-              const double dy = corner[1] - pivot[1];
-              const double dz = corner[2] - pivot[2];
-              radii[joint] = std::max (
-                radii[joint], std::sqrt (dx * dx + dy * dy + dz * dz));
-            }
-          }
-        }
-      }
-    }
-  };
-  accumulate_pose (start);
-  accumulate_pose (target);
-  return radii;
 }
 
 } // namespace
@@ -211,148 +138,40 @@ Robot_Render_Controller::Try_Set_Joint_State_With_Refinement (
     return result;
   }
 
+  Robot_Motion_Collision_Request request;
+  request.current_state = model_state.Joint_State ( );
+  request.requested_state = joint_state;
+  request.current_collision = m_current_pose_collision;
+  request.options.clearance_mm = m_collision_settings.clearance_mm;
+  request.options.maximum_joint_step_deg = kMaximumCollisionJointStepDeg;
+  request.options.maximum_spatial_step_mm = kMaximumCollisionSpatialStepMm;
+  request.options.boundary_refinement_iterations =
+    boundary_refinement_iterations;
+  request.options.maximum_sweep_pose_count = maximum_sweep_pose_count;
+  const auto guarded = m_motion_collision_guard.Evaluate (
+    m_forward_model, m_assembly.Parts ( ), m_collision_detector, request);
+
+  result.accepted = guarded.accepted;
+  result.state_changed = guarded.state_changed;
   result.collision_checked = true;
-  result.clearance_mm = m_collision_settings.clearance_mm;
-  const auto start_state = model_state.Joint_State ( );
-  const auto start_transforms = Compute_Forward_Kinematics (
-    m_forward_model, start_state);
-  auto target_state = joint_state;
-  auto target_transforms = Compute_Forward_Kinematics (
-    m_forward_model, target_state);
-  auto influence_radii = collision_influence_radii (
-    m_assembly.Parts ( ), start_transforms, target_transforms);
-  auto step_count = Calculate_Robot_Joint_Sweep_Step_Count (
-    start_state, target_state, kMaximumCollisionJointStepDeg,
-    influence_radii, kMaximumCollisionSpatialStepMm);
-  for( int limiting_pass = 0;
-       maximum_sweep_pose_count > 0 &&
-         step_count > maximum_sweep_pose_count && limiting_pass < 3;
-       ++limiting_pass )
+  result.recovery_motion = guarded.recovery_motion;
+  result.clearance_mm = request.options.clearance_mm;
+  result.checked_pose_count = guarded.checked_pose_count;
+  result.collision_query_time_ms = guarded.collision_query_time_ms;
+  result.collision_query_stats = guarded.collision_query_stats;
+  result.collision = guarded.blocking_collision;
+  if( guarded.state_changed )
   {
-    const double fraction = static_cast<double> (
-      maximum_sweep_pose_count) / static_cast<double> (step_count);
-    target_state = Interpolate_Robot_Joint_State (
-      start_state, target_state, fraction);
-    target_transforms = Compute_Forward_Kinematics (
-      m_forward_model, target_state);
-    influence_radii = collision_influence_radii (
-      m_assembly.Parts ( ), start_transforms, target_transforms);
-    step_count = Calculate_Robot_Joint_Sweep_Step_Count (
-      start_state, target_state, kMaximumCollisionJointStepDeg,
-      influence_radii, kMaximumCollisionSpatialStepMm);
+    model_state.Set_Joint_State (guarded.applied_state);
+    m_assembly.Apply_Forward_Kinematics (guarded.applied_transforms);
   }
-  Robot_Joint_State last_allowed_state = start_state;
-  Robot_Forward_Kinematics_Result last_allowed_transforms = start_transforms;
-  Robot_Collision_Result last_allowed_collision = m_current_pose_collision;
-  bool has_intermediate_allowed_state = false;
-  bool recovering = m_current_pose_collision.collided;
-  double recovery_margin = m_current_pose_collision.clearance_margin_mm;
-  const auto check_collision = [&] (
-    const std::vector<Matrix4>& world_from_parts)
-  {
-    const auto started_at = std::chrono::steady_clock::now ( );
-    auto collision = m_collision_detector.Check_Pose (
-      world_from_parts, result.clearance_mm);
-    result.collision_query_time_ms +=
-      std::chrono::duration<double, std::milli> (
-        std::chrono::steady_clock::now ( ) - started_at).count ( );
-    accumulate_query_stats (
-      m_collision_detector.Last_Query_Stats ( ),
-      &result.collision_query_stats);
-    ++result.checked_pose_count;
-    return collision;
-  };
-  for( std::size_t step = 1; step <= step_count; ++step )
-  {
-    const double t = static_cast<double> (step) /
-      static_cast<double> (step_count);
-    const auto sample_state = step == step_count
-      ? target_state
-      : Interpolate_Robot_Joint_State (start_state, target_state, t);
-    const auto sample_transforms = step == step_count
-      ? target_transforms
-      : Compute_Forward_Kinematics (m_forward_model, sample_state);
-    result.collision = check_collision (sample_transforms.world_from_parts);
-    if( result.collision.collided )
-    {
-      const bool improves_current_collision =
-        recovering &&
-        Is_Robot_Collision_Recovery_Improvement (
-          m_current_pose_collision, result.collision, recovery_margin);
-      if( improves_current_collision )
-      {
-        recovery_margin = result.collision.clearance_margin_mm;
-        last_allowed_state = sample_state;
-        last_allowed_transforms = sample_transforms;
-        last_allowed_collision = result.collision;
-        has_intermediate_allowed_state = true;
-        result.recovery_motion = true;
-        continue;
-      }
-
-      if( recovering )
-      {
-        if( has_intermediate_allowed_state )
-        {
-          model_state.Set_Joint_State (last_allowed_state);
-          m_assembly.Apply_Forward_Kinematics (last_allowed_transforms);
-          m_current_pose_collision = last_allowed_collision;
-          result.state_changed = true;
-          result.recovery_motion = true;
-        }
-        result.scene_changed = m_assembly.Show_Collision (result.collision);
-        return result;
-      }
-
-      if( has_intermediate_allowed_state )
-      {
-        auto refined_safe_state = last_allowed_state;
-        auto refined_safe_transforms = last_allowed_transforms;
-        auto refined_collision_state = sample_state;
-        for( std::size_t refinement = 0;
-             refinement < boundary_refinement_iterations;
-             ++refinement )
-        {
-          const auto midpoint_state = Interpolate_Robot_Joint_State (
-            refined_safe_state, refined_collision_state, 0.5);
-          const auto midpoint_transforms = Compute_Forward_Kinematics (
-            m_forward_model, midpoint_state);
-          const auto midpoint_collision = check_collision (
-            midpoint_transforms.world_from_parts);
-          if( midpoint_collision.collided )
-          {
-            refined_collision_state = midpoint_state;
-            result.collision = midpoint_collision;
-          }
-          else
-          {
-            refined_safe_state = midpoint_state;
-            refined_safe_transforms = midpoint_transforms;
-          }
-        }
-        model_state.Set_Joint_State (refined_safe_state);
-        m_assembly.Apply_Forward_Kinematics (refined_safe_transforms);
-        m_current_pose_collision = { };
-        result.state_changed = true;
-      }
-      result.scene_changed = m_assembly.Show_Collision (result.collision);
-      return result;
-    }
-    recovering = false;
-    last_allowed_state = sample_state;
-    last_allowed_transforms = sample_transforms;
-    last_allowed_collision = result.collision;
-    has_intermediate_allowed_state = true;
-  }
-
-  model_state.Set_Joint_State (last_allowed_state);
-  m_assembly.Apply_Forward_Kinematics (last_allowed_transforms);
-  m_current_pose_collision = last_allowed_collision;
-  result.accepted = true;
-  result.state_changed = true;
-  result.scene_changed = m_current_pose_collision.collided
-    ? m_assembly.Show_Collision (m_current_pose_collision)
-    : m_assembly.Clear_Collision ( );
+  m_current_pose_collision = guarded.resulting_collision;
+  result.scene_changed = !guarded.accepted &&
+      guarded.blocking_collision.collided
+    ? m_assembly.Show_Collision (guarded.blocking_collision)
+    : ( m_current_pose_collision.collided
+        ? m_assembly.Show_Collision (m_current_pose_collision)
+        : m_assembly.Clear_Collision ( ) );
   return result;
 }
 
@@ -459,7 +278,7 @@ bool Robot_Render_Controller::Set_Collision_Settings (
 
 bool Robot_Render_Controller::Create_Collision_Points_Rebuild_Request (
   std::shared_ptr<const std::vector<float>> xyz,
-  Robot_Collision_Rebuild_Request* request,
+  Collision_Index_Build_Request* request,
   std::string* error_message) const
 {
   if( error_message ) error_message->clear ( );
@@ -476,7 +295,6 @@ bool Robot_Render_Controller::Create_Collision_Points_Rebuild_Request (
   request->settings = m_collision_settings;
   request->reference_joint_state = m_state.Robot_Model ( ).Joint_State ( );
   request->robot_parts = m_assembly.Parts ( );
-  request->scene_options = m_collision_detector.Scene_Collision_Options ( );
   if( m_has_forward_model )
   {
     request->reference_world_from_parts = Compute_Forward_Kinematics (
@@ -487,7 +305,7 @@ bool Robot_Render_Controller::Create_Collision_Points_Rebuild_Request (
 
 bool Robot_Render_Controller::Create_Collision_Settings_Rebuild_Request (
   const Robot_Collision_Settings& settings,
-  Robot_Collision_Rebuild_Request* request,
+  Collision_Index_Build_Request* request,
   std::string* error_message) const
 {
   if( error_message ) error_message->clear ( );
@@ -498,7 +316,6 @@ bool Robot_Render_Controller::Create_Collision_Settings_Rebuild_Request (
   request->settings = settings;
   request->reference_joint_state = m_collision_reference_joint_state;
   request->robot_parts = m_assembly.Parts ( );
-  request->scene_options = m_collision_detector.Scene_Collision_Options ( );
   if( m_has_forward_model )
   {
     request->reference_world_from_parts = Compute_Forward_Kinematics (
@@ -507,56 +324,13 @@ bool Robot_Render_Controller::Create_Collision_Settings_Rebuild_Request (
   return true;
 }
 
-Robot_Collision_Rebuild_Result
-Robot_Render_Controller::Build_Collision_Obstacle (
-  Robot_Collision_Rebuild_Request request)
-{
-  const auto started_at = std::chrono::steady_clock::now ( );
-  Robot_Collision_Rebuild_Result result;
-  result.source_xyz = std::move (request.source_xyz);
-  result.settings = request.settings;
-  result.reference_joint_state = request.reference_joint_state;
-  result.detector = std::make_unique<Robot_Collision_Detector> ( );
-  result.detector->Set_Scene_Collision_Options (request.scene_options);
-  if( request.cancel_requested && request.cancel_requested->load ( ) )
-  {
-    result.cancelled = true;
-    result.stats.build_time_ms = std::chrono::duration<double, std::milli> (
-      std::chrono::steady_clock::now ( ) - started_at).count ( );
-    return result;
-  }
-  result.detector->Set_Robot_Parts (request.robot_parts);
-  if( request.cancel_requested && request.cancel_requested->load ( ) )
-  {
-    result.cancelled = true;
-    result.stats.build_time_ms = std::chrono::duration<double, std::milli> (
-      std::chrono::steady_clock::now ( ) - started_at).count ( );
-    return result;
-  }
-  if( !result.source_xyz || result.source_xyz->empty ( ) )
-  {
-    result.success = true;
-    result.stats.build_time_ms = std::chrono::duration<double, std::milli> (
-      std::chrono::steady_clock::now ( ) - started_at).count ( );
-    return result;
-  }
-  result.success = result.detector->Set_Obstacle_Points (
-    *result.source_xyz, result.settings.point_cloud,
-    request.reference_world_from_parts, &result.stats,
-    &result.error_message, request.cancel_requested.get ( ));
-  result.cancelled = request.cancel_requested &&
-    request.cancel_requested->load (std::memory_order_relaxed);
-  result.stats.build_time_ms = std::chrono::duration<double, std::milli> (
-    std::chrono::steady_clock::now ( ) - started_at).count ( );
-  return result;
-}
-
 void Robot_Render_Controller::Apply_Collision_Rebuild_Result (
-  Robot_Collision_Rebuild_Result result)
+  Collision_Index_Build_Result result)
 {
-  if( !result.success || !result.detector ) return;
+  if( !result.success ) return;
 
-  m_collision_detector = std::move ( *result.detector );
+  m_collision_detector.Set_Obstacle_Snapshot (
+    std::move (result.obstacle_snapshot));
   m_collision_source_xyz = std::move (result.source_xyz);
   m_collision_settings = result.settings;
   m_collision_reference_joint_state = result.reference_joint_state;

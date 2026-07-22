@@ -1,17 +1,23 @@
 #include "robot_collision_detector.h"
+#include "collision_index_build_service.h"
+#include "collision_index_rebuild_coordinator.h"
 #include "robot_calibration_builder.h"
 #include "robot_forward_kinematics.h"
 #include "robot_joint_state_builder.h"
 #include "robot_mesh_loader.h"
 #include "robot_model_config_loader.h"
 #include "robot_model_repository.h"
+#include "robot_motion_collision_guard.h"
 #include "robot_render_controller.h"
 
 #include <vtkCubeSource.h>
 
 #include <cmath>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -143,38 +149,179 @@ int main ( )
     require (!detector.Has_Obstacle_Points ( ),
              "Obstacle points were not cleared");
 
-    robot_model::Robot_Collision_Rebuild_Request rebuild_request;
+    robot_model::Collision_Index_Build_Request rebuild_request;
     rebuild_request.source_xyz =
       std::make_shared<const std::vector<float>> (
         std::vector<float> { 0.0f, 0.0f, 0.0f });
     rebuild_request.settings.point_cloud.exclude_robot_points = false;
     rebuild_request.robot_parts = { cube_part ( ) };
     rebuild_request.reference_world_from_parts = { identity_matrix ( ) };
-    rebuild_request.scene_options.check_self_collision = false;
-    rebuild_request.scene_options.check_ground_collision = false;
     auto rebuilt =
-      robot_model::Robot_Render_Controller::Build_Collision_Obstacle (
+      robot_model::Build_Collision_Index_Snapshot (
         std::move (rebuild_request));
-    require (rebuilt.success && rebuilt.detector &&
-             rebuilt.detector->Has_Obstacle_Points ( ),
+    require (rebuilt.success && rebuilt.obstacle_snapshot &&
+             rebuilt.obstacle_snapshot->Has_Points ( ),
              "Background collision obstacle build failed");
-    require (rebuilt.detector->Check_Pose (
+    robot_model::Robot_Collision_Detector snapshot_detector;
+    robot_model::Robot_Scene_Collision_Options snapshot_options;
+    snapshot_options.check_self_collision = false;
+    snapshot_options.check_ground_collision = false;
+    snapshot_detector.Set_Scene_Collision_Options (snapshot_options);
+    snapshot_detector.Set_Robot_Parts ({ cube_part ( ) });
+    snapshot_detector.Set_Obstacle_Snapshot (rebuilt.obstacle_snapshot);
+    require (snapshot_detector.Has_Robot_Geometry ( ) &&
+             snapshot_detector.Has_Obstacle_Points ( ),
+             "Installing a snapshot replaced robot collision geometry");
+    require (snapshot_detector.Check_Pose (
                { identity_matrix ( ) }, 0.0).collided,
              "Background-built obstacle index was not queryable");
+    snapshot_detector.Set_Obstacle_Snapshot (nullptr);
+    require (snapshot_detector.Has_Robot_Geometry ( ) &&
+             !snapshot_detector.Has_Obstacle_Points ( ),
+             "Clearing a snapshot also cleared robot collision geometry");
 
-    robot_model::Robot_Collision_Rebuild_Request cancelled_request;
+    robot_model::Collision_Index_Build_Request cancelled_request;
     cancelled_request.source_xyz =
       std::make_shared<const std::vector<float>> (
         std::vector<float> { 0.0f, 0.0f, 0.0f });
     cancelled_request.robot_parts = { cube_part ( ) };
     cancelled_request.reference_world_from_parts = { identity_matrix ( ) };
-    cancelled_request.cancel_requested =
-      std::make_shared<std::atomic_bool> (true);
+    const std::atomic_bool cancelled_flag { true };
     const auto cancelled =
-      robot_model::Robot_Render_Controller::Build_Collision_Obstacle (
-        std::move (cancelled_request));
+      robot_model::Build_Collision_Index_Snapshot (
+        std::move (cancelled_request), &cancelled_flag);
     require (cancelled.cancelled && !cancelled.success,
              "Cancelled collision obstacle build continued running");
+
+    robot_model::Collision_Index_Build_Request obsolete_request;
+    auto obsolete_xyz = std::make_shared<std::vector<float>> ( );
+    obsolete_xyz->reserve (200000 * 3);
+    for( std::size_t index = 0; index < 200000; ++index )
+    {
+      obsolete_xyz->push_back (static_cast<float> (index * 6));
+      obsolete_xyz->push_back (1.0f);
+      obsolete_xyz->push_back (2.0f);
+    }
+    obsolete_request.source_xyz = obsolete_xyz;
+    obsolete_request.settings.point_cloud.exclude_robot_points = false;
+    obsolete_request.robot_parts = { cube_part ( ) };
+    robot_model::Collision_Index_Build_Request latest_request;
+    latest_request.source_xyz =
+      std::make_shared<const std::vector<float>> (
+        std::vector<float> { 60.0f, 0.0f, 0.0f });
+    latest_request.settings.point_cloud.exclude_robot_points = false;
+    latest_request.robot_parts = { cube_part ( ) };
+
+    std::mutex completion_mutex;
+    std::condition_variable completion_condition;
+    std::size_t completion_count = 0;
+    std::uint64_t completed_generation = 0;
+    bool latest_succeeded = false;
+    robot_model::Collision_Index_Build_Service build_service;
+    build_service.Submit (
+      std::move (obsolete_request),
+      [&] (std::uint64_t generation,
+           robot_model::Collision_Index_Build_Result result)
+      {
+        std::lock_guard<std::mutex> lock (completion_mutex);
+        ++completion_count;
+        completed_generation = generation;
+        latest_succeeded = result.success;
+        completion_condition.notify_one ( );
+      });
+    const auto latest_generation = build_service.Submit (
+      std::move (latest_request),
+      [&] (std::uint64_t generation,
+           robot_model::Collision_Index_Build_Result result)
+      {
+        std::lock_guard<std::mutex> lock (completion_mutex);
+        ++completion_count;
+        completed_generation = generation;
+        latest_succeeded = result.success;
+        completion_condition.notify_one ( );
+      });
+    {
+      std::unique_lock<std::mutex> lock (completion_mutex);
+      require (completion_condition.wait_for (
+                 lock, std::chrono::seconds (5),
+                 [&] { return completion_count > 0; }),
+               "Collision index build service did not complete latest task");
+    }
+    build_service.Shutdown ( );
+    require (completion_count == 1 && latest_succeeded &&
+             completed_generation == latest_generation,
+             "Obsolete collision index task published a completion result");
+
+    robot_model::Collision_Index_Rebuild_Coordinator rebuild_coordinator;
+    std::mutex dispatch_mutex;
+    std::condition_variable dispatch_condition;
+    std::vector<std::function<void ( )>> dispatched_tasks;
+    auto queued_dispatch = [&] (std::function<void ( )> task)
+    {
+      std::lock_guard<std::mutex> lock (dispatch_mutex);
+      dispatched_tasks.push_back (std::move (task));
+      dispatch_condition.notify_one ( );
+    };
+    std::size_t published_rebuild_count = 0;
+    robot_model::Collision_Index_Build_Result published_rebuild;
+    auto publish_rebuild = [&] (
+      robot_model::Collision_Index_Build_Result result)
+    {
+      ++published_rebuild_count;
+      published_rebuild = std::move (result);
+    };
+    const auto make_rebuild_request = [] (float x)
+    {
+      robot_model::Collision_Index_Build_Request request;
+      request.source_xyz = std::make_shared<const std::vector<float>> (
+        std::vector<float> { x, 0.0f, 0.0f });
+      request.settings.point_cloud.exclude_robot_points = false;
+      request.robot_parts = { cube_part ( ) };
+      return request;
+    };
+    auto wait_for_dispatched_task = [&]
+    {
+      std::unique_lock<std::mutex> lock (dispatch_mutex);
+      require (dispatch_condition.wait_for (
+                 lock, std::chrono::seconds (5),
+                 [&] { return !dispatched_tasks.empty ( ); }),
+               "Collision rebuild coordinator did not dispatch completion");
+      auto task = std::move (dispatched_tasks.front ( ));
+      dispatched_tasks.erase (dispatched_tasks.begin ( ));
+      return task;
+    };
+
+    require (rebuild_coordinator.Submit_Source (
+               make_rebuild_request (70.0f), queued_dispatch,
+               publish_rebuild),
+             "Collision rebuild coordinator rejected a source request");
+    auto stale_task = wait_for_dispatched_task ( );
+    require (rebuild_coordinator.Submit_Source (
+               make_rebuild_request (80.0f), queued_dispatch,
+               publish_rebuild),
+             "Collision rebuild coordinator rejected the newest source");
+    stale_task ( );
+    require (published_rebuild_count == 0,
+             "Stale UI-dispatched collision result was published");
+    wait_for_dispatched_task ( ) ( );
+    require (published_rebuild_count == 1 && published_rebuild.success &&
+             published_rebuild.source_xyz &&
+             published_rebuild.source_xyz->at (0) == 80.0f,
+             "Newest collision rebuild result was not published");
+
+    auto settings_request = make_rebuild_request (999.0f);
+    settings_request.settings.clearance_mm = 27.0;
+    require (rebuild_coordinator.Submit_Settings (
+               std::move (settings_request), queued_dispatch,
+               publish_rebuild),
+             "Collision rebuild coordinator rejected settings");
+    wait_for_dispatched_task ( ) ( );
+    require (published_rebuild_count == 2 &&
+             published_rebuild.source_xyz &&
+             published_rebuild.source_xyz->at (0) == 80.0f &&
+             published_rebuild.settings.clearance_mm == 27.0,
+             "Settings rebuild did not preserve the newest point cloud");
+    rebuild_coordinator.Shutdown ( );
 
     robot_model::Robot_Collision_Detector performance_detector;
     robot_model::Robot_Scene_Collision_Options performance_options;
@@ -336,14 +483,39 @@ int main ( )
       const auto& query_stats = model_detector.Last_Query_Stats ( );
       if( query_stats.self_exact_pair_queries > 0 )
       {
+        model_detector.Set_Obstacle_Snapshot (rebuilt.obstacle_snapshot);
         model_detector.Check_Pose (transforms.world_from_parts, 10.0);
         require (
           model_detector.Last_Query_Stats ( ).self_exact_pair_queries == 0,
-          "Unchanged safe self-collision pair repeated exact mesh detection");
+          "Installing an obstacle snapshot invalidated the self-collision baseline");
+        model_detector.Clear_Obstacle_Points ( );
       }
       require (!home_collision.collided,
                "Robot home pose is initially colliding: " +
                  model.display_name);
+
+      auto query_only_options =
+        model_detector.Scene_Collision_Options ( );
+      query_only_options.check_self_collision = false;
+      query_only_options.check_ground_collision = false;
+      model_detector.Set_Scene_Collision_Options (query_only_options);
+      auto target_angles = home_angles;
+      target_angles[0] += 15.0;
+      robot_model::Robot_Motion_Collision_Request motion_request;
+      motion_request.current_state = state;
+      motion_request.requested_state =
+        robot_model::Build_Joint_State_From_Input_Angles (
+          params, target_angles);
+      motion_request.options.maximum_sweep_pose_count = 8;
+      motion_request.options.boundary_refinement_iterations = 0;
+      robot_model::Robot_Motion_Collision_Guard motion_guard;
+      const auto guarded_motion = motion_guard.Evaluate (
+        forward_model, parts, model_detector, motion_request);
+      require (guarded_motion.accepted && guarded_motion.state_changed,
+               "Independent motion collision guard rejected a safe move");
+      require (guarded_motion.checked_pose_count > 0 &&
+               guarded_motion.checked_pose_count <= 8,
+               "Interactive motion guard exceeded its sweep-pose budget");
     }
 
     std::cout << "Robot collision detector tests passed.\n";

@@ -357,7 +357,7 @@ Robot_Model_Panel::Robot_Model_Panel (
       m_point_cloud_overlay_toolbar->Set_Interactive_LOD (dragging);
   });
   m_view->Set_On_Flange_Drag_Performance (
-    [this] (const Robot_Drag_Performance_Stats& stats)
+    [this] (const robot_model::Robot_Drag_Performance_Stats& stats)
     {
       if( !m_status_text || stats.update_count == 0 ) return;
       const double count = static_cast<double> (stats.update_count);

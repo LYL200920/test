@@ -3,8 +3,11 @@
 
 #include "robot_model_data.h"
 #include "robot_collision_detector.h"
+#include "robot_collision_settings.h"
 #include "robot_forward_kinematics.h"
 #include "robot_inverse_kinematics.h"
+#include "robot_motion_collision_guard.h"
+#include "robot_joint_state_apply_result.h"
 #include "robot_scene_assembly.h"
 #include "robot_simulation_state.h"
 #include "pose_transform.h"
@@ -16,50 +19,10 @@
 namespace robot_model
 {
 
+struct Collision_Index_Build_Request;
+struct Collision_Index_Build_Result;
+
 class Vtk_Scene;
-
-struct Robot_Joint_State_Apply_Result
-{
-  bool accepted = false;
-  bool state_changed = false;
-  bool scene_changed = false;
-  bool collision_checked = false;
-  bool recovery_motion = false;
-  double clearance_mm = 0.0;
-  std::size_t checked_pose_count = 0;
-  double collision_query_time_ms = 0.0;
-  Robot_Collision_Query_Stats collision_query_stats;
-  Robot_Collision_Result collision;
-};
-
-struct Robot_Collision_Settings
-{
-  double clearance_mm = 10.0;
-  Robot_Collision_Point_Cloud_Options point_cloud;
-};
-
-struct Robot_Collision_Rebuild_Request
-{
-  std::shared_ptr<const std::vector<float>> source_xyz;
-  Robot_Collision_Settings settings;
-  Robot_Joint_State reference_joint_state;
-  std::vector<Robot_Visual_Part> robot_parts;
-  std::vector<Matrix4> reference_world_from_parts;
-  Robot_Scene_Collision_Options scene_options;
-  std::shared_ptr<std::atomic_bool> cancel_requested;
-};
-
-struct Robot_Collision_Rebuild_Result
-{
-  std::unique_ptr<Robot_Collision_Detector> detector;
-  std::shared_ptr<const std::vector<float>> source_xyz;
-  Robot_Collision_Settings settings;
-  Robot_Joint_State reference_joint_state;
-  Robot_Collision_Point_Cloud_Stats stats;
-  std::string error_message;
-  bool success = false;
-  bool cancelled = false;
-};
 
 class Robot_Render_Controller
 {
@@ -102,16 +65,14 @@ public:
   }
   bool Create_Collision_Points_Rebuild_Request (
     std::shared_ptr<const std::vector<float>> xyz,
-    Robot_Collision_Rebuild_Request* request,
+    Collision_Index_Build_Request* request,
     std::string* error_message = nullptr) const;
   bool Create_Collision_Settings_Rebuild_Request (
     const Robot_Collision_Settings& settings,
-    Robot_Collision_Rebuild_Request* request,
+    Collision_Index_Build_Request* request,
     std::string* error_message = nullptr) const;
-  static Robot_Collision_Rebuild_Result Build_Collision_Obstacle (
-    Robot_Collision_Rebuild_Request request);
   void Apply_Collision_Rebuild_Result (
-    Robot_Collision_Rebuild_Result result);
+    Collision_Index_Build_Result result);
   Robot_Position_IK_Result Move_Flange_To (const Point3& target_world);
   Robot_Pose_IK_Result Move_Flange_To_Pose (
     const Matrix4& target_world_from_flange,
@@ -133,6 +94,7 @@ private:
   Robot_Simulation_State m_state;
   Robot_Scene_Assembly m_assembly;
   Robot_Collision_Detector m_collision_detector;
+  Robot_Motion_Collision_Guard m_motion_collision_guard;
   Robot_Collision_Settings m_collision_settings;
   Robot_Collision_Point_Cloud_Stats m_collision_point_cloud_stats;
   std::shared_ptr<const std::vector<float>> m_collision_source_xyz;

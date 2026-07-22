@@ -266,6 +266,28 @@ void set_vtk_matrix (vtkMatrix4x4* target, const Matrix4& source)
 
 } // namespace
 
+class Point_Cloud_Collision_Snapshot::Implementation
+{
+public:
+  vtkSmartPointer<vtkPolyData> data;
+  vtkSmartPointer<vtkOctreePointLocator> locator;
+};
+
+Point_Cloud_Collision_Snapshot::Point_Cloud_Collision_Snapshot ( )
+  : m_implementation (std::make_unique<Implementation> ( ))
+{
+}
+
+Point_Cloud_Collision_Snapshot::~Point_Cloud_Collision_Snapshot ( ) = default;
+
+std::size_t Point_Cloud_Collision_Snapshot::Point_Count ( ) const
+{
+  return m_implementation->data
+    ? static_cast<std::size_t> (
+        m_implementation->data->GetNumberOfPoints ( ))
+    : 0;
+}
+
 class Robot_Collision_Detector::Implementation
 {
 public:
@@ -293,8 +315,7 @@ public:
   std::vector<Part> parts;
   std::vector<Self_Collision_Pair> self_collision_pairs;
   Robot_Scene_Collision_Options scene_options;
-  vtkSmartPointer<vtkPolyData> obstacle_data;
-  vtkSmartPointer<vtkOctreePointLocator> obstacle_locator;
+  std::shared_ptr<const Point_Cloud_Collision_Snapshot> obstacle_snapshot;
   vtkSmartPointer<vtkIdTypeArray> candidate_ids =
     vtkSmartPointer<vtkIdTypeArray>::New ( );
   Robot_Collision_Query_Stats last_query_stats;
@@ -377,6 +398,19 @@ bool Is_Robot_Collision_Recovery_Improvement (
 void Robot_Collision_Detector::Set_Robot_Parts (
   const std::vector<Robot_Visual_Part>& parts)
 {
+  Set_Robot_Parts_Internal (parts, true);
+}
+
+void Robot_Collision_Detector::Set_Robot_Parts_For_Obstacle_Filtering (
+  const std::vector<Robot_Visual_Part>& parts)
+{
+  Set_Robot_Parts_Internal (parts, false);
+}
+
+void Robot_Collision_Detector::Set_Robot_Parts_Internal (
+  const std::vector<Robot_Visual_Part>& parts,
+  bool build_pose_query_geometry)
+{
   m_implementation->parts.clear ( );
   m_implementation->self_collision_pairs.clear ( );
   m_implementation->parts.reserve (parts.size ( ));
@@ -396,29 +430,33 @@ void Robot_Collision_Detector::Set_Robot_Parts (
     part.signed_distance =
       vtkSmartPointer<vtkImplicitPolyDataDistance>::New ( );
     part.signed_distance->SetInput (part.mesh);
-    part.surface_locator = vtkSmartPointer<vtkStaticCellLocator>::New ( );
-    part.surface_locator->SetDataSet (part.mesh);
-    part.surface_locator->BuildLocator ( );
-    std::unordered_set<Voxel_Key, Voxel_Key_Hash> sample_voxels;
-    if( auto* mesh_points = part.mesh->GetPoints ( ) )
+    if( build_pose_query_geometry )
     {
-      sample_voxels.reserve (static_cast<std::size_t> (
-        mesh_points->GetNumberOfPoints ( )));
-      for( vtkIdType point_id = 0;
-           point_id < mesh_points->GetNumberOfPoints ( ); ++point_id )
+      part.surface_locator = vtkSmartPointer<vtkStaticCellLocator>::New ( );
+      part.surface_locator->SetDataSet (part.mesh);
+      part.surface_locator->BuildLocator ( );
+      std::unordered_set<Voxel_Key, Voxel_Key_Hash> sample_voxels;
+      if( auto* mesh_points = part.mesh->GetPoints ( ) )
       {
-        double point[3] = { };
-        mesh_points->GetPoint (point_id, point);
-        const Point3 sample = { point[0], point[1], point[2] };
-        if( sample_voxels.insert (voxel_key (sample, 2.0)).second )
+        sample_voxels.reserve (static_cast<std::size_t> (
+          mesh_points->GetNumberOfPoints ( )));
+        for( vtkIdType point_id = 0;
+             point_id < mesh_points->GetNumberOfPoints ( ); ++point_id )
         {
-          part.surface_samples.push_back (sample);
+          double point[3] = { };
+          mesh_points->GetPoint (point_id, point);
+          const Point3 sample = { point[0], point[1], point[2] };
+          if( sample_voxels.insert (voxel_key (sample, 2.0)).second )
+          {
+            part.surface_samples.push_back (sample);
+          }
         }
       }
     }
     m_implementation->parts.push_back (std::move (part));
   }
-  m_implementation->Build_Self_Collision_Pairs ( );
+  if( build_pose_query_geometry )
+    m_implementation->Build_Self_Collision_Pairs ( );
 }
 
 void Robot_Collision_Detector::Set_Scene_Collision_Options (
@@ -572,8 +610,10 @@ bool Robot_Collision_Detector::Set_Obstacle_Points (
   auto locator = vtkSmartPointer<vtkOctreePointLocator>::New ( );
   locator->SetDataSet (data);
   locator->BuildLocator ( );
-  m_implementation->obstacle_data = data;
-  m_implementation->obstacle_locator = locator;
+  auto snapshot = std::make_shared<Point_Cloud_Collision_Snapshot> ( );
+  snapshot->m_implementation->data = data;
+  snapshot->m_implementation->locator = locator;
+  m_implementation->obstacle_snapshot = std::move (snapshot);
   local_stats.collision_point_count = static_cast<std::size_t> (
     points->GetNumberOfPoints ( ));
   if( stats ) *stats = local_stats;
@@ -582,8 +622,19 @@ bool Robot_Collision_Detector::Set_Obstacle_Points (
 
 void Robot_Collision_Detector::Clear_Obstacle_Points ( )
 {
-  m_implementation->obstacle_locator = nullptr;
-  m_implementation->obstacle_data = nullptr;
+  m_implementation->obstacle_snapshot.reset ( );
+}
+
+void Robot_Collision_Detector::Set_Obstacle_Snapshot (
+  std::shared_ptr<const Point_Cloud_Collision_Snapshot> snapshot)
+{
+  m_implementation->obstacle_snapshot = std::move (snapshot);
+}
+
+std::shared_ptr<const Point_Cloud_Collision_Snapshot>
+Robot_Collision_Detector::Obstacle_Snapshot ( ) const
+{
+  return m_implementation->obstacle_snapshot;
 }
 
 void Robot_Collision_Detector::Clear ( )
@@ -600,15 +651,14 @@ bool Robot_Collision_Detector::Has_Robot_Geometry ( ) const
 
 bool Robot_Collision_Detector::Has_Obstacle_Points ( ) const
 {
-  return m_implementation->obstacle_locator != nullptr;
+  return m_implementation->obstacle_snapshot &&
+    m_implementation->obstacle_snapshot->Has_Points ( );
 }
 
 std::size_t Robot_Collision_Detector::Obstacle_Point_Count ( ) const
 {
-  return m_implementation->obstacle_data
-    ? static_cast<std::size_t> (
-        m_implementation->obstacle_data->GetNumberOfPoints ( ))
-    : 0;
+  return m_implementation->obstacle_snapshot
+    ? m_implementation->obstacle_snapshot->Point_Count ( ) : 0;
 }
 
 const Robot_Collision_Query_Stats&
@@ -871,6 +921,8 @@ Robot_Collision_Result Robot_Collision_Detector::Check_Pose (
 
   if( !Has_Obstacle_Points ( ) ) return result;
 
+  const auto obstacle_snapshot = m_implementation->obstacle_snapshot;
+  const auto& obstacle = *obstacle_snapshot->m_implementation;
   auto* candidate_ids = m_implementation->candidate_ids.GetPointer ( );
   for( std::size_t part_index = 0;
        part_index < m_implementation->parts.size ( ); ++part_index )
@@ -888,7 +940,7 @@ Robot_Collision_Result Robot_Collision_Detector::Check_Pose (
       cache.world_bounds[5] + clearance_mm
     };
     candidate_ids->Reset ( );
-    m_implementation->obstacle_locator->FindPointsInArea (
+    obstacle.locator->FindPointsInArea (
       query_bounds, candidate_ids, true);
     m_implementation->last_query_stats.obstacle_candidate_points +=
       static_cast<std::size_t> (candidate_ids->GetNumberOfValues ( ));
@@ -898,7 +950,7 @@ Robot_Collision_Result Robot_Collision_Detector::Check_Pose (
     {
       const vtkIdType point_id = candidate_ids->GetValue (candidate);
       double raw_world_point[3] = { };
-      m_implementation->obstacle_data->GetPoint (point_id, raw_world_point);
+      obstacle.data->GetPoint (point_id, raw_world_point);
       const Point3 world_point = {
         raw_world_point[0], raw_world_point[1], raw_world_point[2]
       };

@@ -3,21 +3,19 @@
 
 #include "robot_model_data.h"
 #include "robot_render_controller.h"
+#include "collision_index_rebuild_coordinator.h"
 #include "coordinate_frame_renderer.h"
 #include "flange_interaction_controller.h"
+#include "flange_drag_update_coordinator.h"
+#include "flange_drag_motion_executor.h"
+#include "robot_drag_performance_collector.h"
 
 #include <wx/glcanvas.h>
 #include <wx/timer.h>
 
-#include <chrono>
-#include <atomic>
-#include <condition_variable>
 #include <memory>
 #include <functional>
-#include <mutex>
-#include <optional>
 #include <string>
-#include <thread>
 #include <vector>
 
 class vtkGenericRenderWindowInteractor;
@@ -27,24 +25,6 @@ namespace robot_model
 {
 class Vtk_Scene;
 } // namespace robot_model
-
-struct Robot_Drag_Performance_Stats
-{
-  std::size_t update_count = 0;
-  std::size_t blocked_update_count = 0;
-  std::size_t checked_pose_count = 0;
-  std::size_t obstacle_candidate_points = 0;
-  std::size_t obstacle_distance_queries = 0;
-  std::size_t self_exact_pair_queries = 0;
-  std::size_t obstacle_blocked_update_count = 0;
-  std::size_t self_blocked_update_count = 0;
-  std::size_t ground_blocked_update_count = 0;
-  double total_update_time_ms = 0.0;
-  double maximum_update_time_ms = 0.0;
-  double total_ik_time_ms = 0.0;
-  double total_collision_time_ms = 0.0;
-  double total_render_time_ms = 0.0;
-};
 
 class Robot_Model_View : public wxGLCanvas
 {
@@ -101,7 +81,8 @@ public:
   void Set_On_Flange_Drag_State_Changed (
     std::function<void (bool)> callback);
   void Set_On_Flange_Drag_Performance (
-    std::function<void (const Robot_Drag_Performance_Stats&)> callback);
+    std::function<void (
+      const robot_model::Robot_Drag_Performance_Stats&)> callback);
 
 private:
   void Ensure_VTK ( );
@@ -128,8 +109,8 @@ private:
   void Apply_Pending_Flange_Drag_Update ( );
   void Finish_Flange_Drag_Performance ( );
   bool Queue_Collision_Rebuild (
-    robot_model::Robot_Collision_Rebuild_Request request);
-  void Collision_Rebuild_Worker_Loop ( );
+    robot_model::Collision_Index_Build_Request request,
+    bool settings_change);
 
 private:
   wxGLContext* m_gl_context = nullptr;
@@ -143,35 +124,19 @@ private:
   std::function<void (const robot_model::Robot_Pose_IK_Result&)>
     m_on_flange_pose_dragged;
   wxTimer m_drag_update_timer;
-  std::chrono::steady_clock::time_point m_last_drag_update_time;
-  int m_pending_drag_x = 0;
-  int m_pending_drag_y = 0;
-  bool m_has_pending_drag_update = false;
-  struct Pending_Collision_Rebuild
-  {
-    std::uint64_t generation = 0;
-    robot_model::Robot_Collision_Rebuild_Request request;
-  };
-  std::thread m_collision_rebuild_worker;
-  mutable std::mutex m_collision_rebuild_mutex;
-  std::condition_variable m_collision_rebuild_condition;
-  std::optional<Pending_Collision_Rebuild> m_pending_collision_rebuild;
-  std::optional<robot_model::Robot_Collision_Rebuild_Request>
-    m_latest_collision_rebuild_request;
-  std::shared_ptr<std::atomic_bool> m_active_collision_rebuild_cancel;
-  std::atomic<std::uint64_t> m_collision_rebuild_generation { 0 };
-  std::atomic<bool> m_collision_rebuild_busy { false };
-  bool m_stop_collision_rebuild_worker = false;
+  robot_model::Flange_Drag_Update_Coordinator m_drag_update_coordinator;
+  robot_model::Flange_Drag_Motion_Executor m_drag_motion_executor;
+  robot_model::Collision_Index_Rebuild_Coordinator
+    m_collision_index_rebuild_coordinator;
   std::function<void (
     bool,
     const robot_model::Robot_Collision_Point_Cloud_Stats&,
       const std::string&)> m_on_collision_rebuild_completed;
   std::function<void (bool)> m_on_flange_drag_state_changed;
-  std::function<void (const Robot_Drag_Performance_Stats&)>
+  std::function<void (const robot_model::Robot_Drag_Performance_Stats&)>
     m_on_flange_drag_performance;
-  Robot_Drag_Performance_Stats m_drag_performance;
+  robot_model::Robot_Drag_Performance_Collector m_drag_performance_collector;
   double m_last_render_time_ms = 0.0;
-  bool m_collect_drag_performance = false;
 };
 
 #endif
