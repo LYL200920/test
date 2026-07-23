@@ -148,6 +148,11 @@ bool Robot_Model_View::Set_Collision_Obstacle_Points (
   std::shared_ptr<const std::vector<float>> xyz,
   std::string* error_message)
 {
+  if( !m_render_controller.Collision_Enabled ( ) )
+  {
+    return m_render_controller.Set_Collision_Obstacle_Points (
+      std::move (xyz), error_message);
+  }
   robot_model::Collision_Index_Build_Request request;
   if( !m_render_controller.Create_Collision_Points_Rebuild_Request (
         std::move (xyz), &request, error_message) )
@@ -177,6 +182,11 @@ bool Robot_Model_View::Set_Collision_Settings (
   const robot_model::Robot_Collision_Settings& settings,
   std::string* error_message)
 {
+  if( !m_render_controller.Collision_Enabled ( ) )
+  {
+    return m_render_controller.Set_Collision_Settings (
+      settings, error_message);
+  }
   robot_model::Collision_Index_Build_Request request;
   if( !m_render_controller.Create_Collision_Settings_Rebuild_Request (
         settings, &request, error_message) )
@@ -184,6 +194,28 @@ bool Robot_Model_View::Set_Collision_Settings (
     return false;
   }
   return Queue_Collision_Rebuild (std::move (request), true);
+}
+
+void Robot_Model_View::Set_Collision_Enabled (bool enabled)
+{
+  if( m_render_controller.Collision_Enabled ( ) == enabled ) return;
+  if( !enabled ) m_collision_index_rebuild_coordinator.Reset ( );
+  m_render_controller.Set_Collision_Enabled (enabled);
+  if( enabled && m_render_controller.Has_Collision_Obstacle_Source ( ) )
+  {
+    robot_model::Collision_Index_Build_Request request;
+    if( m_render_controller.Create_Collision_Settings_Rebuild_Request (
+          m_render_controller.Collision_Settings ( ), &request, nullptr) )
+    {
+      Queue_Collision_Rebuild (std::move (request), true);
+    }
+  }
+  Render ( );
+}
+
+bool Robot_Model_View::Collision_Enabled ( ) const
+{
+  return m_render_controller.Collision_Enabled ( );
 }
 
 const robot_model::Robot_Collision_Settings&

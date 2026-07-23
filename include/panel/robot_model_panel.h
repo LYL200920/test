@@ -65,6 +65,7 @@ private:
   void On_Camera_Image_Display (wxCommandEvent& event);
   void On_Point_Cloud_Display (wxCommandEvent& event);
   void On_Reset_Robot (wxCommandEvent& event);
+  bool Reset_Robot_To_Home ( );
   bool Set_Camera_Pose_Visible (bool visible);
   void On_Toggle_Flange_Frame (wxCommandEvent& event);
   void On_Toggle_Flange_Free_Drag (wxCommandEvent& event);

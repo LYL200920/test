@@ -38,6 +38,9 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
 
   auto* collision_title = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"碰撞参数"));
+  m_collision_enabled_checkbox = new wxCheckBox (
+    this, wxID_ANY, wxString::FromUTF8 (u8"启用体积碰撞"));
+  m_collision_enabled_checkbox->SetValue (true);
   m_clearance_ctrl = new wxSpinCtrlDouble (
     this, wxID_ANY, "10", wxDefaultPosition, wxDefaultSize,
     wxSP_ARROW_KEYS, 0.0, 100.0, 10.0, 1.0);
@@ -63,6 +66,10 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Clear, this);
   m_camera_pose_button->Bind (
     wxEVT_BUTTON, &Point_Cloud_Overlay_Toolbar::On_Toggle_Camera_Pose, this);
+  m_collision_enabled_checkbox->Bind (
+    wxEVT_CHECKBOX,
+    &Point_Cloud_Overlay_Toolbar::On_Toggle_Collision,
+    this);
   apply_collision_settings->Bind (
     wxEVT_BUTTON,
     &Point_Cloud_Overlay_Toolbar::On_Apply_Collision_Settings, this);
@@ -76,6 +83,8 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
   sizer->Add (m_camera_pose_button, 0,
               wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->Add (collision_title, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
+  sizer->Add (m_collision_enabled_checkbox, 0,
+              wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
   auto add_parameter = [this, sizer] (
     const wxString& label, wxSpinCtrlDouble* control)
   {
@@ -224,6 +233,25 @@ void Point_Cloud_Overlay_Toolbar::On_Toggle_Camera_Pose (wxCommandEvent&)
   m_camera_pose_visible = show;
   m_camera_pose_button->SetLabel (wxString::FromUTF8 (
     show ? u8"隐藏相机位姿" : u8"显示相机位姿"));
+}
+
+void Point_Cloud_Overlay_Toolbar::On_Toggle_Collision (wxCommandEvent&)
+{
+  if( !m_collision_enabled_checkbox ||
+      !m_callbacks.set_collision_enabled ) return;
+
+  m_collision_enabled = m_collision_enabled_checkbox->GetValue ( );
+  m_callbacks.set_collision_enabled (m_collision_enabled);
+  if( !m_collision_enabled )
+  {
+    Set_Status (wxString::FromUTF8 (u8"体积碰撞已关闭"));
+    return;
+  }
+
+  Set_Status (m_callbacks.collision_rebuild_in_progress &&
+              m_callbacks.collision_rebuild_in_progress ( )
+    ? wxString::FromUTF8 (u8"体积碰撞已开启，碰撞索引正在后台构建")
+    : wxString::FromUTF8 (u8"体积碰撞已开启"));
 }
 
 void Point_Cloud_Overlay_Toolbar::Report_Error (

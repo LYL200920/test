@@ -60,6 +60,8 @@ public:
   bool Set_Collision_Settings (
     const robot_model::Robot_Collision_Settings& settings,
     std::string* error_message = nullptr);
+  void Set_Collision_Enabled (bool enabled);
+  bool Collision_Enabled ( ) const;
   const robot_model::Robot_Collision_Settings& Collision_Settings ( ) const;
   const robot_model::Robot_Collision_Point_Cloud_Stats&
   Collision_Point_Cloud_Stats ( ) const;

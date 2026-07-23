@@ -31,6 +31,7 @@ public:
       std::shared_ptr<const std::vector<float>>, std::string*)>
       set_collision_obstacle_points;
     std::function<void ( )> clear_collision_obstacle_points;
+    std::function<void (bool)> set_collision_enabled;
     std::function<bool ( )> collision_rebuild_in_progress;
     std::function<bool (
       double, double, double, bool,
@@ -53,6 +54,7 @@ private:
   void On_Load_File (wxCommandEvent& event);
   void On_Clear (wxCommandEvent& event);
   void On_Toggle_Camera_Pose (wxCommandEvent& event);
+  void On_Toggle_Collision (wxCommandEvent& event);
   void On_Apply_Collision_Settings (wxCommandEvent& event);
   void Report_Error (const wxString& title, const std::string& message);
   vtkRenderer* Renderer ( ) const;
@@ -67,11 +69,13 @@ private:
   wxButton* m_load_latest_button = nullptr;
   wxButton* m_save_latest_button = nullptr;
   wxButton* m_camera_pose_button = nullptr;
+  wxCheckBox* m_collision_enabled_checkbox = nullptr;
   wxSpinCtrlDouble* m_clearance_ctrl = nullptr;
   wxSpinCtrlDouble* m_voxel_size_ctrl = nullptr;
   wxSpinCtrlDouble* m_robot_exclusion_ctrl = nullptr;
   wxCheckBox* m_exclude_robot_points = nullptr;
   bool m_camera_pose_visible = false;
+  bool m_collision_enabled = true;
 };
 
 #endif

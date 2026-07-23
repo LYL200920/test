@@ -130,7 +130,7 @@ Robot_Render_Controller::Try_Set_Joint_State_With_Refinement (
   auto& model_state = m_state.Robot_Model ( );
   if( !model_state.Has_Current_Model ( ) ) return result;
 
-  if( !m_has_forward_model ||
+  if( !m_collision_enabled || !m_has_forward_model ||
       !m_collision_detector.Has_Robot_Geometry ( ) )
   {
     Set_Joint_State (joint_state);
@@ -216,6 +216,12 @@ bool Robot_Render_Controller::Set_Collision_Obstacle_Points (
     ? std::move (xyz)
     : std::make_shared<const std::vector<float>> ( );
   m_collision_reference_joint_state = m_state.Robot_Model ( ).Joint_State ( );
+  if( !m_collision_enabled )
+  {
+    m_collision_detector.Clear_Obstacle_Points ( );
+    m_collision_point_cloud_stats = { };
+    return true;
+  }
   const bool rebuilt = Rebuild_Collision_Obstacle_Points (error_message);
   if( rebuilt )
   {
@@ -254,14 +260,10 @@ bool Robot_Render_Controller::Set_Collision_Settings (
   const Robot_Collision_Settings& settings,
   std::string* error_message)
 {
-  if( !std::isfinite (settings.clearance_mm) ||
-      settings.clearance_mm < 0.0 )
-  {
-    if( error_message ) *error_message = "Collision clearance is invalid";
-    return false;
-  }
+  if( !valid_collision_settings (settings, error_message) ) return false;
   const auto previous = m_collision_settings;
   m_collision_settings = settings;
+  if( !m_collision_enabled ) return true;
   if( !Rebuild_Collision_Obstacle_Points (error_message) )
   {
     m_collision_settings = previous;
@@ -274,6 +276,27 @@ bool Robot_Render_Controller::Set_Collision_Settings (
   else
     m_assembly.Clear_Collision ( );
   return true;
+}
+
+void Robot_Render_Controller::Set_Collision_Enabled (bool enabled)
+{
+  if( m_collision_enabled == enabled ) return;
+  m_collision_enabled = enabled;
+  m_current_pose_collision = { };
+  if( enabled )
+    Update_Current_Pose_Collision ( );
+  else
+  {
+    // Keep the raw source so enabling can rebuild it, but release the spatial
+    // index while collision computation is disabled.
+    m_collision_detector.Clear_Obstacle_Points ( );
+    m_collision_point_cloud_stats = { };
+  }
+
+  if( m_current_pose_collision.collided )
+    m_assembly.Show_Collision (m_current_pose_collision);
+  else
+    m_assembly.Clear_Collision ( );
 }
 
 bool Robot_Render_Controller::Create_Collision_Points_Rebuild_Request (
@@ -536,7 +559,7 @@ void Robot_Render_Controller::Update_Current_Pose_Collision ( )
 {
   m_current_pose_collision = { };
   const auto& robot_model_state = m_state.Robot_Model ( );
-  if( !m_has_forward_model ||
+  if( !m_collision_enabled || !m_has_forward_model ||
       !robot_model_state.Has_Current_Model ( ) ||
       !m_collision_detector.Has_Robot_Geometry ( ) )
   {

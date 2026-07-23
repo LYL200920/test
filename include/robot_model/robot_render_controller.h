@@ -51,10 +51,16 @@ public:
     std::string* error_message = nullptr);
   void Clear_Collision_Obstacle_Points ( );
   bool Has_Collision_Obstacle_Points ( ) const;
+  bool Has_Collision_Obstacle_Source ( ) const
+  {
+    return m_collision_source_xyz && !m_collision_source_xyz->empty ( );
+  }
   std::size_t Collision_Obstacle_Point_Count ( ) const;
   bool Set_Collision_Settings (
     const Robot_Collision_Settings& settings,
     std::string* error_message = nullptr);
+  void Set_Collision_Enabled (bool enabled);
+  bool Collision_Enabled ( ) const { return m_collision_enabled; }
   const Robot_Collision_Settings& Collision_Settings ( ) const
   {
     return m_collision_settings;
@@ -103,6 +109,7 @@ private:
   Robot_Joint_State_Apply_Result m_last_joint_apply_result;
   Robot_Collision_Result m_current_pose_collision;
   bool m_has_forward_model = false;
+  bool m_collision_enabled = true;
 };
 
 } // namespace robot_model

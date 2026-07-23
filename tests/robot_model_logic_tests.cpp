@@ -15,6 +15,7 @@
 #include "flange_drag_update_coordinator.h"
 #include "flange_drag_motion_executor.h"
 #include "robot_drag_performance_collector.h"
+#include "robot_render_controller.h"
 
 #include <algorithm>
 #include <array>
@@ -983,6 +984,19 @@ void test_robot_drag_performance_collector ( )
            "Performance collection finished more than once");
 }
 
+void test_collision_enable_switch_defaults_and_toggles ( )
+{
+  robot_model::Robot_Render_Controller controller;
+  require (controller.Collision_Enabled ( ),
+           "Volume collision must be enabled by default");
+  controller.Set_Collision_Enabled (false);
+  require (!controller.Collision_Enabled ( ),
+           "Volume collision switch did not turn off");
+  controller.Set_Collision_Enabled (true);
+  require (controller.Collision_Enabled ( ),
+           "Volume collision switch did not turn back on");
+}
+
 } // namespace
 
 int main ( )
@@ -1009,6 +1023,7 @@ int main ( )
     test_flange_drag_update_coordinator ( );
     test_flange_drag_motion_executor ( );
     test_robot_drag_performance_collector ( );
+    test_collision_enable_switch_defaults_and_toggles ( );
   }
   catch( const std::exception& e )
   {

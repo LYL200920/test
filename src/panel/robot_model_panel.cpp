@@ -295,6 +295,14 @@ Robot_Model_Panel::Robot_Model_Panel (
   {
     if( m_view ) m_view->Clear_Collision_Obstacle_Points ( );
   };
+  overlay_callbacks.set_collision_enabled = [this] (bool enabled)
+  {
+    if( !m_view ) return;
+    // Reset while collision is still disabled so an already-colliding pose
+    // cannot prevent the robot from reaching the known safe home state.
+    if( enabled ) Reset_Robot_To_Home ( );
+    m_view->Set_Collision_Enabled (enabled);
+  };
   overlay_callbacks.collision_rebuild_in_progress = [this]
   {
     return m_view && m_view->Collision_Rebuild_In_Progress ( );
@@ -453,18 +461,18 @@ void Robot_Model_Panel::On_Point_Cloud_Display (wxCommandEvent&)
 
 void Robot_Model_Panel::On_Reset_Robot (wxCommandEvent&)
 {
-  if( !m_view || !m_view->Has_Current_Model ( ) )
-  {
-    return;
-  }
-  if( Is_Trajectory_Active ( ) )
-  {
-    Stop_Trajectory_Playback ( );
-  }
+  if( Reset_Robot_To_Home ( ) && m_status_text )
+    m_status_text->SetLabel (wxString::FromUTF8 (u8"机械臂已复位"));
+}
+
+bool Robot_Model_Panel::Reset_Robot_To_Home ( )
+{
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return false;
+  if( Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
 
   Apply_Joint_Input_Angles_To_Sliders (ROBOT_HOME_INPUT_ANGLES_DEG);
   Select_Display_Page (Main_Display_Page::Robot);
-  m_status_text->SetLabel (wxString::FromUTF8 (u8"机械臂已复位"));
+  return true;
 }
 
 bool Robot_Model_Panel::Set_Camera_Pose_Visible (bool visible)

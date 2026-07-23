@@ -45,21 +45,6 @@ bool is_slider_thumb_hit (wxSlider* slider, const wxMouseEvent& event)
   return PtInRect (&thumb_rect, point) != FALSE;
 }
 
-void bind_drag_only_slider (wxSlider* slider)
-{
-  if( slider == nullptr ) return;
-  slider->Bind (wxEVT_LEFT_DOWN,
-                [slider] (wxMouseEvent& event)
-                {
-                  if( is_slider_thumb_hit (slider, event) ) event.Skip ( );
-                });
-  slider->Bind (wxEVT_LEFT_DCLICK,
-                [slider] (wxMouseEvent& event)
-                {
-                  if( is_slider_thumb_hit (slider, event) ) event.Skip ( );
-                });
-}
-
 } // namespace
 
 Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
@@ -93,17 +78,24 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
                   {
                     Notify_Pose_Changed (index);
                   });
-    slider->Bind (wxEVT_SCROLL_THUMBTRACK,
-                  [this, index] (wxScrollEvent&)
+    slider->Bind (wxEVT_LEFT_DOWN,
+                  [this, slider, index] (wxMouseEvent& event)
                   {
-                    Notify_Pose_Changed (index);
+                    if( !is_slider_thumb_hit (slider, event) ) return;
+                    Begin_Pose_Drag (index);
+                    event.Skip ( );
                   });
-    slider->Bind (wxEVT_SCROLL_CHANGED,
-                  [this, index] (wxScrollEvent&)
+    slider->Bind (wxEVT_LEFT_UP,
+                  [this, index] (wxMouseEvent& event)
                   {
-                    Notify_Pose_Changed (index);
+                    End_Pose_Drag (index);
+                    event.Skip ( );
                   });
-    bind_drag_only_slider (slider);
+    slider->Bind (wxEVT_LEFT_DCLICK,
+                  [slider] (wxMouseEvent& event)
+                  {
+                    if( is_slider_thumb_hit (slider, event) ) event.Skip ( );
+                  });
 
     auto* fine_adjust = new Fine_Adjust_Control (
       this,
@@ -144,8 +136,15 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
 void Cartesian_Pose_Panel::Set_World_From_Flange (
   const robot_model::Matrix4& world_from_flange)
 {
-  m_pose = robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
+  m_actual_pose =
+    robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
+  m_has_actual_pose = true;
   m_has_pose = true;
+  // IK feedback is an achieved pose, not a new command. During a slider drag
+  // keep the command pose anchored to the pose captured on mouse-down so that
+  // solver residuals on the other five axes cannot become the next target.
+  if( m_pose_dragging ) return;
+  m_pose = m_actual_pose;
   Update_Sliders ( );
   Update_Labels ( );
 }
@@ -153,6 +152,8 @@ void Cartesian_Pose_Panel::Set_World_From_Flange (
 void Cartesian_Pose_Panel::Clear ( )
 {
   m_has_pose = false;
+  m_has_actual_pose = false;
+  m_pose_dragging = false;
   Update_Labels ( );
 }
 
@@ -235,9 +236,33 @@ void Cartesian_Pose_Panel::Notify_Pose_Changed (size_t index)
 {
   if( m_updating_controls || !m_has_pose ||
       index >= m_pose_sliders.size ( ) || !m_pose_sliders[index] ) return;
-  auto target = m_pose;
+  auto target = m_pose_dragging && index == m_pose_drag_index
+    ? m_drag_start_pose
+    : m_pose;
   target[index] = static_cast<double> (m_pose_sliders[index]->GetValue ( ));
+  if( m_pose_dragging && index == m_pose_drag_index )
+  {
+    m_pose = target;
+    Update_Labels ( );
+  }
   if( m_on_pose_changed ) m_on_pose_changed (target);
+}
+
+void Cartesian_Pose_Panel::Begin_Pose_Drag (size_t index)
+{
+  if( !m_has_pose || index >= m_pose_sliders.size ( ) ) return;
+  m_pose_dragging = true;
+  m_pose_drag_index = index;
+  m_drag_start_pose = m_pose;
+}
+
+void Cartesian_Pose_Panel::End_Pose_Drag (size_t index)
+{
+  if( !m_pose_dragging || index != m_pose_drag_index ) return;
+  m_pose_dragging = false;
+  if( m_has_actual_pose ) m_pose = m_actual_pose;
+  Update_Sliders ( );
+  Update_Labels ( );
 }
 
 void Cartesian_Pose_Panel::Adjust_Pose (size_t index, double delta)

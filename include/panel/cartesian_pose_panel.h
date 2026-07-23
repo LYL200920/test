@@ -32,6 +32,8 @@ private:
   void Update_Sliders ( );
   void On_Copy (wxCommandEvent& event);
   void On_Toggle_World_Frame (wxCommandEvent& event);
+  void Begin_Pose_Drag (size_t index);
+  void End_Pose_Drag (size_t index);
   void Notify_Pose_Changed (size_t index);
   void Adjust_Pose (size_t index, double delta);
 
@@ -42,9 +44,14 @@ private:
   wxStaticText* m_warning_text = nullptr;
   wxToggleButton* m_world_frame_button = nullptr;
   robot_model::XyzabcPose m_pose = { };
+  robot_model::XyzabcPose m_actual_pose = { };
+  robot_model::XyzabcPose m_drag_start_pose = { };
   std::function<void (bool)> m_on_world_frame_visibility_changed;
   std::function<void (const robot_model::XyzabcPose&)> m_on_pose_changed;
   bool m_has_pose = false;
+  bool m_has_actual_pose = false;
+  bool m_pose_dragging = false;
+  size_t m_pose_drag_index = 0;
   bool m_updating_controls = false;
 };
 
