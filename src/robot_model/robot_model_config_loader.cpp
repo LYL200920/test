@@ -204,6 +204,19 @@ Robot_Kinematic_Params Load_Robot_Kinematic_Params (
     }
   }
 
+  params.has_home_input_angles = true;
+  for( int i = 1; i <= 6; ++i )
+  {
+    const auto key = std::string ("HomeAngle_") + std::to_string (i);
+    if( !item_exists (root, key.c_str ( )) )
+    {
+      params.has_home_input_angles = false;
+      break;
+    }
+    params.home_input_angles_deg[static_cast<size_t> (i - 1)] =
+      item_value_as_double (root, key.c_str ( ), 0.0);
+  }
+
   params.has_neutral_flange_pose =
     item_exists (root, "FlangePose_X") &&
     item_exists (root, "FlangePose_Y") &&

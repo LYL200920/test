@@ -240,9 +240,9 @@ void Point_Cloud_Overlay_Toolbar::On_Toggle_Collision (wxCommandEvent&)
   if( !m_collision_enabled_checkbox ||
       !m_callbacks.set_collision_enabled ) return;
 
-  m_collision_enabled = m_collision_enabled_checkbox->GetValue ( );
-  m_callbacks.set_collision_enabled (m_collision_enabled);
-  if( !m_collision_enabled )
+  const bool enabled = m_collision_enabled_checkbox->GetValue ( );
+  m_callbacks.set_collision_enabled (enabled);
+  if( !enabled )
   {
     Set_Status (wxString::FromUTF8 (u8"体积碰撞已关闭"));
     return;

@@ -75,7 +75,6 @@ private:
   wxSpinCtrlDouble* m_robot_exclusion_ctrl = nullptr;
   wxCheckBox* m_exclude_robot_points = nullptr;
   bool m_camera_pose_visible = false;
-  bool m_collision_enabled = true;
 };
 
 #endif

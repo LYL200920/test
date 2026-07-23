@@ -45,6 +45,12 @@
 		<Item keyname="JointOffset_4"	 name="J4零位偏置" 		valuetype="float"	value="0.0" />
 		<Item keyname="JointOffset_5"	 name="J5零位偏置" 		valuetype="float"	value="0.0" />
 		<Item keyname="JointOffset_6"	 name="J6零位偏置" 		valuetype="float"	value="0.0" />
+		<Item keyname="HomeAngle_1" name="J1复位角" valuetype="float" value="0" />
+		<Item keyname="HomeAngle_2" name="J2复位角" valuetype="float" value="-90" />
+		<Item keyname="HomeAngle_3" name="J3复位角" valuetype="float" value="90" />
+		<Item keyname="HomeAngle_4" name="J4复位角" valuetype="float" value="0" />
+		<Item keyname="HomeAngle_5" name="J5复位角" valuetype="float" value="90" />
+		<Item keyname="HomeAngle_6" name="J6复位角" valuetype="float" value="0" />
 		<!--轴向，整数-->
 		<Item keyname="JointDirection_1" name="一轴方向" 		valuetype="int"		value="-1" />
 		<Item keyname="JointDirection_2" name="二轴方向" 		valuetype="int"		value="-1" />

@@ -20,29 +20,6 @@ constexpr std::size_t kCollisionBoundaryRefinementIterations = 4;
 constexpr std::size_t kInteractiveBoundaryRefinementIterations = 2;
 constexpr std::size_t kMaximumInteractiveSweepPoseCount = 8;
 
-bool valid_collision_settings (
-  const Robot_Collision_Settings& settings,
-  std::string* error_message)
-{
-  if( !std::isfinite (settings.clearance_mm) ||
-      settings.clearance_mm < 0.0 )
-  {
-    if( error_message ) *error_message = "Collision clearance is invalid";
-    return false;
-  }
-  if( !std::isfinite (settings.point_cloud.voxel_size_mm) ||
-      settings.point_cloud.voxel_size_mm <= 0.0 ||
-      !std::isfinite (
-        settings.point_cloud.robot_exclusion_distance_mm) ||
-      settings.point_cloud.robot_exclusion_distance_mm < 0.0 )
-  {
-    if( error_message )
-      *error_message = "Collision point-cloud options are invalid";
-    return false;
-  }
-  return true;
-}
-
 double position_distance (const Point3& lhs, const Point3& rhs)
 {
   const double dx = lhs[0] - rhs[0];
@@ -81,10 +58,9 @@ void Robot_Render_Controller::Attach_Scene (Vtk_Scene* scene)
 void Robot_Render_Controller::Detach_Scene ( )
 {
   m_assembly.Clear ( );
-  m_collision_detector.Clear ( );
+  m_collision_service.Clear_Detector ( );
   m_forward_model = { };
   m_has_forward_model = false;
-  m_current_pose_collision = { };
   m_scene = nullptr;
 }
 
@@ -102,8 +78,9 @@ void Robot_Render_Controller::Set_Joint_State (
   m_state.Robot_Model ( ).Set_Joint_State (joint_state);
   Apply_Joint_Pose ( );
   Update_Current_Pose_Collision ( );
-  const bool scene_changed = m_current_pose_collision.collided
-    ? m_assembly.Show_Collision (m_current_pose_collision)
+  const auto& current_collision = m_collision_service.Current_Collision ( );
+  const bool scene_changed = current_collision.collided
+    ? m_assembly.Show_Collision (current_collision)
     : m_assembly.Clear_Collision ( );
   m_last_joint_apply_result = { };
   m_last_joint_apply_result.accepted = true;
@@ -130,8 +107,8 @@ Robot_Render_Controller::Try_Set_Joint_State_With_Refinement (
   auto& model_state = m_state.Robot_Model ( );
   if( !model_state.Has_Current_Model ( ) ) return result;
 
-  if( !m_collision_enabled || !m_has_forward_model ||
-      !m_collision_detector.Has_Robot_Geometry ( ) )
+  if( !m_collision_service.Enabled ( ) || !m_has_forward_model ||
+      !m_collision_service.Has_Robot_Geometry ( ) )
   {
     Set_Joint_State (joint_state);
     result.accepted = true;
@@ -141,15 +118,16 @@ Robot_Render_Controller::Try_Set_Joint_State_With_Refinement (
   Robot_Motion_Collision_Request request;
   request.current_state = model_state.Joint_State ( );
   request.requested_state = joint_state;
-  request.current_collision = m_current_pose_collision;
-  request.options.clearance_mm = m_collision_settings.clearance_mm;
+  request.current_collision = m_collision_service.Current_Collision ( );
+  request.options.clearance_mm =
+    m_collision_service.Settings ( ).clearance_mm;
   request.options.maximum_joint_step_deg = kMaximumCollisionJointStepDeg;
   request.options.maximum_spatial_step_mm = kMaximumCollisionSpatialStepMm;
   request.options.boundary_refinement_iterations =
     boundary_refinement_iterations;
   request.options.maximum_sweep_pose_count = maximum_sweep_pose_count;
-  const auto guarded = m_motion_collision_guard.Evaluate (
-    m_forward_model, m_assembly.Parts ( ), m_collision_detector, request);
+  const auto guarded = m_collision_service.Evaluate_Motion (
+    m_forward_model, request);
 
   result.accepted = guarded.accepted;
   result.state_changed = guarded.state_changed;
@@ -165,12 +143,13 @@ Robot_Render_Controller::Try_Set_Joint_State_With_Refinement (
     model_state.Set_Joint_State (guarded.applied_state);
     m_assembly.Apply_Forward_Kinematics (guarded.applied_transforms);
   }
-  m_current_pose_collision = guarded.resulting_collision;
+  m_collision_service.Set_Current_Collision (guarded.resulting_collision);
+  const auto& current_collision = m_collision_service.Current_Collision ( );
   result.scene_changed = !guarded.accepted &&
       guarded.blocking_collision.collided
     ? m_assembly.Show_Collision (guarded.blocking_collision)
-    : ( m_current_pose_collision.collided
-        ? m_assembly.Show_Collision (m_current_pose_collision)
+    : ( current_collision.collided
+        ? m_assembly.Show_Collision (current_collision)
         : m_assembly.Clear_Collision ( ) );
   return result;
 }
@@ -212,22 +191,22 @@ bool Robot_Render_Controller::Set_Collision_Obstacle_Points (
   std::shared_ptr<const std::vector<float>> xyz,
   std::string* error_message)
 {
-  m_collision_source_xyz = xyz
-    ? std::move (xyz)
-    : std::make_shared<const std::vector<float>> ( );
-  m_collision_reference_joint_state = m_state.Robot_Model ( ).Joint_State ( );
-  if( !m_collision_enabled )
+  const auto& reference_state = m_state.Robot_Model ( ).Joint_State ( );
+  std::vector<Matrix4> reference_world_from_parts;
+  if( m_has_forward_model )
   {
-    m_collision_detector.Clear_Obstacle_Points ( );
-    m_collision_point_cloud_stats = { };
-    return true;
+    reference_world_from_parts = Compute_Forward_Kinematics (
+      m_forward_model, reference_state).world_from_parts;
   }
-  const bool rebuilt = Rebuild_Collision_Obstacle_Points (error_message);
+  const bool rebuilt = m_collision_service.Set_Obstacle_Source (
+    std::move (xyz), reference_state, reference_world_from_parts,
+    error_message);
   if( rebuilt )
   {
     Update_Current_Pose_Collision ( );
-    if( m_current_pose_collision.collided )
-      m_assembly.Show_Collision (m_current_pose_collision);
+    const auto& collision = m_collision_service.Current_Collision ( );
+    if( collision.collided )
+      m_assembly.Show_Collision (collision);
     else
       m_assembly.Clear_Collision ( );
   }
@@ -236,43 +215,47 @@ bool Robot_Render_Controller::Set_Collision_Obstacle_Points (
 
 void Robot_Render_Controller::Clear_Collision_Obstacle_Points ( )
 {
-  m_collision_detector.Clear_Obstacle_Points ( );
-  m_collision_source_xyz.reset ( );
-  m_collision_point_cloud_stats = { };
+  m_collision_service.Clear_Obstacle_Source ( );
   Update_Current_Pose_Collision ( );
-  if( m_current_pose_collision.collided )
-    m_assembly.Show_Collision (m_current_pose_collision);
+  const auto& collision = m_collision_service.Current_Collision ( );
+  if( collision.collided )
+    m_assembly.Show_Collision (collision);
   else
     m_assembly.Clear_Collision ( );
 }
 
 bool Robot_Render_Controller::Has_Collision_Obstacle_Points ( ) const
 {
-  return m_collision_detector.Has_Obstacle_Points ( );
+  return m_collision_service.Has_Obstacle_Points ( );
+}
+
+bool Robot_Render_Controller::Has_Collision_Obstacle_Source ( ) const
+{
+  return m_collision_service.Has_Obstacle_Source ( );
 }
 
 std::size_t Robot_Render_Controller::Collision_Obstacle_Point_Count ( ) const
 {
-  return m_collision_detector.Obstacle_Point_Count ( );
+  return m_collision_service.Obstacle_Point_Count ( );
 }
 
 bool Robot_Render_Controller::Set_Collision_Settings (
   const Robot_Collision_Settings& settings,
   std::string* error_message)
 {
-  if( !valid_collision_settings (settings, error_message) ) return false;
-  const auto previous = m_collision_settings;
-  m_collision_settings = settings;
-  if( !m_collision_enabled ) return true;
-  if( !Rebuild_Collision_Obstacle_Points (error_message) )
+  std::vector<Matrix4> reference_world_from_parts;
+  if( m_has_forward_model )
   {
-    m_collision_settings = previous;
-    Rebuild_Collision_Obstacle_Points (nullptr);
-    return false;
+    reference_world_from_parts = Compute_Forward_Kinematics (
+      m_forward_model,
+      m_collision_service.Reference_Joint_State ( )).world_from_parts;
   }
+  if( !m_collision_service.Set_Settings (
+        settings, reference_world_from_parts, error_message) ) return false;
   Update_Current_Pose_Collision ( );
-  if( m_current_pose_collision.collided )
-    m_assembly.Show_Collision (m_current_pose_collision);
+  const auto& collision = m_collision_service.Current_Collision ( );
+  if( collision.collided )
+    m_assembly.Show_Collision (collision);
   else
     m_assembly.Clear_Collision ( );
   return true;
@@ -280,21 +263,13 @@ bool Robot_Render_Controller::Set_Collision_Settings (
 
 void Robot_Render_Controller::Set_Collision_Enabled (bool enabled)
 {
-  if( m_collision_enabled == enabled ) return;
-  m_collision_enabled = enabled;
-  m_current_pose_collision = { };
-  if( enabled )
-    Update_Current_Pose_Collision ( );
-  else
-  {
-    // Keep the raw source so enabling can rebuild it, but release the spatial
-    // index while collision computation is disabled.
-    m_collision_detector.Clear_Obstacle_Points ( );
-    m_collision_point_cloud_stats = { };
-  }
+  if( m_collision_service.Enabled ( ) == enabled ) return;
+  m_collision_service.Set_Enabled (enabled);
+  if( enabled ) Update_Current_Pose_Collision ( );
 
-  if( m_current_pose_collision.collided )
-    m_assembly.Show_Collision (m_current_pose_collision);
+  const auto& collision = m_collision_service.Current_Collision ( );
+  if( collision.collided )
+    m_assembly.Show_Collision (collision);
   else
     m_assembly.Clear_Collision ( );
 }
@@ -304,26 +279,16 @@ bool Robot_Render_Controller::Create_Collision_Points_Rebuild_Request (
   Collision_Index_Build_Request* request,
   std::string* error_message) const
 {
-  if( error_message ) error_message->clear ( );
-  if( !request || !xyz || xyz->empty ( ) || xyz->size ( ) % 3 != 0 )
-  {
-    if( error_message )
-      *error_message = "Obstacle point array is empty or malformed";
-    return false;
-  }
-  if( !valid_collision_settings (m_collision_settings, error_message) )
-    return false;
-
-  request->source_xyz = std::move (xyz);
-  request->settings = m_collision_settings;
-  request->reference_joint_state = m_state.Robot_Model ( ).Joint_State ( );
-  request->robot_parts = m_assembly.Parts ( );
+  const auto& reference_state = m_state.Robot_Model ( ).Joint_State ( );
+  std::vector<Matrix4> reference_world_from_parts;
   if( m_has_forward_model )
   {
-    request->reference_world_from_parts = Compute_Forward_Kinematics (
-      m_forward_model, request->reference_joint_state).world_from_parts;
+    reference_world_from_parts = Compute_Forward_Kinematics (
+      m_forward_model, reference_state).world_from_parts;
   }
-  return true;
+  return m_collision_service.Create_Points_Rebuild_Request (
+    std::move (xyz), reference_state, reference_world_from_parts,
+    request, error_message);
 }
 
 bool Robot_Render_Controller::Create_Collision_Settings_Rebuild_Request (
@@ -331,36 +296,26 @@ bool Robot_Render_Controller::Create_Collision_Settings_Rebuild_Request (
   Collision_Index_Build_Request* request,
   std::string* error_message) const
 {
-  if( error_message ) error_message->clear ( );
-  if( !request || !valid_collision_settings (settings, error_message) )
-    return false;
-
-  request->source_xyz = m_collision_source_xyz;
-  request->settings = settings;
-  request->reference_joint_state = m_collision_reference_joint_state;
-  request->robot_parts = m_assembly.Parts ( );
+  std::vector<Matrix4> reference_world_from_parts;
   if( m_has_forward_model )
   {
-    request->reference_world_from_parts = Compute_Forward_Kinematics (
-      m_forward_model, request->reference_joint_state).world_from_parts;
+    reference_world_from_parts = Compute_Forward_Kinematics (
+      m_forward_model,
+      m_collision_service.Reference_Joint_State ( )).world_from_parts;
   }
-  return true;
+  return m_collision_service.Create_Settings_Rebuild_Request (
+    settings, reference_world_from_parts, request, error_message);
 }
 
 void Robot_Render_Controller::Apply_Collision_Rebuild_Result (
   Collision_Index_Build_Result result)
 {
   if( !result.success ) return;
-
-  m_collision_detector.Set_Obstacle_Snapshot (
-    std::move (result.obstacle_snapshot));
-  m_collision_source_xyz = std::move (result.source_xyz);
-  m_collision_settings = result.settings;
-  m_collision_reference_joint_state = result.reference_joint_state;
-  m_collision_point_cloud_stats = result.stats;
+  m_collision_service.Apply_Rebuild_Result (std::move (result));
   Update_Current_Pose_Collision ( );
-  if( m_current_pose_collision.collided )
-    m_assembly.Show_Collision (m_current_pose_collision);
+  const auto& collision = m_collision_service.Current_Collision ( );
+  if( collision.collided )
+    m_assembly.Show_Collision (collision);
   else
     m_assembly.Clear_Collision ( );
 }
@@ -368,26 +323,16 @@ void Robot_Render_Controller::Apply_Collision_Rebuild_Result (
 bool Robot_Render_Controller::Rebuild_Collision_Obstacle_Points (
   std::string* error_message)
 {
-  if( error_message ) error_message->clear ( );
-  if( !m_collision_source_xyz || m_collision_source_xyz->empty ( ) )
-  {
-    m_collision_detector.Clear_Obstacle_Points ( );
-    m_collision_point_cloud_stats = { };
-    return true;
-  }
   std::vector<Matrix4> reference_world_from_parts;
   if( m_has_forward_model )
   {
     reference_world_from_parts = Compute_Forward_Kinematics (
       m_forward_model,
-      m_collision_reference_joint_state).world_from_parts;
+      m_state.Robot_Model ( ).Joint_State ( )).world_from_parts;
   }
-  return m_collision_detector.Set_Obstacle_Points (
-    *m_collision_source_xyz,
-    m_collision_settings.point_cloud,
-    reference_world_from_parts,
-    &m_collision_point_cloud_stats,
-    error_message);
+  return m_collision_service.Rebuild_Obstacle_Source (
+    m_state.Robot_Model ( ).Joint_State ( ),
+    reference_world_from_parts, error_message);
 }
 
 Robot_Position_IK_Result Robot_Render_Controller::Move_Flange_To (
@@ -491,7 +436,7 @@ void Robot_Render_Controller::Rebuild_Current_Model ( )
   m_scene->Remove_All_ViewProps ( );
   m_scene->Remove_All_Lights ( );
   m_assembly.Clear ( );
-  m_collision_detector.Set_Robot_Parts ({ });
+  m_collision_service.Set_Robot_Parts ({ });
   m_forward_model = { };
   m_has_forward_model = false;
   robot_model_state.Clear_Assembly_Calibration ( );
@@ -500,16 +445,15 @@ void Robot_Render_Controller::Rebuild_Current_Model ( )
   {
     m_assembly.Load_Mesh (model, m_scene->Renderer ( ));
     auto scene_collision_options =
-      m_collision_detector.Scene_Collision_Options ( );
+      m_collision_service.Scene_Options ( );
     scene_collision_options.self_collision_clearance_mm =
       robot_model_state.Params ( ).self_collision_clearance_mm;
     scene_collision_options.self_collision_pairs =
       robot_model_state.Params ( ).self_collision_pairs;
     scene_collision_options.ground_checked_parts =
       robot_model_state.Params ( ).ground_collision_parts;
-    m_collision_detector.Set_Scene_Collision_Options (
-      scene_collision_options);
-    m_collision_detector.Set_Robot_Parts (m_assembly.Parts ( ));
+    m_collision_service.Set_Scene_Options (scene_collision_options);
+    m_collision_service.Set_Robot_Parts (m_assembly.Parts ( ));
     const auto assembly_calibration = Build_Assembly_Calibration (
       robot_model_state.Params ( ),
       robot_model_state.Model_Name ( ),
@@ -520,7 +464,6 @@ void Robot_Render_Controller::Rebuild_Current_Model ( )
       robot_model_state.Assembly_Calibration ( ),
       robot_model_state.Params ( ));
     m_has_forward_model = m_forward_model.has_flange;
-    m_collision_reference_joint_state = robot_model_state.Joint_State ( );
     Rebuild_Collision_Obstacle_Points (nullptr);
     Apply_Joint_Pose ( );
     Update_Current_Pose_Collision ( );
@@ -557,18 +500,17 @@ void Robot_Render_Controller::Apply_Joint_Pose ( )
 
 void Robot_Render_Controller::Update_Current_Pose_Collision ( )
 {
-  m_current_pose_collision = { };
+  m_collision_service.Clear_Current_Collision ( );
   const auto& robot_model_state = m_state.Robot_Model ( );
-  if( !m_collision_enabled || !m_has_forward_model ||
+  if( !m_collision_service.Enabled ( ) || !m_has_forward_model ||
       !robot_model_state.Has_Current_Model ( ) ||
-      !m_collision_detector.Has_Robot_Geometry ( ) )
+      !m_collision_service.Has_Robot_Geometry ( ) )
   {
     return;
   }
   const auto transforms = Compute_Forward_Kinematics (
     m_forward_model, robot_model_state.Joint_State ( ));
-  m_current_pose_collision = m_collision_detector.Check_Pose (
-    transforms.world_from_parts, m_collision_settings.clearance_mm);
+  m_collision_service.Check_Pose (transforms.world_from_parts);
 }
 
 } // namespace robot_model

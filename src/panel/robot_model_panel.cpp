@@ -46,12 +46,20 @@ constexpr int TEACH_POINT_COLLAPSED_WIDTH = 38;
 constexpr int TEACH_POINT_DEFAULT_EXPANDED_WIDTH = 240;
 constexpr int WORKSPACE_MINIMUM_WIDTH = 500;
 constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR10_R1100_2";
-constexpr std::array<double, 6> ROBOT_HOME_INPUT_ANGLES_DEG = {
-  0.0, -90.0, 90.0, 0.0, 90.0, 0.0
-};
 constexpr std::array<double, 5> TRAJECTORY_SPEED_SCALES = {
   0.25, 0.5, 1.0, 2.0, 4.0
 };
+
+std::array<double, 6> configured_home_input_angles (
+  const robot_model::Robot_Kinematic_Params& params)
+{
+  if( params.has_home_input_angles ) return params.home_input_angles_deg;
+
+  std::array<double, 6> fallback = { };
+  for( size_t index = 0; index < fallback.size ( ); ++index )
+    fallback[index] = robot_model::Neutral_Joint_Input_At (params, index);
+  return fallback;
+}
 
 int slider_limit_at (const std::vector<double>& values, size_t index,
                      int fallback)
@@ -470,7 +478,8 @@ bool Robot_Model_Panel::Reset_Robot_To_Home ( )
   if( !m_view || !m_view->Has_Current_Model ( ) ) return false;
   if( Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
 
-  Apply_Joint_Input_Angles_To_Sliders (ROBOT_HOME_INPUT_ANGLES_DEG);
+  Apply_Joint_Input_Angles_To_Sliders (
+    configured_home_input_angles (m_view->Kinematic_Params ( )));
   Select_Display_Page (Main_Display_Page::Robot);
   return true;
 }
@@ -1055,6 +1064,7 @@ void Robot_Model_Panel::Apply_Joint_Limits (
     return;
   }
 
+  const auto home_angles = configured_home_input_angles (params);
   for( size_t i = 0; i < ROBOT_JOINT_COUNT; ++i )
   {
     int min_value = slider_limit_at (params.joint_mins, i, DEFAULT_JOINT_MIN);
@@ -1064,8 +1074,8 @@ void Robot_Model_Panel::Apply_Joint_Limits (
       std::swap (min_value, max_value);
     }
 
-    const int neutral_value = static_cast<int> (
-      std::lround (ROBOT_HOME_INPUT_ANGLES_DEG[i]));
+    const int neutral_value =
+      static_cast<int> (std::lround (home_angles[i]));
     m_joint_panel->Set_Joint_Range_And_Value (
       i, min_value, max_value, neutral_value);
   }

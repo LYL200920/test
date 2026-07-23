@@ -78,6 +78,14 @@
         <Item keyname="JointOffset_5" name="A5零位偏置" valuetype="float" value="0" />
         <Item keyname="JointOffset_6" name="A6零位偏置" valuetype="float" value="0" />
 
+        <!-- Safe application reset pose, expressed as controller input angles. -->
+        <Item keyname="HomeAngle_1" name="A1复位角" valuetype="float" value="0" />
+        <Item keyname="HomeAngle_2" name="A2复位角" valuetype="float" value="-90" />
+        <Item keyname="HomeAngle_3" name="A3复位角" valuetype="float" value="90" />
+        <Item keyname="HomeAngle_4" name="A4复位角" valuetype="float" value="0" />
+        <Item keyname="HomeAngle_5" name="A5复位角" valuetype="float" value="90" />
+        <Item keyname="HomeAngle_6" name="A6复位角" valuetype="float" value="0" />
+
         <!-- Direction is paired with the axes below to match the verified
              KUKA transform chain while retaining this project's convention. -->
         <Item keyname="JointDirection_1" name="A1方向" valuetype="int" value="-1" />

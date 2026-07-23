@@ -2,11 +2,9 @@
 #define includeguard_robot_render_controller_h_includeguard
 
 #include "robot_model_data.h"
-#include "robot_collision_detector.h"
-#include "robot_collision_settings.h"
+#include "robot_collision_service.h"
 #include "robot_forward_kinematics.h"
 #include "robot_inverse_kinematics.h"
-#include "robot_motion_collision_guard.h"
 #include "robot_joint_state_apply_result.h"
 #include "robot_scene_assembly.h"
 #include "robot_simulation_state.h"
@@ -51,23 +49,20 @@ public:
     std::string* error_message = nullptr);
   void Clear_Collision_Obstacle_Points ( );
   bool Has_Collision_Obstacle_Points ( ) const;
-  bool Has_Collision_Obstacle_Source ( ) const
-  {
-    return m_collision_source_xyz && !m_collision_source_xyz->empty ( );
-  }
+  bool Has_Collision_Obstacle_Source ( ) const;
   std::size_t Collision_Obstacle_Point_Count ( ) const;
   bool Set_Collision_Settings (
     const Robot_Collision_Settings& settings,
     std::string* error_message = nullptr);
   void Set_Collision_Enabled (bool enabled);
-  bool Collision_Enabled ( ) const { return m_collision_enabled; }
+  bool Collision_Enabled ( ) const { return m_collision_service.Enabled ( ); }
   const Robot_Collision_Settings& Collision_Settings ( ) const
   {
-    return m_collision_settings;
+    return m_collision_service.Settings ( );
   }
   const Robot_Collision_Point_Cloud_Stats& Collision_Point_Cloud_Stats ( ) const
   {
-    return m_collision_point_cloud_stats;
+    return m_collision_service.Point_Cloud_Stats ( );
   }
   bool Create_Collision_Points_Rebuild_Request (
     std::shared_ptr<const std::vector<float>> xyz,
@@ -99,17 +94,10 @@ private:
   Vtk_Scene* m_scene = nullptr;
   Robot_Simulation_State m_state;
   Robot_Scene_Assembly m_assembly;
-  Robot_Collision_Detector m_collision_detector;
-  Robot_Motion_Collision_Guard m_motion_collision_guard;
-  Robot_Collision_Settings m_collision_settings;
-  Robot_Collision_Point_Cloud_Stats m_collision_point_cloud_stats;
-  std::shared_ptr<const std::vector<float>> m_collision_source_xyz;
-  Robot_Joint_State m_collision_reference_joint_state;
+  Robot_Collision_Service m_collision_service;
   Robot_Forward_Kinematics_Model m_forward_model;
   Robot_Joint_State_Apply_Result m_last_joint_apply_result;
-  Robot_Collision_Result m_current_pose_collision;
   bool m_has_forward_model = false;
-  bool m_collision_enabled = true;
 };
 
 } // namespace robot_model

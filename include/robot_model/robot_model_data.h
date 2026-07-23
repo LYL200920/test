@@ -55,6 +55,10 @@ struct Robot_Kinematic_Params
   std::vector<int> joint_directions;
   std::vector<double> joint_mins;
   std::vector<double> joint_maxs;
+  std::array<double, 6> home_input_angles_deg = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  };
+  bool has_home_input_angles = false;
   std::array<Robot_Joint_Frame_Config, 6> joint_frames;
   std::array<double, 6> neutral_flange_pose = {
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0

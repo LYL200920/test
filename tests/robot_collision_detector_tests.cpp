@@ -455,9 +455,6 @@ int main ( )
 
     const auto models = robot_model::Scan_Models_In_Directory (
       robot_model::Find_Robot_Root ( ));
-    const std::array<double, 6> home_angles = {
-      0.0, -90.0, 90.0, 0.0, 90.0, 0.0
-    };
     for( const auto& model : models )
     {
       std::vector<robot_model::Robot_Visual_Part> parts;
@@ -468,6 +465,10 @@ int main ( )
       }
       const auto params = robot_model::Load_Robot_Kinematic_Params (
         model.xml_path, model.display_name);
+      require (params.has_home_input_angles,
+               "Robot model does not define a complete home pose: " +
+                 model.display_name);
+      const auto& home_angles = params.home_input_angles_deg;
       const auto calibration = robot_model::Build_Assembly_Calibration (
         params, model.display_name, parts);
       const auto forward_model = robot_model::Build_Forward_Kinematics_Model (

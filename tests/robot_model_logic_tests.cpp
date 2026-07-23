@@ -16,6 +16,7 @@
 #include "flange_drag_motion_executor.h"
 #include "robot_drag_performance_collector.h"
 #include "robot_render_controller.h"
+#include "robot_collision_service.h"
 
 #include <algorithm>
 #include <array>
@@ -24,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -297,6 +299,13 @@ void test_kr10_r1100_2_resource_config ( )
                 "KR10_R1100_2 A2 lower limit mismatch");
   require_near (params.joint_maxs[2], 156.0,
                 "KR10_R1100_2 A3 upper limit mismatch");
+  require (params.has_home_input_angles,
+           "KR10_R1100_2 home input angles were not parsed");
+  const std::array<double, 6> expected_home = {
+    0.0, -90.0, 90.0, 0.0, 90.0, 0.0
+  };
+  require (params.home_input_angles_deg == expected_home,
+           "KR10_R1100_2 home input angles mismatch");
   require (params.joint_frames[0].has_pivot &&
              params.joint_frames[0].has_axis,
            "KR10_R1100_2 A1 frame was not parsed");
@@ -997,6 +1006,33 @@ void test_collision_enable_switch_defaults_and_toggles ( )
            "Volume collision switch did not turn back on");
 }
 
+void test_collision_service_owns_disabled_state ( )
+{
+  robot_model::Robot_Collision_Service service;
+  require (service.Enabled ( ),
+           "Collision service must be enabled by default");
+
+  service.Set_Enabled (false);
+  auto source = std::make_shared<const std::vector<float>> (
+    std::vector<float> { 10.0F, 20.0F, 30.0F });
+  robot_model::Robot_Joint_State reference_state;
+  require (service.Set_Obstacle_Source (
+             source, reference_state, { }, nullptr),
+           "Disabled collision service rejected a valid source");
+  require (service.Has_Obstacle_Source ( ),
+           "Disabled collision service did not retain the raw source");
+  require (!service.Has_Obstacle_Points ( ),
+           "Disabled collision service retained an active query index");
+
+  robot_model::Collision_Index_Build_Request request;
+  service.Set_Enabled (true);
+  require (service.Create_Settings_Rebuild_Request (
+             service.Settings ( ), { }, &request, nullptr),
+           "Enabled collision service could not create a rebuild request");
+  require (request.source_xyz == source,
+           "Collision rebuild request lost the retained source");
+}
+
 } // namespace
 
 int main ( )
@@ -1024,6 +1060,7 @@ int main ( )
     test_flange_drag_motion_executor ( );
     test_robot_drag_performance_collector ( );
     test_collision_enable_switch_defaults_and_toggles ( );
+    test_collision_service_owns_disabled_state ( );
   }
   catch( const std::exception& e )
   {
