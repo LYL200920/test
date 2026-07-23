@@ -31,7 +31,6 @@ struct Camera_Device_Detail
   std::string device_guid;
 };
 
-Camera_Device_Detail Build_Camera_Device_Detail (
-  const MV3D_RGBD_DEVICE_INFO& source);
+Camera_Device_Detail Build_Camera_Device_Detail(const MV3D_RGBD_DEVICE_INFO &source);
 
 #endif

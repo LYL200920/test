@@ -23,10 +23,10 @@ struct Camera_Display_Image
   std::vector<std::uint8_t> rgb;
 };
 
-bool Convert_Camera_Frame_To_Display_Image (
-  const Camera_Frame& frame,
-  Camera_Image_Display_Mode mode,
-  Camera_Display_Image* destination,
-  std::string* error = nullptr);
+bool Convert_Camera_Frame_To_Display_Image(
+    const Camera_Frame &frame,
+    Camera_Image_Display_Mode mode,
+    Camera_Display_Image *destination,
+    std::string *error = nullptr);
 
 #endif

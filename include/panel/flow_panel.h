@@ -30,23 +30,23 @@ class wxStaticText;
 class Flow_Panel : public wxPanel
 {
 public:
-  explicit Flow_Panel (wxWindow* parent, wxWindowID id = wxID_ANY);
-  ~Flow_Panel ( ) override;
+  explicit Flow_Panel(wxWindow *parent, wxWindowID id = wxID_ANY);
+  ~Flow_Panel() override;
 
 private:
   // 流程编排中的两条连接端点
   struct Flow_Endpoint
   {
-    wxString name;                       // "HIK" / "KUKA"
+    wxString name; // "HIK" / "KUKA"
     wxString default_ip;
     wxString default_port;
     std::shared_ptr<tcp_client> client;
 
-    wxComboBox* ip_input = nullptr;
-    wxComboBox* port_input = nullptr;
-    wxButton* connect_btn = nullptr;
-    wxButton* disconnect_btn = nullptr;
-    wxStaticText* status_label = nullptr;
+    wxComboBox *ip_input = nullptr;
+    wxComboBox *port_input = nullptr;
+    wxButton *connect_btn = nullptr;
+    wxButton *disconnect_btn = nullptr;
+    wxStaticText *status_label = nullptr;
 
     // HIK 回复重组缓冲：async_read_some 是字节流、一条回复可能分多次到达，
     // HIK 回复以 ';' 结尾，按 ';' 重组为完整消息后再转发，保证 KUKA 收到完整内容。
@@ -57,70 +57,67 @@ private:
   enum class Flow_Step
   {
     Idle,
-    Step1_Wait_Recv1,   // 已发给 HIK，等 HIK 回复
-    Step3_Wait_Recv2,   // 已转发给 KUKA，等 KUKA 回复
+    Step1_Wait_Recv1, // 已发给 HIK，等 HIK 回复
+    Step3_Wait_Recv2, // 已转发给 KUKA，等 KUKA 回复
     Done,
     Error
   };
 
-  void Build_Ui ( );
+  void Build_Ui();
 
   // 连接 / 发送按钮（按事件来源定位端点）
-  void On_Connect_Click (wxCommandEvent& event);
-  void On_Disconnect_Click (wxCommandEvent& event);
-  Flow_Endpoint* Find_Endpoint_By_Window (wxWindow* win);
+  void On_Connect_Click(wxCommandEvent &event);
+  void On_Disconnect_Click(wxCommandEvent &event);
+  Flow_Endpoint *Find_Endpoint_By_Window(wxWindow *win);
 
-  void On_Run_Click (wxCommandEvent& event);
-  void On_Stop_Click (wxCommandEvent& event);
-  void On_Clear_Click (wxCommandEvent& event);
-  void On_Timeout (wxTimerEvent& event);
+  void On_Run_Click(wxCommandEvent &event);
+  void On_Stop_Click(wxCommandEvent &event);
+  void On_Clear_Click(wxCommandEvent &event);
+  void On_Timeout(wxTimerEvent &event);
 
   // recv 事件（UI 线程）：把一条完整消息喂给状态机
-  void On_HIK_Recv_Event (wxThreadEvent& event);
-  void On_KUKA_Recv_Event (wxThreadEvent& event);
-  void Handle_HIK_Recv (const wxString& msg);   // 已重组的完整 HIK 回复
-  void Handle_KUKA_Recv (const wxString& msg);
+  void On_HIK_Recv_Event(wxThreadEvent &event);
+  void On_KUKA_Recv_Event(wxThreadEvent &event);
+  void Handle_HIK_Recv(const wxString &msg); // 已重组的完整 HIK 回复
+  void Handle_KUKA_Recv(const wxString &msg);
 
   // 给 client 的 recv 回调（IO 线程）：把收到的字节流原样投递一个事件到 UI 线程
-  void Feed_HIK_Recv (const std::string& bytes);
-  void Feed_KUKA_Recv (const std::string& bytes);
+  void Feed_HIK_Recv(const std::string &bytes);
+  void Feed_KUKA_Recv(const std::string &bytes);
 
-  void Try_Connect (Flow_Endpoint& ep);
-  void Update_Status (Flow_Endpoint& ep, bool connected, const std::string& info);
+  void Try_Connect(Flow_Endpoint &ep);
+  void Update_Status(Flow_Endpoint &ep, bool connected, const std::string &info);
 
-  void Set_Step (Flow_Step step);
-  void Start_Wait_Timer ( );
-  void Stop_Wait_Timer ( );
-  void Append_Log (const wxString& tag, const wxString& msg);
-  bool Calculate_HIK_Reference_Transform (const wxString& msg,
-                                          robot_model::XyzabcPose* reference_pose,
-                                          robot_model::XyzabcPose* hik_pose,
-                                          robot_model::Matrix4* transform,
-                                          wxString* error_tag,
-                                          wxString* error_message) const;
-  bool Read_Reference_Pose (robot_model::XyzabcPose* pose,
-                            wxString* error_message) const;
-  wxString Build_KUKA_Forward_Body (
-    const wxString& hik_msg,
-    const robot_model::Matrix4* transform) const;
-  void Load_Point_File ( );
-  void Apply_Reference_Pose_To_Ui (const robot_model::XyzabcPose& pose);
+  void Set_Step(Flow_Step step);
+  void Start_Wait_Timer();
+  void Stop_Wait_Timer();
+  void Append_Log(const wxString &tag, const wxString &msg);
+  bool Calculate_HIK_Reference_Transform(const wxString &msg,
+                                         robot_model::XyzabcPose *reference_pose,
+                                         robot_model::XyzabcPose *hik_pose,
+                                         robot_model::Matrix4 *transform,
+                                         wxString *error_tag,
+                                         wxString *error_message) const;
+  bool Read_Reference_Pose(robot_model::XyzabcPose *pose, wxString *error_message) const;
+  wxString Build_KUKA_Forward_Body(const wxString &hik_msg, const robot_model::Matrix4 *transform) const;
+  void Load_Point_File();
+  void Apply_Reference_Pose_To_Ui(const robot_model::XyzabcPose &pose);
 
-  wxString Load_Config ( );
-  void Save_Config ( );
+  wxString Load_Config();
+  void Save_Config();
 
 private:
-  Flow_Endpoint m_hik;    // Server1
-  Flow_Endpoint m_kuka;   // Server2
+  Flow_Endpoint m_hik;  // Server1
+  Flow_Endpoint m_kuka; // Server2
 
-  wxTextCtrl* m_input = nullptr;       // 用户编辑的初始消息
-  wxButton* m_run_btn = nullptr;
-  wxButton* m_stop_btn = nullptr;
-  wxStaticText* m_flow_status_label = nullptr;
-  wxTextCtrl* m_log = nullptr;
-  wxButton* m_clear_btn = nullptr;
-  std::array<wxTextCtrl*, 6> m_reference_pose_inputs = { };
-  std::array<double, 6> m_reference_pose_values = { };
+  wxTextCtrl *m_input = nullptr; // 用户编辑的初始消息
+  wxButton *m_run_btn = nullptr;
+  wxButton *m_stop_btn = nullptr;
+  wxStaticText *m_flow_status_label = nullptr;
+  wxTextCtrl *m_log = nullptr;
+  wxButton *m_clear_btn = nullptr;
+  std::array<wxTextCtrl *, 6> m_reference_pose_inputs = {};
+  std::array<double, 6> m_reference_pose_values = {};
   std::vector<robot_model::XyzabcPose> m_points_to_transform;
   bool m_point_file_loaded = false;
   wxString m_point_file_status;
@@ -131,7 +128,7 @@ private:
   wxString m_config_path;
   wxString m_point_file_path;
 
-  wxDECLARE_EVENT_TABLE ( );
+  wxDECLARE_EVENT_TABLE();
 };
 
 #endif

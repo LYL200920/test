@@ -124,19 +124,14 @@ void Camera_Acquisition_Panel::Update_View(
     const std::vector<Camera_Stream_Config> &stream_configuration,
     bool stream_configuration_loaded)
 {
-  m_device_text->SetLabel(
-      serial_number.empty()
-          ? From_Utf8(u8"设备：未选择")
-          : From_Utf8(u8"设备：") + From_Utf8(serial_number));
-  m_state_text->SetLabel(
-      From_Utf8(u8"状态：") + State_Label(state));
+  m_device_text->SetLabel(serial_number.empty() ? From_Utf8(u8"设备：未选择")
+                                                : From_Utf8(u8"设备：") + From_Utf8(serial_number));
+  m_state_text->SetLabel(From_Utf8(u8"状态：") + State_Label(state));
   m_start_button->Enable(!busy && state == Camera_State::Opened);
   m_stop_button->Enable(!busy && state == Camera_State::Grabbing);
   m_close_button->Enable(!busy && device_open);
-  m_refresh_streams_button->Enable(!busy && device_open &&
-                                   state == Camera_State::Opened);
-  m_stream_config_text->SetLabel(Format_Stream_Configuration(
-      stream_configuration, stream_configuration_loaded));
+  m_refresh_streams_button->Enable(!busy && device_open && state == Camera_State::Opened);
+  m_stream_config_text->SetLabel(Format_Stream_Configuration(stream_configuration, stream_configuration_loaded));
 
   m_stream_config_text->Wrap(350);
 
@@ -151,8 +146,7 @@ void Camera_Acquisition_Panel::Update_View(
   FitInside();
 }
 
-void Camera_Acquisition_Panel::Update_Frame(
-    const std::shared_ptr<const Camera_Frame> &frame)
+void Camera_Acquisition_Panel::Update_Frame(const std::shared_ptr<const Camera_Frame> &frame)
 {
   if (!frame)
   {
@@ -169,20 +163,14 @@ void Camera_Acquisition_Panel::Update_Frame(
     m_last_generation = frame->generation;
     m_last_frame_time = now;
   }
-  else if (frame->generation > m_last_generation &&
-           m_last_frame_time.time_since_epoch().count() != 0)
+  else if (frame->generation > m_last_generation && m_last_frame_time.time_since_epoch().count() != 0)
   {
-    const auto seconds = std::chrono::duration<double>(
-                             now - m_last_frame_time)
-                             .count();
+    const auto seconds = std::chrono::duration<double>(now - m_last_frame_time).count();
     if (seconds > 0.0)
     {
-      const auto sample = static_cast<double>(
-                              frame->generation - m_last_generation) /
-                          seconds;
-      m_measured_fps = m_measured_fps <= 0.0
-                           ? sample
-                           : m_measured_fps * 0.75 + sample * 0.25;
+      const auto sample = static_cast<double>(frame->generation - m_last_generation) / seconds;
+      m_measured_fps = m_measured_fps <= 0.0 ? sample
+                                             : m_measured_fps * 0.75 + sample * 0.25;
     }
     m_last_generation = frame->generation;
     m_last_frame_time = now;

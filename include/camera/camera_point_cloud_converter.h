@@ -42,17 +42,15 @@ struct Camera_Point_Cloud_Filter_Stats
   std::array<double, 6> camera_bounds_mm = {};
 };
 
-bool Convert_Camera_Frame_To_Point_Cloud (
-  const Camera_Frame& frame,
-  Camera_Point_Cloud* destination,
-  std::string* error = nullptr,
-  std::size_t maximum_points = 500000,
-  std::uint32_t required_coordinate_type = 0);
+bool Convert_Camera_Frame_To_Point_Cloud(const Camera_Frame &frame,
+                                         Camera_Point_Cloud *destination,
+                                         std::string *error = nullptr,
+                                         std::size_t maximum_points = 500000,
+                                         std::uint32_t required_coordinate_type = 0);
 
-bool Prepare_Camera_Point_Cloud_For_Overlay (
-  Camera_Point_Cloud* cloud,
-  const Camera_Point_Cloud_Filter_Options& options,
-  Camera_Point_Cloud_Filter_Stats* stats = nullptr,
-  std::string* error = nullptr);
+bool Prepare_Camera_Point_Cloud_For_Overlay(Camera_Point_Cloud *cloud,
+                                            const Camera_Point_Cloud_Filter_Options &options,
+                                            Camera_Point_Cloud_Filter_Stats *stats = nullptr,
+                                            std::string *error = nullptr);
 
 #endif

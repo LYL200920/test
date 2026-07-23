@@ -38,24 +38,21 @@ struct Point_Cloud_Save_Result
 class Point_Cloud_Overlay_Controller
 {
 public:
-  explicit Point_Cloud_Overlay_Controller (Camera_Service& camera_service);
-  ~Point_Cloud_Overlay_Controller ( );
+  explicit Point_Cloud_Overlay_Controller(Camera_Service &camera_service);
+  ~Point_Cloud_Overlay_Controller();
 
-  Point_Cloud_Overlay_Result Load_Latest (vtkRenderer* renderer);
-  Point_Cloud_Save_Result Save_Latest_To_File (
-    const std::filesystem::path& path,
-    const std::string& robot_model_id);
-  Point_Cloud_Overlay_Result Load_File (
-    const std::filesystem::path& path,
-    const std::string& expected_robot_model,
-    vtkRenderer* renderer);
-  void Attach_Renderer (vtkRenderer* renderer);
-  void Clear ( );
-  bool Has_Point_Cloud ( ) const;
-  void Set_Interactive_LOD (bool enabled);
-  std::size_t Displayed_Point_Count ( ) const;
-  std::size_t Interaction_Point_Count ( ) const;
-  std::shared_ptr<const std::vector<float>> Collision_Obstacle_Xyz ( ) const;
+  Point_Cloud_Overlay_Result Load_Latest(vtkRenderer *renderer);
+  Point_Cloud_Save_Result Save_Latest_To_File(const std::filesystem::path &path, const std::string &robot_model_id);
+  Point_Cloud_Overlay_Result Load_File(const std::filesystem::path &path,
+                                       const std::string &expected_robot_model,
+                                       vtkRenderer *renderer);
+  void Attach_Renderer(vtkRenderer *renderer);
+  void Clear();
+  bool Has_Point_Cloud() const;
+  void Set_Interactive_LOD(bool enabled);
+  std::size_t Displayed_Point_Count() const;
+  std::size_t Interaction_Point_Count() const;
+  std::shared_ptr<const std::vector<float>> Collision_Obstacle_Xyz() const;
 
 private:
   class Implementation;

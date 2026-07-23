@@ -22,8 +22,8 @@ class wxStaticText;
 class Camera_Image_View : public wxPanel
 {
 public:
-  Camera_Image_View (wxWindow* parent, Camera_Service& camera_service);
-  ~Camera_Image_View ( ) override;
+  Camera_Image_View(wxWindow *parent, Camera_Service &camera_service);
+  ~Camera_Image_View() override;
 
 private:
   struct Conversion_Job
@@ -44,18 +44,18 @@ private:
     Camera_Display_Image image;
   };
 
-  Camera_Image_Display_Mode Selected_Mode ( ) const;
-  void Submit_Frame (std::shared_ptr<const Camera_Frame> frame);
-  void Worker_Loop ( );
-  void Consume_Result ( );
-  void On_Mode_Changed (wxCommandEvent& event);
-  void On_Timer (wxTimerEvent& event);
+  Camera_Image_Display_Mode Selected_Mode() const;
+  void Submit_Frame(std::shared_ptr<const Camera_Frame> frame);
+  void Worker_Loop();
+  void Consume_Result();
+  void On_Mode_Changed(wxCommandEvent &event);
+  void On_Timer(wxTimerEvent &event);
 
 private:
-  Camera_Service& m_camera_service;
-  Camera_Bitmap_Canvas* m_canvas = nullptr;
-  wxChoice* m_mode_choice = nullptr;
-  wxStaticText* m_status_text = nullptr;
+  Camera_Service &m_camera_service;
+  Camera_Bitmap_Canvas *m_canvas = nullptr;
+  wxChoice *m_mode_choice = nullptr;
+  wxStaticText *m_status_text = nullptr;
   wxTimer m_timer;
 
   std::thread m_worker;
@@ -66,8 +66,7 @@ private:
   std::optional<Conversion_Result> m_pending_result;
   std::uint64_t m_next_job_id = 1;
   std::uint64_t m_last_submitted_generation = 0;
-  Camera_Image_Display_Mode m_last_submitted_mode =
-    Camera_Image_Display_Mode::Automatic;
+  Camera_Image_Display_Mode m_last_submitted_mode = Camera_Image_Display_Mode::Automatic;
   std::uint64_t m_last_displayed_job = 0;
 };
 

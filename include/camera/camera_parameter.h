@@ -26,11 +26,11 @@ enum class Camera_Parameter_Group
 };
 
 using Camera_Parameter_Value = std::variant<
-  bool,
-  std::int64_t,
-  float,
-  std::uint32_t,
-  std::string>;
+    bool,
+    std::int64_t,
+    float,
+    std::uint32_t,
+    std::string>;
 
 struct Camera_Parameter_Choice
 {
@@ -63,19 +63,16 @@ struct Camera_Parameter_Update
   Camera_Parameter_Value value = std::int64_t{0};
 };
 
-bool Decode_Camera_Parameter (
-  const MV3D_RGBD_PARAM& source,
-  Camera_Parameter* parameter,
-  std::string* error = nullptr);
+bool Decode_Camera_Parameter(const MV3D_RGBD_PARAM &source,
+                             Camera_Parameter *parameter,
+                             std::string *error = nullptr);
 
-bool Encode_Camera_Parameter_Update (
-  const Camera_Parameter_Update& update,
-  MV3D_RGBD_PARAM* destination,
-  std::string* error = nullptr);
+bool Encode_Camera_Parameter_Update(const Camera_Parameter_Update &update,
+                                    MV3D_RGBD_PARAM *destination,
+                                    std::string *error = nullptr);
 
-bool Validate_Camera_Parameter_Update (
-  const Camera_Parameter& current,
-  const Camera_Parameter_Update& update,
-  std::string* error = nullptr);
+bool Validate_Camera_Parameter_Update(const Camera_Parameter &current,
+                                      const Camera_Parameter_Update &update,
+                                      std::string *error = nullptr);
 
 #endif

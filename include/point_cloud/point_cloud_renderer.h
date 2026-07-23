@@ -23,54 +23,50 @@
 namespace point_cloud
 {
 
-class Point_Cloud_Renderer
-{
-public:
-  void Attach_Renderer (vtkRenderer* renderer);
-  void Detach_Renderer ( );
-
-  bool Load_Ply (const std::filesystem::path& path,
-                 std::string* error_message = nullptr);
-  bool Set_Point_Data (
-    const std::vector<float>& xyz,
-    const std::vector<std::uint8_t>& rgb = {},
-    std::string* error_message = nullptr);
-  void Set_World_From_Point_Cloud (
-    const robot_model::Matrix4& world_from_point_cloud);
-  void Set_Interactive_LOD (bool enabled);
-  void Clear ( );
-
-  bool Has_Point_Cloud ( ) const { return m_actor != nullptr; }
-  std::size_t Point_Count ( ) const { return m_point_count; }
-  std::size_t Displayed_Point_Count ( ) const;
-  std::size_t Interaction_Point_Count ( ) const
+  class Point_Cloud_Renderer
   {
-    return m_interaction_point_count;
-  }
-  bool Interactive_LOD_Enabled ( ) const { return m_interactive_lod; }
-  bool Get_World_Bounds (double bounds[6]) const;
+  public:
+    void Attach_Renderer(vtkRenderer *renderer);
+    void Detach_Renderer();
 
-private:
-  vtkSmartPointer<vtkPolyData> Build_Display_Data (vtkPolyData* input) const;
-  vtkSmartPointer<vtkPolyData> Build_Interaction_Data (
-    vtkPolyData* input) const;
-  void Build_Actor ( );
-  void Add_Actor_To_Renderer ( );
+    bool Load_Ply(const std::filesystem::path &path, std::string *error_message = nullptr);
+    bool Set_Point_Data(const std::vector<float> &xyz,
+                        const std::vector<std::uint8_t> &rgb = {},
+                        std::string *error_message = nullptr);
+    void Set_World_From_Point_Cloud(const robot_model::Matrix4 &world_from_point_cloud);
+    void Set_Interactive_LOD(bool enabled);
+    void Clear();
 
-private:
-  vtkRenderer* m_renderer = nullptr;
-  vtkSmartPointer<vtkPLYReader> m_reader;
-  vtkSmartPointer<vtkPolyData> m_display_data;
-  vtkSmartPointer<vtkVertexGlyphFilter> m_glyph_filter;
-  vtkSmartPointer<vtkPolyData> m_interaction_display_data;
-  vtkSmartPointer<vtkVertexGlyphFilter> m_interaction_glyph_filter;
-  vtkSmartPointer<vtkPolyDataMapper> m_mapper;
-  vtkSmartPointer<vtkActor> m_actor;
-  vtkSmartPointer<vtkMatrix4x4> m_world_from_point_cloud;
-  std::size_t m_point_count = 0;
-  std::size_t m_interaction_point_count = 0;
-  bool m_interactive_lod = false;
-};
+    bool Has_Point_Cloud() const { return m_actor != nullptr; }
+    std::size_t Point_Count() const { return m_point_count; }
+    std::size_t Displayed_Point_Count() const;
+    std::size_t Interaction_Point_Count() const
+    {
+      return m_interaction_point_count;
+    }
+    bool Interactive_LOD_Enabled() const { return m_interactive_lod; }
+    bool Get_World_Bounds(double bounds[6]) const;
+
+  private:
+    vtkSmartPointer<vtkPolyData> Build_Display_Data(vtkPolyData *input) const;
+    vtkSmartPointer<vtkPolyData> Build_Interaction_Data(vtkPolyData *input) const;
+    void Build_Actor();
+    void Add_Actor_To_Renderer();
+
+  private:
+    vtkRenderer *m_renderer = nullptr;
+    vtkSmartPointer<vtkPLYReader> m_reader;
+    vtkSmartPointer<vtkPolyData> m_display_data;
+    vtkSmartPointer<vtkVertexGlyphFilter> m_glyph_filter;
+    vtkSmartPointer<vtkPolyData> m_interaction_display_data;
+    vtkSmartPointer<vtkVertexGlyphFilter> m_interaction_glyph_filter;
+    vtkSmartPointer<vtkPolyDataMapper> m_mapper;
+    vtkSmartPointer<vtkActor> m_actor;
+    vtkSmartPointer<vtkMatrix4x4> m_world_from_point_cloud;
+    std::size_t m_point_count = 0;
+    std::size_t m_interaction_point_count = 0;
+    bool m_interactive_lod = false;
+  };
 
 } // namespace point_cloud
 

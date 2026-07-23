@@ -15,14 +15,13 @@ struct Camera_Parameter_Definition
   bool affects_stream_config = false;
 };
 
-const std::vector<Camera_Parameter_Definition>&
-First_Stage_Camera_Parameter_Definitions ( );
+const std::vector<Camera_Parameter_Definition> &
+First_Stage_Camera_Parameter_Definitions();
 
-const Camera_Parameter_Definition* Find_Camera_Parameter_Definition (
-  const std::string& key);
+const Camera_Parameter_Definition *Find_Camera_Parameter_Definition(const std::string &key);
 
-std::string Camera_Parameter_Enum_Label (
-  const std::string& key,
-  std::uint32_t value);
+std::string Camera_Parameter_Enum_Label(
+    const std::string &key,
+    std::uint32_t value);
 
 #endif

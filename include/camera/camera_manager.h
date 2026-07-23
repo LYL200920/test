@@ -26,19 +26,17 @@ public:
   bool Open_Selected_Device(std::string *error = nullptr);
   bool Refresh_Current_Device_Info(std::string *error = nullptr);
   bool Refresh_Parameters(std::string *error = nullptr);
-  bool Apply_Parameters(
-      const std::vector<Camera_Parameter_Update> &updates,
-      bool *stream_config_changed = nullptr,
-      std::string *error = nullptr);
+  bool Apply_Parameters(const std::vector<Camera_Parameter_Update> &updates,
+                        bool *stream_config_changed = nullptr,
+                        std::string *error = nullptr);
   bool Refresh_Stream_Configuration(std::string *error = nullptr);
   bool Close_Device(std::string *error = nullptr);
   bool Start_Acquisition(std::string *error = nullptr);
   bool Stop_Acquisition(std::string *error = nullptr);
-  bool Fetch_Frame(
-      Camera_Frame &frame,
-      std::uint32_t timeout_ms,
-      bool *no_data = nullptr,
-      std::string *error = nullptr);
+  bool Fetch_Frame(Camera_Frame &frame,
+                   std::uint32_t timeout_ms,
+                   bool *no_data = nullptr,
+                   std::string *error = nullptr);
   void Shut_Down();
 
   Camera_State State() const { return m_state; }
@@ -79,10 +77,9 @@ private:
   void Restore_Lifecycle_State();
   void Clear_Parameters();
   void Clear_Stream_Configuration();
-  bool Set_Error(
-      Camera_State recovery_state,
-      const std::string &message,
-      std::string *error);
+  bool Set_Error(Camera_State recovery_state,
+                 const std::string &message,
+                 std::string *error);
   void Clear_Error();
 
 private:
