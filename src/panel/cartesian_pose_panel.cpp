@@ -51,10 +51,10 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
   : wxPanel (parent, wxID_ANY)
 {
   auto* root = new wxBoxSizer (wxVERTICAL);
-  auto* title = new wxStaticText (
+  m_title_text = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (
-      u8"法兰世界坐标位姿控制（XYZABC）"));
-  root->Add (title, 0, wxBOTTOM, 8);
+      u8"工具世界坐标位姿控制（XYZABC）"));
+  root->Add (m_title_text, 0, wxBOTTOM, 8);
 
   const std::array<const char*, 6> names = { "X", "Y", "Z", "A", "B", "C" };
   for( size_t index = 0; index < names.size ( ); ++index )
@@ -147,6 +147,18 @@ void Cartesian_Pose_Panel::Set_World_From_Flange (
   m_pose = m_actual_pose;
   Update_Sliders ( );
   Update_Labels ( );
+}
+
+void Cartesian_Pose_Panel::Set_Control_Frame_Name(const std::string &name)
+{
+  if (!m_title_text)
+  {
+    return;
+  }
+  m_title_text->SetLabel(
+    wxString::FromUTF8(u8"工具世界坐标位姿控制（") +
+    wxString::FromUTF8(name.c_str()) +
+    wxString::FromUTF8(u8" / XYZABC）"));
 }
 
 void Cartesian_Pose_Panel::Clear ( )

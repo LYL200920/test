@@ -39,6 +39,7 @@ Robot_Model_View::~Robot_Model_View()
   m_drag_update_timer.Stop();
   m_collision_index_rebuild_coordinator.Shutdown();
   m_flange_interaction.Detach_Renderer();
+  m_tool_frame_renderer.Detach_Renderer();
   m_world_frame_renderer.Detach_Renderer();
   m_render_controller.Detach_Scene();
   m_scene.reset();
@@ -54,6 +55,7 @@ void Robot_Model_View::Load_Model(const robot_model::Robot_Model_Info &model)
   if (m_scene)
   {
     m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+    m_tool_frame_renderer.Attach_Renderer(m_scene->Renderer());
     m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
     m_world_frame_renderer.Set_Visible(m_world_frame_renderer.Is_Visible());
   }
@@ -189,6 +191,26 @@ bool Robot_Model_View::Get_World_From_Flange(robot_model::Matrix4 *pose) const
     return false;
   *pose = m_render_controller.World_From_Flange();
   return true;
+}
+
+bool Robot_Model_View::Get_World_From_Tool(robot_model::Matrix4 *pose) const
+{
+  if (!pose || !m_render_controller.Has_Flange_Pose())
+  {
+    return false;
+  }
+  *pose = robot_model::Build_World_From_Tool(
+    m_render_controller.World_From_Flange(),
+    m_tool_coordinate);
+  return true;
+}
+
+void Robot_Model_View::Set_Tool_Coordinate(
+  const robot_model::Tool_Coordinate_Profile &tool)
+{
+  m_tool_coordinate = tool;
+  Update_Flange_Frame();
+  Render();
 }
 
 bool Robot_Model_View::Set_Collision_Obstacle_Points(const std::vector<float> &xyz,
@@ -361,6 +383,7 @@ void Robot_Model_View::Ensure_VTK()
   m_scene->Init(this, m_gl_context);
   m_render_controller.Attach_Scene(m_scene.get());
   m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+  m_tool_frame_renderer.Attach_Renderer(m_scene->Renderer());
   m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
   robot_model::Matrix4 identity = {};
   for (int index = 0; index < 4; ++index)
@@ -374,10 +397,16 @@ void Robot_Model_View::Update_Flange_Frame()
   if (m_render_controller.Has_Flange_Pose())
   {
     m_flange_interaction.Update_Flange_Pose(&m_render_controller.World_From_Flange());
+    m_tool_frame_renderer.Set_World_From_Frame(
+      robot_model::Build_World_From_Tool(
+        m_render_controller.World_From_Flange(),
+        m_tool_coordinate));
+    m_tool_frame_renderer.Set_Visible(m_tool_coordinate.id != "flange");
   }
   else
   {
     m_flange_interaction.Update_Flange_Pose(nullptr);
+    m_tool_frame_renderer.Set_Visible(false);
   }
 }
 

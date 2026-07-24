@@ -7,6 +7,7 @@
 
 #include <array>
 #include <functional>
+#include <string>
 
 class wxStaticText;
 class wxToggleButton;
@@ -19,6 +20,7 @@ public:
   explicit Cartesian_Pose_Panel(wxWindow *parent);
 
   void Set_World_From_Flange(const robot_model::Matrix4 &world_from_flange);
+  void Set_Control_Frame_Name(const std::string &name);
   void Clear();
   void Set_On_World_Frame_Visibility_Changed(std::function<void(bool)> callback);
   void Set_On_Pose_Changed(std::function<void(const robot_model::XyzabcPose &)> callback);
@@ -40,6 +42,7 @@ private:
   std::array<wxSlider *, 6> m_pose_sliders = {};
   std::array<Fine_Adjust_Control *, 6> m_fine_adjust_controls = {};
   wxStaticText *m_warning_text = nullptr;
+  wxStaticText *m_title_text = nullptr;
   wxToggleButton *m_world_frame_button = nullptr;
   robot_model::XyzabcPose m_pose = {};
   robot_model::XyzabcPose m_actual_pose = {};

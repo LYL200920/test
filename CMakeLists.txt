@@ -236,6 +236,9 @@ if(BUILD_TESTING)
   vtk_module_autoinit(TARGETS robot_collision_detector_tests
                       MODULES ${VTK_LIBRARIES})
 
+  add_project_test(tool_coordinate_tests tool_coordinate_tests.cpp)
+  target_link_libraries(tool_coordinate_tests PRIVATE robot_model)
+
   add_project_test(camera_frame_buffer_tests camera_frame_buffer_tests.cpp)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)
 

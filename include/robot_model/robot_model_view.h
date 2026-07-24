@@ -9,6 +9,7 @@
 #include "flange_drag_update_coordinator.h"
 #include "flange_drag_motion_executor.h"
 #include "robot_drag_performance_collector.h"
+#include "tool_coordinate.h"
 
 #include <wx/glcanvas.h>
 #include <wx/overlay.h>
@@ -53,6 +54,9 @@ public:
   void Set_Flange_Frame_Visible(bool visible);
   bool Has_Flange_Pose() const;
   bool Get_World_From_Flange(robot_model::Matrix4 *pose) const;
+  bool Get_World_From_Tool(robot_model::Matrix4 *pose) const;
+  void Set_Tool_Coordinate(
+    const robot_model::Tool_Coordinate_Profile &tool);
   bool Set_Collision_Obstacle_Points(const std::vector<float> &xyz, std::string *error_message = nullptr);
   bool Set_Collision_Obstacle_Points(std::shared_ptr<const std::vector<float>> xyz, std::string *error_message = nullptr);
   void Clear_Collision_Obstacle_Points();
@@ -123,6 +127,9 @@ private:
   std::unique_ptr<robot_model::Vtk_Scene> m_scene;
   robot_model::Robot_Render_Controller m_render_controller;
   robot_model::Coordinate_Frame_Renderer m_world_frame_renderer{500.0, 20.0, true};
+  robot_model::Coordinate_Frame_Renderer m_tool_frame_renderer{140.0, 10.0, true};
+  robot_model::Tool_Coordinate_Profile m_tool_coordinate{
+    "flange", "Flange", {}};
   robot_model::Flange_Interaction_Controller m_flange_interaction;
   std::function<void(const robot_model::Robot_Position_IK_Result &)> m_on_flange_dragged;
   std::function<void(const robot_model::Robot_Pose_IK_Result &)> m_on_flange_pose_dragged;

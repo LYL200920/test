@@ -9,6 +9,7 @@
 #include "joint_control_panel.h"
 #include "trajectory_control_panel.h"
 #include "cartesian_pose_panel.h"
+#include "tool_coordinate.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -100,6 +101,8 @@ private:
   void Load_Model_List();
   void Load_Default_Model();
   bool Load_Model(size_t model_index, std::string *error_message = nullptr);
+  const robot_model::Tool_Coordinate_Profile &Active_Tool() const;
+  void Apply_Active_Tool();
 
 private:
   wxStaticText *m_model_name_text = nullptr;
@@ -132,6 +135,7 @@ private:
   robot_model::Robot_Teach_Point_Store m_teach_point_store;
   std::string m_current_model_id;
   Camera_Pose_Controller m_camera_pose_controller;
+  robot_model::Tool_Coordinate_Configuration m_tool_configuration;
   int m_expanded_right_tool_width = 476;
   int m_expanded_teach_point_width = 240;
 };

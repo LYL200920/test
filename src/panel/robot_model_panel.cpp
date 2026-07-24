@@ -6,6 +6,7 @@
 #include "robot_joint_state_builder.h"
 #include "robot_model_config_dialog.h"
 #include "robot_model_repository.h"
+#include "tool_coordinate_repository.h"
 #include "robot_trajectory_io.h"
 #include "right_tool_panel.h"
 #include "net_panel.h"
@@ -506,6 +507,17 @@ Robot_Model_Panel::Robot_Model_Panel (
 
   Select_Display_Page (Main_Display_Page::Robot);
 
+  std::string tool_error;
+  if( !robot_model::Load_Tool_Coordinate_Configuration (
+        robot_model::Tool_Coordinate_Config_Path ( ),
+        &m_tool_configuration,
+        &tool_error) )
+  {
+    m_tool_configuration =
+      robot_model::Default_Tool_Coordinate_Configuration ( );
+  }
+  Apply_Active_Tool ( );
+
   Load_Model_List ( );
   Load_Default_Model ( );
 }
@@ -718,22 +730,50 @@ void Robot_Model_Panel::Show_Model_Configuration (wxWindow* parent)
   Robot_Model_Config_Dialog dialog (
     parent ? parent : this,
     m_models,
-    m_current_model_id);
+    m_current_model_id,
+    m_tool_configuration);
   if( dialog.ShowModal ( ) != wxID_OK )
   {
     return;
   }
 
-  wxBusyCursor busy_cursor;
-  std::string error_message;
-  if( !Load_Model (dialog.Selected_Model_Index ( ), &error_message) )
+  if( dialog.Tool_Apply_Requested ( ) )
   {
-    m_status_text->SetLabel (wxString::FromUTF8 (u8"机械臂模型加载失败"));
-    wxMessageBox (
-      wxString::FromUTF8 (error_message.c_str ( )),
-      wxString::FromUTF8 (u8"机械臂加载失败"),
-      wxOK | wxICON_ERROR,
-      parent ? parent : this);
+    std::string error_message;
+    if( !robot_model::Save_Tool_Coordinate_Configuration (
+          robot_model::Tool_Coordinate_Config_Path ( ),
+          dialog.Tool_Configuration ( ),
+          &error_message) )
+    {
+      wxMessageBox (
+        wxString::FromUTF8 (error_message.c_str ( )),
+        wxString::FromUTF8 (u8"工具坐标保存失败"),
+        wxOK | wxICON_ERROR,
+        parent ? parent : this);
+      return;
+    }
+    m_tool_configuration = dialog.Tool_Configuration ( );
+    Apply_Active_Tool ( );
+    Update_Cartesian_Pose ( );
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"当前工具坐标：") +
+      wxString::FromUTF8 (Active_Tool ( ).name.c_str ( )));
+    return;
+  }
+
+  if( dialog.Model_Load_Requested ( ) )
+  {
+    wxBusyCursor busy_cursor;
+    std::string error_message;
+    if( !Load_Model (dialog.Selected_Model_Index ( ), &error_message) )
+    {
+      m_status_text->SetLabel (wxString::FromUTF8 (u8"机械臂模型加载失败"));
+      wxMessageBox (
+        wxString::FromUTF8 (error_message.c_str ( )),
+        wxString::FromUTF8 (u8"机械臂加载失败"),
+        wxOK | wxICON_ERROR,
+        parent ? parent : this);
+    }
   }
 }
 
@@ -1198,10 +1238,10 @@ void Robot_Model_Panel::Sync_Joint_Controls_From_State ( )
 void Robot_Model_Panel::Update_Cartesian_Pose ( )
 {
   if( !m_cartesian_pose_panel || !m_view ) return;
-  robot_model::Matrix4 world_from_flange = { };
-  if( m_view->Get_World_From_Flange (&world_from_flange) )
+  robot_model::Matrix4 world_from_tool = { };
+  if( m_view->Get_World_From_Tool (&world_from_tool) )
   {
-    m_cartesian_pose_panel->Set_World_From_Flange (world_from_flange);
+    m_cartesian_pose_panel->Set_World_From_Flange (world_from_tool);
   }
   else
   {
@@ -1223,7 +1263,9 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
   options.max_iterations = 100;
   options.time_budget_ms = 8.0;
   const auto result = m_view->Move_Flange_To_Pose (
-    robot_model::Build_Zyx_Pose_Matrix (target_pose),
+    robot_model::Build_World_From_Flange_Target (
+      robot_model::Build_Zyx_Pose_Matrix (target_pose),
+      Active_Tool ( )),
     options);
   if( result.status == robot_model::Robot_IK_Status::Invalid_Model )
   {
@@ -1542,6 +1584,36 @@ void Robot_Model_Panel::Resize_Teach_Point_List (bool collapsed)
     TEACH_POINT_COLLAPSED_WIDTH,
     maximum_left_width);
   m_workspace_splitter->SetSashPosition (left_width, true);
+}
+
+const robot_model::Tool_Coordinate_Profile&
+Robot_Model_Panel::Active_Tool ( ) const
+{
+  const auto* tool = robot_model::Find_Tool_Coordinate (
+    m_tool_configuration,
+    m_tool_configuration.active_tool_id);
+  if( tool )
+  {
+    return *tool;
+  }
+  static const robot_model::Tool_Coordinate_Profile fallback = {
+    "flange", "Flange", {}};
+  return fallback;
+}
+
+void Robot_Model_Panel::Apply_Active_Tool ( )
+{
+  robot_model::Normalize_Tool_Coordinate_Configuration (
+    &m_tool_configuration);
+  const auto& tool = Active_Tool ( );
+  if( m_view )
+  {
+    m_view->Set_Tool_Coordinate (tool);
+  }
+  if( m_cartesian_pose_panel )
+  {
+    m_cartesian_pose_panel->Set_Control_Frame_Name (tool.name);
+  }
 }
 
 void Robot_Model_Panel::Load_Model_List ( )
