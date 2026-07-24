@@ -15,9 +15,7 @@ wxDEFINE_EVENT(wxEVT_CAMERA_UPDATED, wxThreadEvent);
 
 Camera_Service::Camera_Service()
 {
-  Bind(wxEVT_CAMERA_WORKER_RESULT,
-       &Camera_Service::On_Worker_Result,
-       this);
+  Bind(wxEVT_CAMERA_WORKER_RESULT, &Camera_Service::On_Worker_Result, this);
   m_worker = std::thread(&Camera_Service::Worker_Loop, this);
 }
 
@@ -35,9 +33,7 @@ Camera_Service::~Camera_Service()
   }
 
   DeletePendingEvents();
-  Unbind(wxEVT_CAMERA_WORKER_RESULT,
-         &Camera_Service::On_Worker_Result,
-         this);
+  Unbind(wxEVT_CAMERA_WORKER_RESULT, &Camera_Service::On_Worker_Result, this);
 }
 
 std::uint64_t Camera_Service::Request_Refresh_Devices()
@@ -45,8 +41,7 @@ std::uint64_t Camera_Service::Request_Refresh_Devices()
   return Enqueue(Camera_Operation::Refresh_Devices);
 }
 
-std::uint64_t Camera_Service::Request_Select_Device(
-    const std::string &serial_number)
+std::uint64_t Camera_Service::Request_Select_Device(const std::string &serial_number)
 {
   return Enqueue(Camera_Operation::Select_Device, serial_number);
 }
@@ -123,14 +118,10 @@ void Camera_Service::Worker_Loop()
     bool has_command = false;
     {
       std::unique_lock<std::mutex> lock(m_command_mutex);
-      if (m_commands.empty() &&
-          core.State() != Camera_State::Grabbing &&
-          !m_exit_requested)
+      if (m_commands.empty() && core.State() != Camera_State::Grabbing && !m_exit_requested)
       {
-        m_command_ready.wait(
-            lock,
-            [this]
-            { return m_exit_requested || !m_commands.empty(); });
+        m_command_ready.wait(lock, [this]
+                             { return m_exit_requested || !m_commands.empty(); });
       }
 
       if (m_exit_requested)
@@ -156,8 +147,7 @@ void Camera_Service::Worker_Loop()
       Camera_Frame frame;
       bool no_data = false;
       std::string error;
-      if (core.Fetch_Frame(
-              frame, FRAME_FETCH_TIMEOUT_MS, &no_data, &error))
+      if (core.Fetch_Frame(frame, FRAME_FETCH_TIMEOUT_MS, &no_data, &error))
       {
         m_frame_buffer.Publish(std::move(frame));
       }
@@ -165,8 +155,7 @@ void Camera_Service::Worker_Loop()
       {
         Command frame_error;
         frame_error.operation = Camera_Operation::Frame_Error;
-        Post_Worker_Result(
-            Build_Result(core, frame_error, false, std::move(error)));
+        Post_Worker_Result(Build_Result(core, frame_error, false, std::move(error)));
       }
     }
   }
@@ -175,9 +164,7 @@ void Camera_Service::Worker_Loop()
   m_frame_buffer.Clear();
 }
 
-Camera_Service::Worker_Result Camera_Service::Execute_Command(
-    Camera_Manager &core,
-    const Command &command)
+Camera_Service::Worker_Result Camera_Service::Execute_Command(Camera_Manager &core, const Command &command)
 {
   bool success = false;
   std::string error;
@@ -210,8 +197,7 @@ Camera_Service::Worker_Result Camera_Service::Execute_Command(
   case Camera_Operation::Apply_Parameters:
   {
     bool stream_config_changed = false;
-    success = core.Apply_Parameters(
-        command.parameter_updates, &stream_config_changed, &error);
+    success = core.Apply_Parameters(command.parameter_updates, &stream_config_changed, &error);
     if (stream_config_changed)
     {
       m_frame_buffer.Clear();
@@ -254,11 +240,10 @@ Camera_Service::Worker_Result Camera_Service::Execute_Command(
   return Build_Result(core, command, success, std::move(error));
 }
 
-Camera_Service::Worker_Result Camera_Service::Build_Result(
-    const Camera_Manager &core,
-    const Command &command,
-    bool success,
-    std::string error) const
+Camera_Service::Worker_Result Camera_Service::Build_Result(const Camera_Manager &core,
+                                                           const Command &command,
+                                                           bool success,
+                                                           std::string error) const
 {
   Worker_Result result;
   result.request_id = command.request_id;
@@ -277,8 +262,7 @@ Camera_Service::Worker_Result Camera_Service::Build_Result(
   result.parameters_loaded = core.Parameters_Loaded();
   result.parameter_status = core.Parameter_Status();
   result.stream_configuration = core.Stream_Configuration();
-  result.stream_configuration_loaded =
-      core.Stream_Configuration_Loaded();
+  result.stream_configuration_loaded = core.Stream_Configuration_Loaded();
   result.selected_serial_number = core.Selected_Serial_Number();
   return result;
 }

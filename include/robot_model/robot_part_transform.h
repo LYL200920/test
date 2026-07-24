@@ -7,13 +7,11 @@
 namespace robot_model
 {
 
-// Reproduces the mesh calibration order Rx * Ry * Rz * T using only the
-// renderer-independent Matrix4 representation.
-Matrix4 Build_Part_Calibration_Matrix (
-  const Robot_Part_Calibration& calibration);
+  // Reproduces the mesh calibration order Rx * Ry * Rz * T using only the
+  // renderer-independent Matrix4 representation.
+  Matrix4 Build_Part_Calibration_Matrix(const Robot_Part_Calibration &calibration);
 
-Point3 Transform_Part_Point (const Robot_Part_Calibration& calibration,
-                             const Point3& point);
+  Point3 Transform_Part_Point(const Robot_Part_Calibration &calibration, const Point3 &point);
 
 } // namespace robot_model
 

@@ -9,10 +9,9 @@
 namespace robot_model
 {
 
-std::filesystem::path Find_Robot_Root ( );
+  std::filesystem::path Find_Robot_Root();
 
-std::vector<Robot_Model_Info> Scan_Models_In_Directory (
-  const std::filesystem::path& root);
+  std::vector<Robot_Model_Info> Scan_Models_In_Directory(const std::filesystem::path &root);
 
 } // namespace robot_model
 

@@ -6,24 +6,23 @@
 
 namespace
 {
-bool Fail(MV3D_RGBD_STATUS code, const char *operation, std::string *error)
-{
-  if (error)
+  bool Fail(MV3D_RGBD_STATUS code, const char *operation, std::string *error)
   {
-    std::ostringstream text;
-    text << operation << " failed: 0x" << std::hex << std::uppercase
-         << static_cast<std::uint32_t>(code);
-    *error = text.str();
+    if (error)
+    {
+      std::ostringstream text;
+      text << operation << " failed: 0x" << std::hex << std::uppercase << static_cast<std::uint32_t>(code);
+      *error = text.str();
+    }
+    return false;
   }
-  return false;
-}
 
-template <std::size_t Size>
-std::string From_Fixed_String(const char (&value)[Size])
-{
-  const auto end = std::find(std::begin(value), std::end(value), '\0');
-  return std::string(std::begin(value), end);
-}
+  template <std::size_t Size>
+  std::string From_Fixed_String(const char (&value)[Size])
+  {
+    const auto end = std::find(std::begin(value), std::end(value), '\0');
+    return std::string(std::begin(value), end);
+  }
 } // namespace
 
 Mv3d_Rgbd_Camera::~Mv3d_Rgbd_Camera()
@@ -72,10 +71,9 @@ bool Mv3d_Rgbd_Camera::Enumerate_Devices(std::vector<CAMERA_DEVICE_INFO> &device
   return Enumerate_Devices(devices, sdk_devices, error);
 }
 
-bool Mv3d_Rgbd_Camera::Enumerate_Devices(
-    std::vector<CAMERA_DEVICE_INFO> &devices,
-    std::vector<MV3D_RGBD_DEVICE_INFO> &sdk_devices,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Enumerate_Devices(std::vector<CAMERA_DEVICE_INFO> &devices,
+                                         std::vector<MV3D_RGBD_DEVICE_INFO> &sdk_devices,
+                                         std::string *error)
 {
   if (error)
     error->clear();
@@ -112,17 +110,14 @@ bool Mv3d_Rgbd_Camera::Enumerate_Devices(
     device.device_type = static_cast<std::uint32_t>(source.enDeviceType);
     device.model_name = From_Fixed_String(source.chModelName);
     device.serial_number = From_Fixed_String(source.chSerialNumber);
-    if (source.enDeviceType == DeviceType_Ethernet ||
-        source.enDeviceType == DeviceType_Ethernet_Vir)
+    if (source.enDeviceType == DeviceType_Ethernet || source.enDeviceType == DeviceType_Ethernet_Vir)
       device.ip_address = From_Fixed_String(source.SpecialInfo.stNetInfo.chCurrentIp);
     devices.push_back(std::move(device));
   }
   return true;
 }
 
-bool Mv3d_Rgbd_Camera::Open_Device(
-    const MV3D_RGBD_DEVICE_INFO &sdk_device,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Open_Device(const MV3D_RGBD_DEVICE_INFO &sdk_device, std::string *error)
 {
   if (error)
     error->clear();
@@ -145,9 +140,7 @@ bool Mv3d_Rgbd_Camera::Open_Device(
   return true;
 }
 
-bool Mv3d_Rgbd_Camera::Get_Device_Info(
-    Camera_Device_Detail &detail,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Get_Device_Info(Camera_Device_Detail &detail, std::string *error)
 {
   if (error)
     error->clear();
@@ -165,10 +158,9 @@ bool Mv3d_Rgbd_Camera::Get_Device_Info(
   return true;
 }
 
-bool Mv3d_Rgbd_Camera::Get_Parameter(
-    const std::string &key,
-    Camera_Parameter &parameter,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Get_Parameter(const std::string &key,
+                                     Camera_Parameter &parameter,
+                                     std::string *error)
 {
   if (error)
     error->clear();
@@ -180,8 +172,7 @@ bool Mv3d_Rgbd_Camera::Get_Parameter(
     return Fail(MV3D_RGBD_E_PARAMETER, "Camera parameter key is empty", error);
 
   MV3D_RGBD_PARAM sdk_parameter{};
-  const auto status = MV3D_RGBD_GetParam(
-      m_handle, key.c_str(), &sdk_parameter);
+  const auto status = MV3D_RGBD_GetParam(m_handle, key.c_str(), &sdk_parameter);
   if (status != MV3D_RGBD_OK)
     return Fail(status, "MV3D_RGBD_GetParam", error);
 
@@ -189,9 +180,7 @@ bool Mv3d_Rgbd_Camera::Get_Parameter(
   return Decode_Camera_Parameter(sdk_parameter, &parameter, error);
 }
 
-bool Mv3d_Rgbd_Camera::Set_Parameter(
-    const Camera_Parameter_Update &update,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Set_Parameter(const Camera_Parameter_Update &update, std::string *error)
 {
   if (error)
     error->clear();
@@ -205,16 +194,13 @@ bool Mv3d_Rgbd_Camera::Set_Parameter(
   if (!Encode_Camera_Parameter_Update(update, &sdk_parameter, error))
     return false;
 
-  const auto status = MV3D_RGBD_SetParam(
-      m_handle, update.key.c_str(), &sdk_parameter);
+  const auto status = MV3D_RGBD_SetParam(m_handle, update.key.c_str(), &sdk_parameter);
   if (status != MV3D_RGBD_OK)
     return Fail(status, "MV3D_RGBD_SetParam", error);
   return true;
 }
 
-bool Mv3d_Rgbd_Camera::Get_Stream_Configuration(
-    std::vector<Camera_Stream_Config> &streams,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Get_Stream_Configuration(std::vector<Camera_Stream_Config> &streams, std::string *error)
 {
   if (error)
     error->clear();
@@ -287,11 +273,10 @@ bool Mv3d_Rgbd_Camera::Stop(std::string *error)
   return true;
 }
 
-bool Mv3d_Rgbd_Camera::Fetch_Frame(
-    Camera_Frame &frame,
-    std::uint32_t timeout_ms,
-    MV3D_RGBD_STATUS *status_code,
-    std::string *error)
+bool Mv3d_Rgbd_Camera::Fetch_Frame(Camera_Frame &frame,
+                                   std::uint32_t timeout_ms,
+                                   MV3D_RGBD_STATUS *status_code,
+                                   std::string *error)
 {
   if (error)
     error->clear();
@@ -315,8 +300,7 @@ bool Mv3d_Rgbd_Camera::Fetch_Frame(
 
   frame.valid_info = sdk_frame.nValidInfo;
   frame.trigger_id = sdk_frame.nTriggerId;
-  const auto image_count = std::min<std::size_t>(
-      sdk_frame.nImageCount, MV3D_RGBD_MAX_IMAGE_COUNT);
+  const auto image_count = std::min<std::size_t>(sdk_frame.nImageCount, MV3D_RGBD_MAX_IMAGE_COUNT);
   frame.images.reserve(image_count);
   for (std::size_t i = 0; i < image_count; ++i)
   {

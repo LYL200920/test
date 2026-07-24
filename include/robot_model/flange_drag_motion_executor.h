@@ -41,15 +41,12 @@ namespace robot_model
   class Flange_Drag_Motion_Executor
   {
   public:
-    using Position_Mover = std::function<Flange_Position_Motion_Outcome(
-        const Point3 &)>;
-    using Pose_Mover = std::function<Flange_Pose_Motion_Outcome(
-        const Matrix4 &)>;
+    using Position_Mover = std::function<Flange_Position_Motion_Outcome(const Point3 &)>;
+    using Pose_Mover = std::function<Flange_Pose_Motion_Outcome(const Matrix4 &)>;
 
-    Flange_Drag_Motion_Execution Execute(
-        const Flange_Drag_Update &update,
-        const Position_Mover &move_position,
-        const Pose_Mover &move_pose) const;
+    Flange_Drag_Motion_Execution Execute(const Flange_Drag_Update &update,
+                                         const Position_Mover &move_position,
+                                         const Pose_Mover &move_pose) const;
   };
 
 } // namespace robot_model

@@ -8,12 +8,12 @@
 
 namespace
 {
-bool Return_Error(const std::string &message, std::string *error)
-{
-  if (error)
-    *error = message;
-  return false;
-}
+  bool Return_Error(const std::string &message, std::string *error)
+  {
+    if (error)
+      *error = message;
+    return false;
+  }
 } // namespace
 
 Camera_Manager::~Camera_Manager()
@@ -99,12 +99,11 @@ bool Camera_Manager::Refresh_Devices(std::string *error)
     return true;
   }
 
-  const auto selected = std::find_if(
-      m_devices.begin(), m_devices.end(),
-      [this](const CAMERA_DEVICE_INFO &device)
-      {
-        return device.serial_number == m_selected_serial_number;
-      });
+  const auto selected = std::find_if(m_devices.begin(), m_devices.end(),
+                                     [this](const CAMERA_DEVICE_INFO &device)
+                                     {
+                                       return device.serial_number == m_selected_serial_number;
+                                     });
   if (selected == m_devices.end())
   {
     m_selected_serial_number.clear();
@@ -112,8 +111,7 @@ bool Camera_Manager::Refresh_Devices(std::string *error)
     return true;
   }
 
-  const auto selected_index = static_cast<std::size_t>(
-      std::distance(m_devices.begin(), selected));
+  const auto selected_index = static_cast<std::size_t>(std::distance(m_devices.begin(), selected));
   if (selected_index >= m_sdk_devices.size())
   {
     m_selected_serial_number.clear();
@@ -131,17 +129,15 @@ bool Camera_Manager::Select_Device(const std::string &serial_number)
   if (!Can_Select_Device())
     return false;
 
-  const auto selected = std::find_if(
-      m_devices.begin(), m_devices.end(),
-      [&serial_number](const CAMERA_DEVICE_INFO &device)
-      {
-        return device.serial_number == serial_number;
-      });
+  const auto selected = std::find_if(m_devices.begin(), m_devices.end(),
+                                     [&serial_number](const CAMERA_DEVICE_INFO &device)
+                                     {
+                                       return device.serial_number == serial_number;
+                                     });
   if (selected == m_devices.end())
     return false;
 
-  const auto selected_index = static_cast<std::size_t>(
-      std::distance(m_devices.begin(), selected));
+  const auto selected_index = static_cast<std::size_t>(std::distance(m_devices.begin(), selected));
   if (selected_index >= m_sdk_devices.size())
     return false;
 
@@ -216,9 +212,7 @@ bool Camera_Manager::Refresh_Parameters(std::string *error)
     {
       for (const auto value : parameter.enum_values)
       {
-        parameter.choices.push_back({
-            static_cast<std::int64_t>(value),
-            Camera_Parameter_Enum_Label(parameter.key, value)});
+        parameter.choices.push_back({static_cast<std::int64_t>(value), Camera_Parameter_Enum_Label(parameter.key, value)});
       }
     }
     else
@@ -229,15 +223,11 @@ bool Camera_Manager::Refresh_Parameters(std::string *error)
         (parameter.type == Camera_Parameter_Type::Int ||
          parameter.type == Camera_Parameter_Type::Enum))
     {
-      const auto current_value = parameter.type == Camera_Parameter_Type::Int
-                                     ? std::get<std::int64_t>(parameter.current_value)
-                                     : static_cast<std::int64_t>(
-                                           std::get<std::uint32_t>(
-                                               parameter.current_value));
-      const auto choice_found = std::find_if(
-          parameter.choices.begin(), parameter.choices.end(),
-          [current_value](const Camera_Parameter_Choice &choice)
-          { return choice.value == current_value; });
+      const auto current_value = parameter.type == Camera_Parameter_Type::Int ? std::get<std::int64_t>(parameter.current_value)
+                                                                              : static_cast<std::int64_t>(std::get<std::uint32_t>(parameter.current_value));
+      const auto choice_found = std::find_if(parameter.choices.begin(), parameter.choices.end(),
+                                             [current_value](const Camera_Parameter_Choice &choice)
+                                             { return choice.value == current_value; });
       if (choice_found == parameter.choices.end())
       {
         parameter.choices.push_back({current_value, "当前设备值"});
@@ -249,9 +239,8 @@ bool Camera_Manager::Refresh_Parameters(std::string *error)
   if (parameters.empty())
   {
     Clear_Parameters();
-    const auto message = first_operation_error.empty()
-                             ? "No supported camera parameters were found"
-                             : first_operation_error;
+    const auto message = first_operation_error.empty() ? "No supported camera parameters were found"
+                                                       : first_operation_error;
     m_parameter_status = message;
     return Return_Error(message, error);
   }
@@ -259,8 +248,7 @@ bool Camera_Manager::Refresh_Parameters(std::string *error)
   m_parameters = std::move(parameters);
   m_parameters_loaded = true;
   std::ostringstream status;
-  status << "已读取 " << m_parameters.size() << " / " << definitions.size()
-         << " 项参数";
+  status << "已读取 " << m_parameters.size() << " / " << definitions.size() << " 项参数";
   if (unavailable_count > 0)
     status << "，" << unavailable_count << " 项当前设备不可用";
   m_parameter_status = status.str();
@@ -268,10 +256,9 @@ bool Camera_Manager::Refresh_Parameters(std::string *error)
   return true;
 }
 
-bool Camera_Manager::Apply_Parameters(
-    const std::vector<Camera_Parameter_Update> &updates,
-    bool *stream_config_changed,
-    std::string *error)
+bool Camera_Manager::Apply_Parameters(const std::vector<Camera_Parameter_Update> &updates,
+                                      bool *stream_config_changed,
+                                      std::string *error)
 {
   if (error)
     error->clear();
@@ -294,10 +281,9 @@ bool Camera_Manager::Apply_Parameters(
   std::string apply_error;
   for (const auto &update : updates)
   {
-    const auto current = std::find_if(
-        m_parameters.begin(), m_parameters.end(),
-        [&update](const Camera_Parameter &parameter)
-        { return parameter.key == update.key; });
+    const auto current = std::find_if(m_parameters.begin(), m_parameters.end(),
+                                      [&update](const Camera_Parameter &parameter)
+                                      { return parameter.key == update.key; });
     if (current == m_parameters.end())
     {
       apply_error = update.key + ": parameter is not available";
@@ -305,15 +291,13 @@ bool Camera_Manager::Apply_Parameters(
     }
 
     std::string operation_error;
-    if (!Validate_Camera_Parameter_Update(*current, update, &operation_error) ||
-        !m_camera.Set_Parameter(update, &operation_error))
+    if (!Validate_Camera_Parameter_Update(*current, update, &operation_error) || !m_camera.Set_Parameter(update, &operation_error))
     {
       apply_error = current->display_name + ": " + operation_error;
       break;
     }
 
-    changed_stream_config =
-        changed_stream_config || current->affects_stream_config;
+    changed_stream_config = changed_stream_config || current->affects_stream_config;
     ++applied_count;
   }
 
@@ -342,9 +326,8 @@ bool Camera_Manager::Refresh_Stream_Configuration(std::string *error)
 
   Restore_Lifecycle_State();
   if (m_state != Camera_State::Opened)
-    return Return_Error(
-        "Stream configuration can only be read while acquisition is stopped",
-        error);
+    return Return_Error("Stream configuration can only be read while acquisition is stopped",
+                        error);
 
   std::vector<Camera_Stream_Config> streams;
   std::string operation_error;
@@ -390,8 +373,7 @@ bool Camera_Manager::Close_Device(std::string *error)
   Restore_Lifecycle_State();
   if (m_state == Camera_State::Grabbing && !Stop_Acquisition(error))
     return false;
-  if (m_state == Camera_State::Uninitialized ||
-      m_state == Camera_State::Initialized)
+  if (m_state == Camera_State::Uninitialized || m_state == Camera_State::Initialized)
   {
     m_device_detail.reset();
     Clear_Parameters();
@@ -465,11 +447,10 @@ bool Camera_Manager::Stop_Acquisition(std::string *error)
   return true;
 }
 
-bool Camera_Manager::Fetch_Frame(
-    Camera_Frame &frame,
-    std::uint32_t timeout_ms,
-    bool *no_data,
-    std::string *error)
+bool Camera_Manager::Fetch_Frame(Camera_Frame &frame,
+                                 std::uint32_t timeout_ms,
+                                 bool *no_data,
+                                 std::string *error)
 {
   if (error)
     error->clear();
@@ -527,8 +508,7 @@ bool Camera_Manager::Is_Device_Open() const
 bool Camera_Manager::Can_Refresh_Devices() const
 {
   const auto state = Lifecycle_State();
-  return state == Camera_State::Uninitialized ||
-         state == Camera_State::Initialized;
+  return state == Camera_State::Uninitialized || state == Camera_State::Initialized;
 }
 
 bool Camera_Manager::Can_Select_Device() const
