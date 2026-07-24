@@ -49,9 +49,7 @@ namespace point_cloud
     m_renderer = nullptr;
   }
 
-  bool Point_Cloud_Renderer::Load_Ply(
-      const std::filesystem::path &path,
-      std::string *error_message)
+  bool Point_Cloud_Renderer::Load_Ply(const std::filesystem::path &path, std::string *error_message)
   {
     if (error_message)
     {
@@ -94,16 +92,14 @@ namespace point_cloud
       return false;
     }
 
-    m_point_count = static_cast<std::size_t>(
-        m_display_data->GetNumberOfPoints());
+    m_point_count = static_cast<std::size_t>(m_display_data->GetNumberOfPoints());
     Build_Actor();
     return true;
   }
 
-  bool Point_Cloud_Renderer::Set_Point_Data(
-      const std::vector<float> &xyz,
-      const std::vector<std::uint8_t> &rgb,
-      std::string *error_message)
+  bool Point_Cloud_Renderer::Set_Point_Data(const std::vector<float> &xyz,
+                                            const std::vector<std::uint8_t> &rgb,
+                                            std::string *error_message)
   {
     if (error_message)
     {
@@ -143,10 +139,9 @@ namespace point_cloud
     for (std::size_t i = 0; i < input_count; ++i)
     {
       const double point[3] = {
-        static_cast<double>(xyz[i * 3]),
-        static_cast<double>(xyz[i * 3 + 1]),
-        static_cast<double>(xyz[i * 3 + 2])
-      };
+          static_cast<double>(xyz[i * 3]),
+          static_cast<double>(xyz[i * 3 + 1]),
+          static_cast<double>(xyz[i * 3 + 2])};
       if (!point_is_valid(point))
       {
         continue;
@@ -154,8 +149,7 @@ namespace point_cloud
       points->InsertNextPoint(point);
       if (colors)
       {
-        colors->InsertNextTuple3(
-          rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+        colors->InsertNextTuple3(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
       }
     }
     if (points->GetNumberOfPoints() <= 0)
@@ -179,8 +173,7 @@ namespace point_cloud
     return true;
   }
 
-  void Point_Cloud_Renderer::Set_World_From_Point_Cloud(
-      const robot_model::Matrix4 &world_from_point_cloud)
+  void Point_Cloud_Renderer::Set_World_From_Point_Cloud(const robot_model::Matrix4 &world_from_point_cloud)
   {
     if (!m_world_from_point_cloud)
     {
@@ -190,8 +183,7 @@ namespace point_cloud
     {
       for (int column = 0; column < 4; ++column)
       {
-        m_world_from_point_cloud->SetElement(
-          row, column, world_from_point_cloud[row][column]);
+        m_world_from_point_cloud->SetElement(row, column, world_from_point_cloud[row][column]);
       }
     }
     m_world_from_point_cloud->Modified();
@@ -205,8 +197,8 @@ namespace point_cloud
   void Point_Cloud_Renderer::Set_Interactive_LOD(bool enabled)
   {
     const bool use_interaction_data = enabled &&
-      m_interaction_glyph_filter &&
-      m_interaction_point_count < m_point_count;
+                                      m_interaction_glyph_filter &&
+                                      m_interaction_point_count < m_point_count;
     if (m_interactive_lod == use_interaction_data)
     {
       return;
@@ -216,10 +208,8 @@ namespace point_cloud
     {
       return;
     }
-    m_mapper->SetInputConnection(
-      m_interactive_lod
-        ? m_interaction_glyph_filter->GetOutputPort()
-        : m_glyph_filter->GetOutputPort());
+    m_mapper->SetInputConnection(m_interactive_lod ? m_interaction_glyph_filter->GetOutputPort()
+                                                   : m_glyph_filter->GetOutputPort());
     m_mapper->Modified();
   }
 
@@ -257,24 +247,21 @@ namespace point_cloud
     return true;
   }
 
-  vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Display_Data(
-      vtkPolyData *input) const
+  vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Display_Data(vtkPolyData *input) const
   {
     if (input == nullptr)
     {
       return nullptr;
     }
 
-    auto *input_scalars = input->GetPointData()
-                              ? input->GetPointData()->GetScalars()
-                              : nullptr;
+    auto *input_scalars = input->GetPointData() ? input->GetPointData()->GetScalars()
+                                                : nullptr;
     vtkSmartPointer<vtkDataArray> display_scalars;
     if (input_scalars)
     {
       display_scalars.TakeReference(input_scalars->NewInstance());
       display_scalars->SetName(input_scalars->GetName());
-      display_scalars->SetNumberOfComponents(
-          input_scalars->GetNumberOfComponents());
+      display_scalars->SetNumberOfComponents(input_scalars->GetNumberOfComponents());
     }
 
     auto points = vtkSmartPointer<vtkPoints>::New();
@@ -310,8 +297,7 @@ namespace point_cloud
     return output;
   }
 
-  vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Interaction_Data(
-      vtkPolyData *input) const
+  vtkSmartPointer<vtkPolyData> Point_Cloud_Renderer::Build_Interaction_Data(vtkPolyData *input) const
   {
     if (!input || input->GetNumberOfPoints() <= 0)
     {
@@ -323,15 +309,13 @@ namespace point_cloud
       return input;
     }
 
-    const vtkIdType stride = std::max<vtkIdType>(
-      1, (input_count + kMaximumInteractivePointCount - 1) /
-        kMaximumInteractivePointCount);
+    const vtkIdType stride = std::max<vtkIdType>(1, (input_count + kMaximumInteractivePointCount - 1) / kMaximumInteractivePointCount);
     auto points = vtkSmartPointer<vtkPoints>::New();
     points->SetDataType(input->GetPoints()->GetDataType());
     points->Allocate((input_count + stride - 1) / stride);
 
-    auto *input_scalars = input->GetPointData()
-      ? input->GetPointData()->GetScalars() : nullptr;
+    auto *input_scalars = input->GetPointData() ? input->GetPointData()->GetScalars()
+                                                : nullptr;
     vtkSmartPointer<vtkDataArray> colors;
     if (input_scalars)
     {
@@ -346,11 +330,13 @@ namespace point_cloud
     {
       input->GetPoint(index, point);
       points->InsertNextPoint(point);
-      if (colors) colors->InsertNextTuple(index, input_scalars);
+      if (colors)
+        colors->InsertNextTuple(index, input_scalars);
     }
     auto output = vtkSmartPointer<vtkPolyData>::New();
     output->SetPoints(points);
-    if (colors) output->GetPointData()->SetScalars(colors);
+    if (colors)
+      output->GetPointData()->SetScalars(colors);
     return output;
   }
 
@@ -374,14 +360,11 @@ namespace point_cloud
     m_glyph_filter->Update();
 
     m_interaction_display_data = Build_Interaction_Data(m_display_data);
-    m_interaction_point_count = m_interaction_display_data
-      ? static_cast<std::size_t>(
-          m_interaction_display_data->GetNumberOfPoints())
-      : m_point_count;
+    m_interaction_point_count = m_interaction_display_data ? static_cast<std::size_t>(m_interaction_display_data->GetNumberOfPoints())
+                                                           : m_point_count;
     if (m_interaction_point_count < m_point_count)
     {
-      m_interaction_glyph_filter =
-        vtkSmartPointer<vtkVertexGlyphFilter>::New();
+      m_interaction_glyph_filter = vtkSmartPointer<vtkVertexGlyphFilter>::New();
       m_interaction_glyph_filter->SetInputData(m_interaction_display_data);
       m_interaction_glyph_filter->Update();
     }
@@ -390,8 +373,7 @@ namespace point_cloud
     m_mapper->SetInputConnection(m_glyph_filter->GetOutputPort());
     m_mapper->SetColorModeToDirectScalars();
     m_mapper->SetScalarModeToUsePointData();
-    m_mapper->SetScalarVisibility(
-      m_display_data->GetPointData()->GetScalars() != nullptr);
+    m_mapper->SetScalarVisibility(m_display_data->GetPointData()->GetScalars() != nullptr);
 
     m_actor = vtkSmartPointer<vtkActor>::New();
     m_actor->SetMapper(m_mapper);

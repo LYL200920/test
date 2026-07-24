@@ -9,691 +9,656 @@
 
 #include <utility>
 
-Robot_Model_View::Robot_Model_View (wxWindow* parent, wxWindowID id)
-  : wxGLCanvas (parent, id, nullptr, wxDefaultPosition, wxDefaultSize,
-                wxBORDER_SIMPLE | wxFULL_REPAINT_ON_RESIZE),
-    m_drag_update_timer (this)
+Robot_Model_View::Robot_Model_View(wxWindow *parent, wxWindowID id)
+    : wxGLCanvas(parent, id, nullptr, wxDefaultPosition, wxDefaultSize, wxBORDER_SIMPLE | wxFULL_REPAINT_ON_RESIZE),
+      m_drag_update_timer(this)
 {
-  SetBackgroundStyle (wxBG_STYLE_PAINT);
-  m_gl_context = new wxGLContext (this);
+  SetBackgroundStyle(wxBG_STYLE_PAINT);
+  m_gl_context = new wxGLContext(this);
 
-  Bind (wxEVT_SIZE, &Robot_Model_View::On_Size, this);
-  Bind (wxEVT_PAINT, &Robot_Model_View::On_Paint, this);
-  Bind (wxEVT_ERASE_BACKGROUND, &Robot_Model_View::On_Erase_Background, this);
-  Bind (wxEVT_MOTION, &Robot_Model_View::On_Mouse_Move, this);
-  Bind (wxEVT_MOUSEWHEEL, &Robot_Model_View::On_Mouse_Wheel, this);
-  Bind (wxEVT_LEFT_DOWN, &Robot_Model_View::On_Left_Down, this);
-  Bind (wxEVT_LEFT_UP, &Robot_Model_View::On_Left_Up, this);
-  Bind (wxEVT_RIGHT_DOWN, &Robot_Model_View::On_Right_Down, this);
-  Bind (wxEVT_RIGHT_UP, &Robot_Model_View::On_Right_Up, this);
-  Bind (wxEVT_MIDDLE_DOWN, &Robot_Model_View::On_Middle_Down, this);
-  Bind (wxEVT_MIDDLE_UP, &Robot_Model_View::On_Middle_Up, this);
-  Bind (wxEVT_MOUSE_CAPTURE_LOST,
-        &Robot_Model_View::On_Mouse_Capture_Lost, this);
-  Bind (wxEVT_TIMER, &Robot_Model_View::On_Drag_Update_Timer, this,
-        m_drag_update_timer.GetId ( ));
+  Bind(wxEVT_SIZE, &Robot_Model_View::On_Size, this);
+  Bind(wxEVT_PAINT, &Robot_Model_View::On_Paint, this);
+  Bind(wxEVT_ERASE_BACKGROUND, &Robot_Model_View::On_Erase_Background, this);
+  Bind(wxEVT_MOTION, &Robot_Model_View::On_Mouse_Move, this);
+  Bind(wxEVT_MOUSEWHEEL, &Robot_Model_View::On_Mouse_Wheel, this);
+  Bind(wxEVT_LEFT_DOWN, &Robot_Model_View::On_Left_Down, this);
+  Bind(wxEVT_LEFT_UP, &Robot_Model_View::On_Left_Up, this);
+  Bind(wxEVT_RIGHT_DOWN, &Robot_Model_View::On_Right_Down, this);
+  Bind(wxEVT_RIGHT_UP, &Robot_Model_View::On_Right_Up, this);
+  Bind(wxEVT_MIDDLE_DOWN, &Robot_Model_View::On_Middle_Down, this);
+  Bind(wxEVT_MIDDLE_UP, &Robot_Model_View::On_Middle_Up, this);
+  Bind(wxEVT_MOUSE_CAPTURE_LOST, &Robot_Model_View::On_Mouse_Capture_Lost, this);
+  Bind(wxEVT_TIMER, &Robot_Model_View::On_Drag_Update_Timer, this, m_drag_update_timer.GetId());
 }
 
-Robot_Model_View::~Robot_Model_View ( )
+Robot_Model_View::~Robot_Model_View()
 {
-  m_drag_update_timer.Stop ( );
-  m_collision_index_rebuild_coordinator.Shutdown ( );
-  m_flange_interaction.Detach_Renderer ( );
-  m_world_frame_renderer.Detach_Renderer ( );
-  m_render_controller.Detach_Scene ( );
-  m_scene.reset ( );
+  m_drag_update_timer.Stop();
+  m_collision_index_rebuild_coordinator.Shutdown();
+  m_flange_interaction.Detach_Renderer();
+  m_world_frame_renderer.Detach_Renderer();
+  m_render_controller.Detach_Scene();
+  m_scene.reset();
   delete m_gl_context;
   m_gl_context = nullptr;
 }
 
-void Robot_Model_View::Load_Model (const robot_model::Robot_Model_Info& model)
+void Robot_Model_View::Load_Model(const robot_model::Robot_Model_Info &model)
 {
-  m_collision_index_rebuild_coordinator.Reset ( );
-  Ensure_VTK ( );
-  m_render_controller.Load_Model (model);
-  if( m_scene )
+  m_collision_index_rebuild_coordinator.Reset();
+  Ensure_VTK();
+  m_render_controller.Load_Model(model);
+  if (m_scene)
   {
-    m_flange_interaction.Attach_Renderer (m_scene->Renderer ( ));
-    m_world_frame_renderer.Attach_Renderer (m_scene->Renderer ( ));
-    m_world_frame_renderer.Set_Visible (m_world_frame_renderer.Is_Visible ( ));
+    m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+    m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
+    m_world_frame_renderer.Set_Visible(m_world_frame_renderer.Is_Visible());
   }
-  Update_Flange_Frame ( );
-  Render ( );
+  Update_Flange_Frame();
+  Render();
 }
 
-void Robot_Model_View::Set_Joint_State (
-  const robot_model::Robot_Joint_State& state)
+void Robot_Model_View::Set_Joint_State(const robot_model::Robot_Joint_State &state)
 {
-  m_render_controller.Set_Joint_State (state);
-  Update_Flange_Frame ( );
-  Render ( );
+  m_render_controller.Set_Joint_State(state);
+  Update_Flange_Frame();
+  Render();
 }
 
 robot_model::Robot_Joint_State_Apply_Result
-Robot_Model_View::Try_Set_Joint_State (
-  const robot_model::Robot_Joint_State& state)
+Robot_Model_View::Try_Set_Joint_State(const robot_model::Robot_Joint_State &state)
 {
-  const auto result = m_render_controller.Try_Set_Joint_State (state);
-  if( result.state_changed || result.scene_changed )
+  const auto result = m_render_controller.Try_Set_Joint_State(state);
+  if (result.state_changed || result.scene_changed)
   {
-    Update_Flange_Frame ( );
-    Render ( );
+    Update_Flange_Frame();
+    Render();
   }
   return result;
 }
 
-const robot_model::Robot_Joint_State_Apply_Result&
-Robot_Model_View::Last_Joint_State_Apply_Result ( ) const
+const robot_model::Robot_Joint_State_Apply_Result &Robot_Model_View::Last_Joint_State_Apply_Result() const
 {
-  return m_render_controller.Last_Joint_State_Apply_Result ( );
+  return m_render_controller.Last_Joint_State_Apply_Result();
 }
 
-bool Robot_Model_View::Has_Current_Model ( ) const
+bool Robot_Model_View::Has_Current_Model() const
 {
-  return m_render_controller.Has_Current_Model ( );
+  return m_render_controller.Has_Current_Model();
 }
 
-const robot_model::Robot_Kinematic_Params&
-Robot_Model_View::Kinematic_Params ( ) const
+const robot_model::Robot_Kinematic_Params &Robot_Model_View::Kinematic_Params() const
 {
-  return m_render_controller.Kinematic_Params ( );
+  return m_render_controller.Kinematic_Params();
 }
 
-const robot_model::Robot_Joint_State& Robot_Model_View::Joint_State ( ) const
+const robot_model::Robot_Joint_State &Robot_Model_View::Joint_State() const
 {
-  return m_render_controller.Joint_State ( );
+  return m_render_controller.Joint_State();
 }
 
-vtkRenderer* Robot_Model_View::Scene_Renderer ( )
+vtkRenderer *Robot_Model_View::Scene_Renderer()
 {
-  Ensure_VTK ( );
-  return m_scene ? m_scene->Renderer ( ) : nullptr;
+  Ensure_VTK();
+  return m_scene ? m_scene->Renderer() : nullptr;
 }
 
-void Robot_Model_View::Render_Scene ( )
+void Robot_Model_View::Render_Scene()
 {
-  Render ( );
+  Render();
 }
 
-void Robot_Model_View::Set_Flange_Frame_Visible (bool visible)
+void Robot_Model_View::Set_Flange_Frame_Visible(bool visible)
 {
-  Ensure_VTK ( );
-  m_flange_interaction.Set_Frame_Visible (visible);
-  Update_Flange_Frame ( );
-  Render_Scene ( );
+  Ensure_VTK();
+  m_flange_interaction.Set_Frame_Visible(visible);
+  Update_Flange_Frame();
+  Render_Scene();
 }
 
-bool Robot_Model_View::Has_Flange_Pose ( ) const
+bool Robot_Model_View::Has_Flange_Pose() const
 {
-  return m_render_controller.Has_Flange_Pose ( );
+  return m_render_controller.Has_Flange_Pose();
 }
 
-bool Robot_Model_View::Get_World_From_Flange (
-  robot_model::Matrix4* pose) const
+bool Robot_Model_View::Get_World_From_Flange(robot_model::Matrix4 *pose) const
 {
-  if( !pose || !m_render_controller.Has_Flange_Pose ( ) ) return false;
-  *pose = m_render_controller.World_From_Flange ( );
+  if (!pose || !m_render_controller.Has_Flange_Pose())
+    return false;
+  *pose = m_render_controller.World_From_Flange();
   return true;
 }
 
-bool Robot_Model_View::Set_Collision_Obstacle_Points (
-  const std::vector<float>& xyz,
-  std::string* error_message)
+bool Robot_Model_View::Set_Collision_Obstacle_Points(const std::vector<float> &xyz,
+                                                     std::string *error_message)
 {
-  return Set_Collision_Obstacle_Points (
-    std::make_shared<const std::vector<float>> (xyz), error_message);
+  return Set_Collision_Obstacle_Points(
+      std::make_shared<const std::vector<float>>(xyz), error_message);
 }
 
-bool Robot_Model_View::Set_Collision_Obstacle_Points (
-  std::shared_ptr<const std::vector<float>> xyz,
-  std::string* error_message)
+bool Robot_Model_View::Set_Collision_Obstacle_Points(std::shared_ptr<const std::vector<float>> xyz,
+                                                     std::string *error_message)
 {
-  if( !m_render_controller.Collision_Enabled ( ) )
+  if (!m_render_controller.Collision_Enabled())
   {
-    return m_render_controller.Set_Collision_Obstacle_Points (
-      std::move (xyz), error_message);
+    return m_render_controller.Set_Collision_Obstacle_Points(std::move(xyz), error_message);
   }
   robot_model::Collision_Index_Build_Request request;
-  if( !m_render_controller.Create_Collision_Points_Rebuild_Request (
-        std::move (xyz), &request, error_message) )
+  if (!m_render_controller.Create_Collision_Points_Rebuild_Request(std::move(xyz), &request, error_message))
   {
     return false;
   }
-  return Queue_Collision_Rebuild (std::move (request), false);
+  return Queue_Collision_Rebuild(std::move(request), false);
 }
 
-void Robot_Model_View::Clear_Collision_Obstacle_Points ( )
+void Robot_Model_View::Clear_Collision_Obstacle_Points()
 {
-  m_collision_index_rebuild_coordinator.Reset ( );
-  m_render_controller.Clear_Collision_Obstacle_Points ( );
+  m_collision_index_rebuild_coordinator.Reset();
+  m_render_controller.Clear_Collision_Obstacle_Points();
 }
 
-bool Robot_Model_View::Has_Collision_Obstacle_Points ( ) const
+bool Robot_Model_View::Has_Collision_Obstacle_Points() const
 {
-  return m_render_controller.Has_Collision_Obstacle_Points ( );
+  return m_render_controller.Has_Collision_Obstacle_Points();
 }
 
-std::size_t Robot_Model_View::Collision_Obstacle_Point_Count ( ) const
+std::size_t Robot_Model_View::Collision_Obstacle_Point_Count() const
 {
-  return m_render_controller.Collision_Obstacle_Point_Count ( );
+  return m_render_controller.Collision_Obstacle_Point_Count();
 }
 
-bool Robot_Model_View::Set_Collision_Settings (
-  const robot_model::Robot_Collision_Settings& settings,
-  std::string* error_message)
+bool Robot_Model_View::Set_Collision_Settings(const robot_model::Robot_Collision_Settings &settings,
+                                              std::string *error_message)
 {
-  if( !m_render_controller.Collision_Enabled ( ) )
+  if (!m_render_controller.Collision_Enabled())
   {
-    return m_render_controller.Set_Collision_Settings (
-      settings, error_message);
+    return m_render_controller.Set_Collision_Settings(settings, error_message);
   }
   robot_model::Collision_Index_Build_Request request;
-  if( !m_render_controller.Create_Collision_Settings_Rebuild_Request (
-        settings, &request, error_message) )
+  if (!m_render_controller.Create_Collision_Settings_Rebuild_Request(settings, &request, error_message))
   {
     return false;
   }
-  return Queue_Collision_Rebuild (std::move (request), true);
+  return Queue_Collision_Rebuild(std::move(request), true);
 }
 
-void Robot_Model_View::Set_Collision_Enabled (bool enabled)
+void Robot_Model_View::Set_Collision_Enabled(bool enabled)
 {
-  if( m_render_controller.Collision_Enabled ( ) == enabled ) return;
-  if( !enabled ) m_collision_index_rebuild_coordinator.Reset ( );
-  m_render_controller.Set_Collision_Enabled (enabled);
-  if( enabled && m_render_controller.Has_Collision_Obstacle_Source ( ) )
+  if (m_render_controller.Collision_Enabled() == enabled)
+    return;
+  if (!enabled)
+    m_collision_index_rebuild_coordinator.Reset();
+  m_render_controller.Set_Collision_Enabled(enabled);
+  if (enabled && m_render_controller.Has_Collision_Obstacle_Source())
   {
     robot_model::Collision_Index_Build_Request request;
-    if( m_render_controller.Create_Collision_Settings_Rebuild_Request (
-          m_render_controller.Collision_Settings ( ), &request, nullptr) )
+    if (m_render_controller.Create_Collision_Settings_Rebuild_Request(m_render_controller.Collision_Settings(), &request, nullptr))
     {
-      Queue_Collision_Rebuild (std::move (request), true);
+      Queue_Collision_Rebuild(std::move(request), true);
     }
   }
-  Render ( );
+  Render();
 }
 
-bool Robot_Model_View::Collision_Enabled ( ) const
+bool Robot_Model_View::Collision_Enabled() const
 {
-  return m_render_controller.Collision_Enabled ( );
+  return m_render_controller.Collision_Enabled();
 }
 
-const robot_model::Robot_Collision_Settings&
-Robot_Model_View::Collision_Settings ( ) const
+const robot_model::Robot_Collision_Settings &
+Robot_Model_View::Collision_Settings() const
 {
-  return m_render_controller.Collision_Settings ( );
+  return m_render_controller.Collision_Settings();
 }
 
-const robot_model::Robot_Collision_Point_Cloud_Stats&
-Robot_Model_View::Collision_Point_Cloud_Stats ( ) const
+const robot_model::Robot_Collision_Point_Cloud_Stats &
+Robot_Model_View::Collision_Point_Cloud_Stats() const
 {
-  return m_render_controller.Collision_Point_Cloud_Stats ( );
+  return m_render_controller.Collision_Point_Cloud_Stats();
 }
 
-bool Robot_Model_View::Collision_Rebuild_In_Progress ( ) const
+bool Robot_Model_View::Collision_Rebuild_In_Progress() const
 {
-  return m_collision_index_rebuild_coordinator.Busy ( );
+  return m_collision_index_rebuild_coordinator.Busy();
 }
 
-void Robot_Model_View::Set_On_Collision_Rebuild_Completed (
-  std::function<void (
-    bool,
-    const robot_model::Robot_Collision_Point_Cloud_Stats&,
-    const std::string&)> callback)
+void Robot_Model_View::Set_On_Collision_Rebuild_Completed(
+    std::function<void(
+        bool,
+        const robot_model::Robot_Collision_Point_Cloud_Stats &,
+        const std::string &)>
+        callback)
 {
-  m_on_collision_rebuild_completed = std::move (callback);
+  m_on_collision_rebuild_completed = std::move(callback);
 }
 
-robot_model::Robot_Pose_IK_Result Robot_Model_View::Move_Flange_To_Pose (
-  const robot_model::Matrix4& target_world_from_flange,
-  const robot_model::Robot_Pose_IK_Options& options)
+robot_model::Robot_Pose_IK_Result Robot_Model_View::Move_Flange_To_Pose(const robot_model::Matrix4 &target_world_from_flange,
+                                                                        const robot_model::Robot_Pose_IK_Options &options)
 {
-  const auto result = m_render_controller.Move_Flange_To_Pose (
-    target_world_from_flange,
-    options);
-  Update_Flange_Frame ( );
-  Render ( );
+  const auto result = m_render_controller.Move_Flange_To_Pose(target_world_from_flange, options);
+  Update_Flange_Frame();
+  Render();
   return result;
 }
 
-void Robot_Model_View::Set_World_Frame_Visible (bool visible)
+void Robot_Model_View::Set_World_Frame_Visible(bool visible)
 {
-  Ensure_VTK ( );
-  robot_model::Matrix4 identity = { };
-  for( int index = 0; index < 4; ++index ) identity[index][index] = 1.0;
-  m_world_frame_renderer.Set_World_From_Frame (identity);
-  m_world_frame_renderer.Set_Visible (visible);
-  Render_Scene ( );
+  Ensure_VTK();
+  robot_model::Matrix4 identity = {};
+  for (int index = 0; index < 4; ++index)
+    identity[index][index] = 1.0;
+  m_world_frame_renderer.Set_World_From_Frame(identity);
+  m_world_frame_renderer.Set_Visible(visible);
+  Render_Scene();
 }
 
-void Robot_Model_View::Set_Flange_Interaction_Mode (
-  Flange_Interaction_Mode mode)
+void Robot_Model_View::Set_Flange_Interaction_Mode(Flange_Interaction_Mode mode)
 {
-  Ensure_VTK ( );
-  m_flange_interaction.Set_Mode (mode);
-  Update_Flange_Frame ( );
-  Render_Scene ( );
+  Ensure_VTK();
+  m_flange_interaction.Set_Mode(mode);
+  Update_Flange_Frame();
+  Render_Scene();
 }
 
-void Robot_Model_View::Set_On_Flange_Dragged (
-  std::function<void (const robot_model::Robot_Position_IK_Result&)> callback)
+void Robot_Model_View::Set_On_Flange_Dragged(std::function<void(const robot_model::Robot_Position_IK_Result &)> callback)
 {
-  m_on_flange_dragged = std::move (callback);
+  m_on_flange_dragged = std::move(callback);
 }
 
-void Robot_Model_View::Set_On_Flange_Pose_Dragged (
-  std::function<void (const robot_model::Robot_Pose_IK_Result&)> callback)
+void Robot_Model_View::Set_On_Flange_Pose_Dragged(std::function<void(const robot_model::Robot_Pose_IK_Result &)> callback)
 {
-  m_on_flange_pose_dragged = std::move (callback);
+  m_on_flange_pose_dragged = std::move(callback);
 }
 
-void Robot_Model_View::Set_On_Flange_Drag_State_Changed (
-  std::function<void (bool)> callback)
+void Robot_Model_View::Set_On_Flange_Drag_State_Changed(std::function<void(bool)> callback)
 {
-  m_on_flange_drag_state_changed = std::move (callback);
+  m_on_flange_drag_state_changed = std::move(callback);
 }
 
-void Robot_Model_View::Set_On_Flange_Drag_Performance (
-  std::function<void (
-    const robot_model::Robot_Drag_Performance_Stats&)> callback)
+void Robot_Model_View::Set_On_Flange_Drag_Performance(std::function<void(
+                                                          const robot_model::Robot_Drag_Performance_Stats &)>
+                                                          callback)
 {
-  m_on_flange_drag_performance = std::move (callback);
+  m_on_flange_drag_performance = std::move(callback);
 }
 
-void Robot_Model_View::Ensure_VTK ( )
+void Robot_Model_View::Ensure_VTK()
 {
-  if( m_scene )
+  if (m_scene)
   {
     return;
   }
 
-  if( !IsShownOnScreen ( ) )
+  if (!IsShownOnScreen())
   {
     return;
   }
 
-  SetCurrent (*m_gl_context);
-  m_scene = std::make_unique<robot_model::Vtk_Scene> ( );
-  m_scene->Init (this, m_gl_context);
-  m_render_controller.Attach_Scene (m_scene.get ( ));
-  m_flange_interaction.Attach_Renderer (m_scene->Renderer ( ));
-  m_world_frame_renderer.Attach_Renderer (m_scene->Renderer ( ));
-  robot_model::Matrix4 identity = { };
-  for( int index = 0; index < 4; ++index ) identity[index][index] = 1.0;
-  m_world_frame_renderer.Set_World_From_Frame (identity);
-  Update_Flange_Frame ( );
+  SetCurrent(*m_gl_context);
+  m_scene = std::make_unique<robot_model::Vtk_Scene>();
+  m_scene->Init(this, m_gl_context);
+  m_render_controller.Attach_Scene(m_scene.get());
+  m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+  m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
+  robot_model::Matrix4 identity = {};
+  for (int index = 0; index < 4; ++index)
+    identity[index][index] = 1.0;
+  m_world_frame_renderer.Set_World_From_Frame(identity);
+  Update_Flange_Frame();
 }
 
-void Robot_Model_View::Update_Flange_Frame ( )
+void Robot_Model_View::Update_Flange_Frame()
 {
-  if( m_render_controller.Has_Flange_Pose ( ) )
+  if (m_render_controller.Has_Flange_Pose())
   {
-    m_flange_interaction.Update_Flange_Pose (
-      &m_render_controller.World_From_Flange ( ));
+    m_flange_interaction.Update_Flange_Pose(&m_render_controller.World_From_Flange());
   }
   else
   {
-    m_flange_interaction.Update_Flange_Pose (nullptr);
+    m_flange_interaction.Update_Flange_Pose(nullptr);
   }
 }
 
-void Robot_Model_View::On_Size (wxSizeEvent& event)
+void Robot_Model_View::On_Size(wxSizeEvent &event)
 {
-  Ensure_VTK ( );
-  const auto size = GetClientSize ( );
-  if( m_scene && size.x > 0 && size.y > 0 )
+  Ensure_VTK();
+  const auto size = GetClientSize();
+  if (m_scene && size.x > 0 && size.y > 0)
   {
-    m_scene->Resize (size.x, size.y);
-    Render ( );
+    m_scene->Resize(size.x, size.y);
+    Render();
   }
-  event.Skip ( );
+  event.Skip();
 }
 
-void Robot_Model_View::On_Paint (wxPaintEvent&)
+void Robot_Model_View::On_Paint(wxPaintEvent &)
 {
-  wxPaintDC dc (this);
-  Ensure_VTK ( );
-  Render ( );
+  wxPaintDC dc(this);
+  Ensure_VTK();
+  Render();
 }
 
-void Robot_Model_View::On_Erase_Background (wxEraseEvent&)
+void Robot_Model_View::On_Erase_Background(wxEraseEvent &)
 {
 }
 
-void Robot_Model_View::Render ( )
+void Robot_Model_View::Render()
 {
-  const auto started_at = std::chrono::steady_clock::now ( );
+  const auto started_at = std::chrono::steady_clock::now();
   m_last_render_time_ms = 0.0;
-  if( m_scene && m_scene->Is_Ready ( ) )
+  if (m_scene && m_scene->Is_Ready())
   {
-    SetCurrent (*m_gl_context);
-    const auto size = GetClientSize ( );
-    glViewport (0, 0, size.x, size.y);
-    glClearColor (0.02f, 0.08f, 0.16f, 1.0f);
-    glClear (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    m_scene->Render ( );
-    m_last_render_time_ms = std::chrono::duration<double, std::milli> (
-      std::chrono::steady_clock::now ( ) - started_at).count ( );
+    SetCurrent(*m_gl_context);
+    const auto size = GetClientSize();
+    glViewport(0, 0, size.x, size.y);
+    glClearColor(0.02f, 0.08f, 0.16f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    m_scene->Render();
+    m_last_render_time_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started_at).count();
   }
 }
 
-vtkGenericRenderWindowInteractor* Robot_Model_View::Interactor ( )
+vtkGenericRenderWindowInteractor *Robot_Model_View::Interactor()
 {
-  Ensure_VTK ( );
-  return m_scene ? m_scene->Get_Interactor ( ) : nullptr;
+  Ensure_VTK();
+  return m_scene ? m_scene->Get_Interactor() : nullptr;
 }
 
-void Robot_Model_View::Set_Interactor_Event (const wxMouseEvent& event)
+void Robot_Model_View::Set_Interactor_Event(const wxMouseEvent &event)
 {
-  if( !m_scene )
+  if (!m_scene)
   {
     return;
   }
 
-  auto* interactor = m_scene->Get_Interactor ( );
-  if( !interactor )
+  auto *interactor = m_scene->Get_Interactor();
+  if (!interactor)
   {
     return;
   }
 
-  const auto pos = event.GetPosition ( );
-  interactor->SetEventInformationFlipY (
-    pos.x, pos.y,
-    event.ControlDown ( ) ? 1 : 0,
-    event.ShiftDown ( ) ? 1 : 0
-  );
+  const auto pos = event.GetPosition();
+  interactor->SetEventInformationFlipY(pos.x, pos.y,
+                                       event.ControlDown() ? 1 : 0,
+                                       event.ShiftDown() ? 1 : 0);
 }
 
-void Robot_Model_View::On_Mouse_Move (wxMouseEvent& event)
+void Robot_Model_View::On_Mouse_Move(wxMouseEvent &event)
 {
-  if( m_flange_interaction.Is_Dragging ( ) )
+  if (m_flange_interaction.Is_Dragging())
   {
-    const auto position = event.GetPosition ( );
-    const auto size = GetClientSize ( );
-    Queue_Flange_Drag_Update (
-      position.x, size.y - 1 - position.y);
+    const auto position = event.GetPosition();
+    const auto size = GetClientSize();
+    Queue_Flange_Drag_Update(position.x, size.y - 1 - position.y);
     return;
   }
 
-  if( !event.LeftIsDown ( ) && !event.RightIsDown ( ) &&
-      !event.MiddleIsDown ( ) )
+  if (!event.LeftIsDown() &&
+      !event.RightIsDown() &&
+      !event.MiddleIsDown())
   {
-    Update_Flange_Hover (event);
+    Update_Flange_Hover(event);
   }
 
-  auto* interactor = Interactor ( );
-  if( !interactor )
+  auto *interactor = Interactor();
+  if (!interactor)
   {
     return;
   }
 
-  Set_Interactor_Event (event);
-  interactor->MouseMoveEvent ( );
-  Render ( );
+  Set_Interactor_Event(event);
+  interactor->MouseMoveEvent();
+  Render();
 }
 
-void Robot_Model_View::On_Mouse_Wheel (wxMouseEvent& event)
+void Robot_Model_View::On_Mouse_Wheel(wxMouseEvent &event)
 {
-  auto* interactor = Interactor ( );
-  if( !interactor )
+  auto *interactor = Interactor();
+  if (!interactor)
   {
     return;
   }
 
-  Set_Interactor_Event (event);
-  if( event.GetWheelRotation ( ) > 0 )
+  Set_Interactor_Event(event);
+  if (event.GetWheelRotation() > 0)
   {
-    interactor->MouseWheelForwardEvent ( );
+    interactor->MouseWheelForwardEvent();
   }
   else
   {
-    interactor->MouseWheelBackwardEvent ( );
+    interactor->MouseWheelBackwardEvent();
   }
-  Render ( );
+  Render();
 }
 
-void Robot_Model_View::On_Left_Down (wxMouseEvent& event)
+void Robot_Model_View::On_Left_Down(wxMouseEvent &event)
 {
-  Ensure_VTK ( );
-  if( m_scene )
+  Ensure_VTK();
+  if (m_scene)
   {
-    const auto pos = event.GetPosition ( );
-    if( m_scene->Handle_View_Cube_Click (pos.x, pos.y) )
+    const auto pos = event.GetPosition();
+    if (m_scene->Handle_View_Cube_Click(pos.x, pos.y))
     {
-      Render ( );
+      Render();
       return;
     }
   }
 
-  if( m_render_controller.Has_Flange_Pose ( ) )
+  if (m_render_controller.Has_Flange_Pose())
   {
-    const auto position = event.GetPosition ( );
-    const auto size = GetClientSize ( );
-    const auto& pose = m_render_controller.World_From_Flange ( );
-    if( m_flange_interaction.Begin_Drag (
-          position.x, size.y - 1 - position.y, pose) )
+    const auto position = event.GetPosition();
+    const auto size = GetClientSize();
+    const auto &pose = m_render_controller.World_From_Flange();
+    if (m_flange_interaction.Begin_Drag(position.x, size.y - 1 - position.y, pose))
     {
-      SetFocus ( );
-      if( !HasCapture ( ) )
+      SetFocus();
+      if (!HasCapture())
       {
-        CaptureMouse ( );
+        CaptureMouse();
       }
-      m_drag_update_coordinator.Begin ( );
-      m_drag_performance_collector.Begin ( );
-      if( m_on_flange_drag_state_changed )
-        m_on_flange_drag_state_changed (true);
+      m_drag_update_coordinator.Begin();
+      m_drag_performance_collector.Begin();
+      if (m_on_flange_drag_state_changed)
+        m_on_flange_drag_state_changed(true);
       return;
     }
   }
 
-  auto* interactor = m_scene ? m_scene->Get_Interactor ( ) : nullptr;
-  if( !interactor )
+  auto *interactor = m_scene ? m_scene->Get_Interactor() : nullptr;
+  if (!interactor)
   {
     return;
   }
 
-  SetFocus ( );
-  if( !HasCapture ( ) )
+  SetFocus();
+  if (!HasCapture())
   {
-    CaptureMouse ( );
+    CaptureMouse();
   }
-  Set_Interactor_Event (event);
-  interactor->LeftButtonPressEvent ( );
-  Render ( );
+  Set_Interactor_Event(event);
+  interactor->LeftButtonPressEvent();
+  Render();
 }
 
-void Robot_Model_View::On_Left_Up (wxMouseEvent& event)
+void Robot_Model_View::On_Left_Up(wxMouseEvent &event)
 {
-  if( m_flange_interaction.Is_Dragging ( ) )
+  if (m_flange_interaction.Is_Dragging())
   {
-    const auto position = event.GetPosition ( );
-    const auto size = GetClientSize ( );
-    m_drag_update_coordinator.Set_Final (
-      position.x, size.y - 1 - position.y);
-    Apply_Pending_Flange_Drag_Update ( );
-    m_flange_interaction.End_Drag ( );
-    if( m_on_flange_drag_state_changed )
-      m_on_flange_drag_state_changed (false);
-    Finish_Flange_Drag_Performance ( );
-    if( HasCapture ( ) ) ReleaseMouse ( );
-    Render ( );
+    const auto position = event.GetPosition();
+    const auto size = GetClientSize();
+    m_drag_update_coordinator.Set_Final(position.x, size.y - 1 - position.y);
+    Apply_Pending_Flange_Drag_Update();
+    m_flange_interaction.End_Drag();
+    if (m_on_flange_drag_state_changed)
+      m_on_flange_drag_state_changed(false);
+    Finish_Flange_Drag_Performance();
+    if (HasCapture())
+      ReleaseMouse();
+    Render();
     return;
   }
 
-  if( auto* interactor = Interactor ( ) )
+  if (auto *interactor = Interactor())
   {
-    Set_Interactor_Event (event);
-    interactor->LeftButtonReleaseEvent ( );
-    Render ( );
+    Set_Interactor_Event(event);
+    interactor->LeftButtonReleaseEvent();
+    Render();
   }
-  if( HasCapture ( ) )
+  if (HasCapture())
   {
-    ReleaseMouse ( );
-  }
-}
-
-void Robot_Model_View::On_Right_Down (wxMouseEvent& event)
-{
-  auto* interactor = Interactor ( );
-  if( !interactor )
-  {
-    return;
-  }
-
-  SetFocus ( );
-  if( !HasCapture ( ) )
-  {
-    CaptureMouse ( );
-  }
-  Set_Interactor_Event (event);
-  interactor->RightButtonPressEvent ( );
-  Render ( );
-}
-
-void Robot_Model_View::On_Right_Up (wxMouseEvent& event)
-{
-  if( auto* interactor = Interactor ( ) )
-  {
-    Set_Interactor_Event (event);
-    interactor->RightButtonReleaseEvent ( );
-    Render ( );
-  }
-  if( HasCapture ( ) )
-  {
-    ReleaseMouse ( );
+    ReleaseMouse();
   }
 }
 
-void Robot_Model_View::On_Middle_Down (wxMouseEvent& event)
+void Robot_Model_View::On_Right_Down(wxMouseEvent &event)
 {
-  auto* interactor = Interactor ( );
-  if( !interactor )
+  auto *interactor = Interactor();
+  if (!interactor)
   {
     return;
   }
 
-  SetFocus ( );
-  if( !HasCapture ( ) )
+  SetFocus();
+  if (!HasCapture())
   {
-    CaptureMouse ( );
+    CaptureMouse();
   }
-  Set_Interactor_Event (event);
-  interactor->MiddleButtonPressEvent ( );
-  Render ( );
+  Set_Interactor_Event(event);
+  interactor->RightButtonPressEvent();
+  Render();
 }
 
-void Robot_Model_View::On_Middle_Up (wxMouseEvent& event)
+void Robot_Model_View::On_Right_Up(wxMouseEvent &event)
 {
-  if( auto* interactor = Interactor ( ) )
+  if (auto *interactor = Interactor())
   {
-    Set_Interactor_Event (event);
-    interactor->MiddleButtonReleaseEvent ( );
-    Render ( );
+    Set_Interactor_Event(event);
+    interactor->RightButtonReleaseEvent();
+    Render();
   }
-  if( HasCapture ( ) )
+  if (HasCapture())
   {
-    ReleaseMouse ( );
+    ReleaseMouse();
   }
 }
 
-void Robot_Model_View::On_Mouse_Capture_Lost (wxMouseCaptureLostEvent&)
+void Robot_Model_View::On_Middle_Down(wxMouseEvent &event)
 {
-  const bool was_dragging = m_flange_interaction.Is_Dragging ( );
-  m_drag_update_timer.Stop ( );
-  m_drag_update_coordinator.Cancel ( );
-  m_flange_interaction.End_Drag ( );
-  if( was_dragging && m_on_flange_drag_state_changed )
-    m_on_flange_drag_state_changed (false);
-  if( was_dragging ) Finish_Flange_Drag_Performance ( );
-  Render ( );
-}
-
-void Robot_Model_View::On_Drag_Update_Timer (wxTimerEvent&)
-{
-  Apply_Pending_Flange_Drag_Update ( );
-}
-
-void Robot_Model_View::Queue_Flange_Drag_Update (
-  int display_x,
-  int display_y)
-{
-  const auto schedule = m_drag_update_coordinator.Queue (
-    display_x, display_y);
-  if( schedule.process_now )
+  auto *interactor = Interactor();
+  if (!interactor)
   {
-    Apply_Pending_Flange_Drag_Update ( );
     return;
   }
 
-  if( schedule.timer_delay_ms > 0 && !m_drag_update_timer.IsRunning ( ) )
+  SetFocus();
+  if (!HasCapture())
   {
-    m_drag_update_timer.StartOnce (schedule.timer_delay_ms);
+    CaptureMouse();
+  }
+  Set_Interactor_Event(event);
+  interactor->MiddleButtonPressEvent();
+  Render();
+}
+
+void Robot_Model_View::On_Middle_Up(wxMouseEvent &event)
+{
+  if (auto *interactor = Interactor())
+  {
+    Set_Interactor_Event(event);
+    interactor->MiddleButtonReleaseEvent();
+    Render();
+  }
+  if (HasCapture())
+  {
+    ReleaseMouse();
   }
 }
 
-void Robot_Model_View::Apply_Pending_Flange_Drag_Update ( )
+void Robot_Model_View::On_Mouse_Capture_Lost(wxMouseCaptureLostEvent &)
 {
-  m_drag_update_timer.Stop ( );
+  const bool was_dragging = m_flange_interaction.Is_Dragging();
+  m_drag_update_timer.Stop();
+  m_drag_update_coordinator.Cancel();
+  m_flange_interaction.End_Drag();
+  if (was_dragging && m_on_flange_drag_state_changed)
+    m_on_flange_drag_state_changed(false);
+  if (was_dragging)
+    Finish_Flange_Drag_Performance();
+  Render();
+}
+
+void Robot_Model_View::On_Drag_Update_Timer(wxTimerEvent &)
+{
+  Apply_Pending_Flange_Drag_Update();
+}
+
+void Robot_Model_View::Queue_Flange_Drag_Update(int display_x, int display_y)
+{
+  const auto schedule = m_drag_update_coordinator.Queue(display_x, display_y);
+  if (schedule.process_now)
+  {
+    Apply_Pending_Flange_Drag_Update();
+    return;
+  }
+
+  if (schedule.timer_delay_ms > 0 && !m_drag_update_timer.IsRunning())
+  {
+    m_drag_update_timer.StartOnce(schedule.timer_delay_ms);
+  }
+}
+
+void Robot_Model_View::Apply_Pending_Flange_Drag_Update()
+{
+  m_drag_update_timer.Stop();
   robot_model::Flange_Drag_Pointer pointer;
-  if( !m_flange_interaction.Is_Dragging ( ) ||
-      !m_drag_update_coordinator.Take_Pending (&pointer) )
+  if (!m_flange_interaction.Is_Dragging() || !m_drag_update_coordinator.Take_Pending(&pointer))
   {
     return;
   }
 
-  const auto update_started_at = std::chrono::steady_clock::now ( );
+  const auto update_started_at = std::chrono::steady_clock::now();
   robot_model::Flange_Drag_Update update;
-  if( !m_flange_interaction.Update_Drag (
-        pointer.display_x, pointer.display_y, &update) )
+  if (!m_flange_interaction.Update_Drag(pointer.display_x, pointer.display_y, &update))
   {
     return;
   }
 
-  const auto execution = m_drag_motion_executor.Execute (
-    update,
-    [this] (const robot_model::Point3& target)
-    {
-      robot_model::Flange_Position_Motion_Outcome outcome;
-      outcome.ik_result = m_render_controller.Move_Flange_To (target);
-      outcome.apply_result =
-        m_render_controller.Last_Joint_State_Apply_Result ( );
-      return outcome;
-    },
-    [this] (const robot_model::Matrix4& target)
-    {
-      robot_model::Flange_Pose_Motion_Outcome outcome;
-      outcome.ik_result = m_render_controller.Move_Flange_To_Pose (target);
-      outcome.apply_result =
-        m_render_controller.Last_Joint_State_Apply_Result ( );
-      return outcome;
-    });
-  if( !execution.handled ) return;
+  const auto execution = m_drag_motion_executor.Execute(update, [this](const robot_model::Point3 &target)
+                                                        {
+                                                          robot_model::Flange_Position_Motion_Outcome outcome;
+                                                          outcome.ik_result = m_render_controller.Move_Flange_To(target);
+                                                          outcome.apply_result =m_render_controller.Last_Joint_State_Apply_Result();
+                                                          return outcome; }, [this](const robot_model::Matrix4 &target)
+                                                        {
+                                                          robot_model::Flange_Pose_Motion_Outcome outcome;
+                                                          outcome.ik_result = m_render_controller.Move_Flange_To_Pose(target);
+                                                          outcome.apply_result = m_render_controller.Last_Joint_State_Apply_Result();
+                                                          return outcome; });
+  if (!execution.handled)
+    return;
 
-  const auto& apply_result = execution.apply_result;
+  const auto &apply_result = execution.apply_result;
   const bool pose_changed = execution.pose_changed;
-  Update_Flange_Frame ( );
-  if( execution.notify_result &&
-      execution.target_type ==
-        robot_model::Flange_Drag_Update::Target_Type::Position &&
-      m_on_flange_dragged )
+  Update_Flange_Frame();
+  if (execution.notify_result &&
+      execution.target_type == robot_model::Flange_Drag_Update::Target_Type::Position &&
+      m_on_flange_dragged)
   {
-    m_on_flange_dragged (execution.position_result);
+    m_on_flange_dragged(execution.position_result);
   }
-  else if( execution.notify_result &&
-           execution.target_type ==
-             robot_model::Flange_Drag_Update::Target_Type::Pose &&
-           m_on_flange_pose_dragged )
+  else if (execution.notify_result &&
+           execution.target_type == robot_model::Flange_Drag_Update::Target_Type::Pose &&
+           m_on_flange_pose_dragged)
   {
-    m_on_flange_pose_dragged (execution.pose_result);
+    m_on_flange_pose_dragged(execution.pose_result);
   }
 
-  m_drag_update_coordinator.Mark_Processed ( );
-  if( pose_changed ) Render ( );
-  if( m_drag_performance_collector.Active ( ) )
+  m_drag_update_coordinator.Mark_Processed();
+  if (pose_changed)
+    Render();
+  if (m_drag_performance_collector.Active())
   {
-    const double update_time_ms =
-      std::chrono::duration<double, std::milli> (
-        std::chrono::steady_clock::now ( ) - update_started_at).count ( );
+    const double update_time_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - update_started_at).count();
     robot_model::Robot_Drag_Performance_Sample sample;
     sample.accepted = apply_result.accepted;
     sample.collision = apply_result.collision;
@@ -704,70 +669,66 @@ void Robot_Model_View::Apply_Pending_Flange_Drag_Update ( )
     sample.collision_time_ms = apply_result.collision_query_time_ms;
     sample.render_time_ms = m_last_render_time_ms;
     sample.rendered = pose_changed;
-    m_drag_performance_collector.Record (sample);
+    m_drag_performance_collector.Record(sample);
   }
 }
 
-void Robot_Model_View::Finish_Flange_Drag_Performance ( )
+void Robot_Model_View::Finish_Flange_Drag_Performance()
 {
   robot_model::Robot_Drag_Performance_Stats stats;
-  if( !m_drag_performance_collector.Finish (&stats) ) return;
-  m_drag_update_coordinator.Cancel ( );
-  if( m_on_flange_drag_performance )
-    m_on_flange_drag_performance (stats);
+  if (!m_drag_performance_collector.Finish(&stats))
+    return;
+  m_drag_update_coordinator.Cancel();
+  if (m_on_flange_drag_performance)
+    m_on_flange_drag_performance(stats);
 }
 
-bool Robot_Model_View::Queue_Collision_Rebuild (
-  robot_model::Collision_Index_Build_Request request,
-  bool settings_change)
+bool Robot_Model_View::Queue_Collision_Rebuild(robot_model::Collision_Index_Build_Request request, bool settings_change)
 {
-  auto dispatch = [this] (std::function<void ( )> task)
+  auto dispatch = [this](std::function<void()> task)
   {
-    CallAfter (std::move (task));
+    CallAfter(std::move(task));
   };
-  auto completion = [this] (
-    robot_model::Collision_Index_Build_Result completed_result)
+  auto completion = [this](robot_model::Collision_Index_Build_Result completed_result)
   {
     const bool success = completed_result.success;
     const auto error_message = completed_result.error_message;
     const auto failed_stats = completed_result.stats;
-    if( success )
+    if (success)
     {
-      m_render_controller.Apply_Collision_Rebuild_Result (
-        std::move (completed_result));
-      Update_Flange_Frame ( );
-      Render ( );
+      m_render_controller.Apply_Collision_Rebuild_Result(std::move(completed_result));
+      Update_Flange_Frame();
+      Render();
     }
-    if( m_on_collision_rebuild_completed )
+    if (m_on_collision_rebuild_completed)
     {
-      m_on_collision_rebuild_completed (
-        success,
-        success
-          ? m_render_controller.Collision_Point_Cloud_Stats ( )
-          : failed_stats,
-        error_message);
+      m_on_collision_rebuild_completed(success,
+                                       success ? m_render_controller.Collision_Point_Cloud_Stats()
+                                               : failed_stats,
+                                       error_message);
     }
   };
-  if( settings_change )
+  if (settings_change)
   {
-    return m_collision_index_rebuild_coordinator.Submit_Settings (
-      std::move (request), std::move (dispatch), std::move (completion));
+    return m_collision_index_rebuild_coordinator.Submit_Settings(std::move(request),
+                                                                 std::move(dispatch),
+                                                                 std::move(completion));
   }
-  return m_collision_index_rebuild_coordinator.Submit_Source (
-    std::move (request), std::move (dispatch), std::move (completion));
+  return m_collision_index_rebuild_coordinator.Submit_Source(std::move(request),
+                                                             std::move(dispatch),
+                                                             std::move(completion));
 }
 
-void Robot_Model_View::Update_Flange_Hover (const wxMouseEvent& event)
+void Robot_Model_View::Update_Flange_Hover(const wxMouseEvent &event)
 {
-  const auto position = event.GetPosition ( );
-  const auto size = GetClientSize ( );
-  const robot_model::Matrix4* pose = m_render_controller.Has_Flange_Pose ( )
-    ? &m_render_controller.World_From_Flange ( )
-    : nullptr;
+  const auto position = event.GetPosition();
+  const auto size = GetClientSize();
+  const robot_model::Matrix4 *pose = m_render_controller.Has_Flange_Pose() ? &m_render_controller.World_From_Flange()
+                                                                           : nullptr;
   bool hover_changed = false;
-  const bool over_handle = m_flange_interaction.Update_Hover (
-    position.x, size.y - 1 - position.y, pose, &hover_changed);
-  if( !hover_changed ) return;
-  SetCursor (over_handle ? wxCursor (wxCURSOR_HAND) : wxNullCursor);
-  Render ( );
+  const bool over_handle = m_flange_interaction.Update_Hover(position.x, size.y - 1 - position.y, pose, &hover_changed);
+  if (!hover_changed)
+    return;
+  SetCursor(over_handle ? wxCursor(wxCURSOR_HAND) : wxNullCursor);
+  Render();
 }
