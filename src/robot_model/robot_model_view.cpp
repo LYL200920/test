@@ -7,6 +7,8 @@
 
 #include <GL/gl.h>
 
+#include <algorithm>
+#include <cstdlib>
 #include <utility>
 
 Robot_Model_View::Robot_Model_View(wxWindow *parent, wxWindowID id)
@@ -28,6 +30,7 @@ Robot_Model_View::Robot_Model_View(wxWindow *parent, wxWindowID id)
   Bind(wxEVT_MIDDLE_DOWN, &Robot_Model_View::On_Middle_Down, this);
   Bind(wxEVT_MIDDLE_UP, &Robot_Model_View::On_Middle_Up, this);
   Bind(wxEVT_MOUSE_CAPTURE_LOST, &Robot_Model_View::On_Mouse_Capture_Lost, this);
+  Bind(wxEVT_KEY_DOWN, &Robot_Model_View::On_Key_Down, this);
   Bind(wxEVT_TIMER, &Robot_Model_View::On_Drag_Update_Timer, this, m_drag_update_timer.GetId());
 }
 
@@ -106,6 +109,65 @@ vtkRenderer *Robot_Model_View::Scene_Renderer()
 void Robot_Model_View::Render_Scene()
 {
   Render();
+}
+
+void Robot_Model_View::Set_Point_Cloud_Edit_Mode(
+  bool enabled,
+  Point_Cloud_Selection_Shape shape)
+{
+  if (m_point_cloud_edit_mode == enabled &&
+      m_point_cloud_selection_shape == shape)
+  {
+    return;
+  }
+  Cancel_Point_Cloud_Polygon_Selection();
+  m_point_cloud_edit_mode = enabled;
+  m_point_cloud_selection_shape = shape;
+  if (!enabled)
+  {
+    m_point_cloud_selecting = false;
+    Clear_Point_Cloud_Selection_Rectangle();
+    if (HasCapture())
+    {
+      ReleaseMouse();
+    }
+  }
+}
+
+void Robot_Model_View::Set_On_Point_Cloud_Area_Selected(
+  std::function<void(int, int, int, int, bool, bool)> callback)
+{
+  m_on_point_cloud_area_selected = std::move(callback);
+}
+
+void Robot_Model_View::Set_On_Point_Cloud_Polygon_Selected(
+  std::function<void(
+    const std::vector<std::array<int, 2>> &, bool, bool)> callback)
+{
+  m_on_point_cloud_polygon_selected = std::move(callback);
+}
+
+void Robot_Model_View::Set_On_Point_Cloud_Delete(
+  std::function<void()> callback)
+{
+  m_on_point_cloud_delete = std::move(callback);
+}
+
+void Robot_Model_View::Set_On_Point_Cloud_Undo(
+  std::function<void()> callback)
+{
+  m_on_point_cloud_undo = std::move(callback);
+}
+
+void Robot_Model_View::Set_On_Point_Cloud_Redo(
+  std::function<void()> callback)
+{
+  m_on_point_cloud_redo = std::move(callback);
+}
+
+void Robot_Model_View::Clear_Point_Cloud_Selection_Outline()
+{
+  Cancel_Point_Cloud_Polygon_Selection();
 }
 
 void Robot_Model_View::Set_Flange_Frame_Visible(bool visible)
@@ -385,6 +447,26 @@ void Robot_Model_View::Set_Interactor_Event(const wxMouseEvent &event)
 
 void Robot_Model_View::On_Mouse_Move(wxMouseEvent &event)
 {
+  if (m_point_cloud_selecting)
+  {
+    m_point_cloud_selection_end = event.GetPosition();
+    Draw_Point_Cloud_Selection_Rectangle();
+    return;
+  }
+  if (m_point_cloud_edit_mode &&
+      m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon &&
+      !m_point_cloud_polygon_vertices.empty())
+  {
+    if (!m_point_cloud_polygon_closed)
+    {
+      m_point_cloud_polygon_preview = event.GetPosition();
+      m_point_cloud_polygon_has_preview = true;
+      Draw_Point_Cloud_Selection_Polygon();
+    }
+    return;
+  }
+
   if (m_flange_interaction.Is_Dragging())
   {
     const auto position = event.GetPosition();
@@ -413,6 +495,14 @@ void Robot_Model_View::On_Mouse_Move(wxMouseEvent &event)
 
 void Robot_Model_View::On_Mouse_Wheel(wxMouseEvent &event)
 {
+  if (m_point_cloud_edit_mode &&
+      m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon &&
+      !m_point_cloud_polygon_vertices.empty())
+  {
+    return;
+  }
+
   auto *interactor = Interactor();
   if (!interactor)
   {
@@ -433,6 +523,40 @@ void Robot_Model_View::On_Mouse_Wheel(wxMouseEvent &event)
 
 void Robot_Model_View::On_Left_Down(wxMouseEvent &event)
 {
+  if (m_point_cloud_edit_mode)
+  {
+    SetFocus();
+    if (m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon)
+    {
+      if (m_point_cloud_polygon_closed)
+      {
+        Cancel_Point_Cloud_Polygon_Selection();
+      }
+      if (m_point_cloud_polygon_vertices.empty())
+      {
+        m_point_cloud_polygon_add = event.ShiftDown();
+        m_point_cloud_polygon_toggle = event.ControlDown();
+      }
+      m_point_cloud_polygon_vertices.push_back(event.GetPosition());
+      m_point_cloud_polygon_preview = event.GetPosition();
+      m_point_cloud_polygon_has_preview = true;
+      m_point_cloud_polygon_closed = false;
+      Draw_Point_Cloud_Selection_Polygon();
+      return;
+    }
+
+    m_point_cloud_selecting = true;
+    m_point_cloud_selection_start = event.GetPosition();
+    m_point_cloud_selection_end = m_point_cloud_selection_start;
+    if (!HasCapture())
+    {
+      CaptureMouse();
+    }
+    Draw_Point_Cloud_Selection_Rectangle();
+    return;
+  }
+
   Ensure_VTK();
   if (m_scene)
   {
@@ -482,6 +606,38 @@ void Robot_Model_View::On_Left_Down(wxMouseEvent &event)
 
 void Robot_Model_View::On_Left_Up(wxMouseEvent &event)
 {
+  if (m_point_cloud_edit_mode &&
+      m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon)
+  {
+    return;
+  }
+
+  if (m_point_cloud_selecting)
+  {
+    m_point_cloud_selection_end = event.GetPosition();
+    const wxPoint start = m_point_cloud_selection_start;
+    const wxPoint end = m_point_cloud_selection_end;
+    m_point_cloud_selecting = false;
+    Clear_Point_Cloud_Selection_Rectangle();
+    if (HasCapture())
+    {
+      ReleaseMouse();
+    }
+    if (m_on_point_cloud_area_selected)
+    {
+      const auto size = GetClientSize();
+      m_on_point_cloud_area_selected(
+        start.x,
+        size.y - 1 - start.y,
+        end.x,
+        size.y - 1 - end.y,
+        event.ShiftDown(),
+        event.ControlDown());
+    }
+    return;
+  }
+
   if (m_flange_interaction.Is_Dragging())
   {
     const auto position = event.GetPosition();
@@ -512,6 +668,53 @@ void Robot_Model_View::On_Left_Up(wxMouseEvent &event)
 
 void Robot_Model_View::On_Right_Down(wxMouseEvent &event)
 {
+  if (m_point_cloud_edit_mode &&
+      m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon)
+  {
+    if (m_point_cloud_polygon_closed)
+    {
+      return;
+    }
+    if (m_point_cloud_polygon_vertices.size() < 2)
+    {
+      Cancel_Point_Cloud_Polygon_Selection();
+      return;
+    }
+
+    m_point_cloud_polygon_vertices.push_back(event.GetPosition());
+    const std::vector<wxPoint> completed_vertices =
+      m_point_cloud_polygon_vertices;
+
+    std::vector<std::array<int, 2>> polygon;
+    polygon.reserve(m_point_cloud_polygon_vertices.size());
+    const auto size = GetClientSize();
+    for (const wxPoint &vertex : m_point_cloud_polygon_vertices)
+    {
+      polygon.push_back({vertex.x, size.y - 1 - vertex.y});
+    }
+    const bool add = m_point_cloud_polygon_add;
+    const bool toggle = m_point_cloud_polygon_toggle;
+    Cancel_Point_Cloud_Polygon_Selection();
+    if (m_on_point_cloud_polygon_selected)
+    {
+      m_on_point_cloud_polygon_selected(
+        polygon,
+        add,
+        toggle);
+    }
+    if (m_point_cloud_edit_mode &&
+        m_point_cloud_selection_shape ==
+          Point_Cloud_Selection_Shape::Polygon)
+    {
+      m_point_cloud_polygon_vertices = completed_vertices;
+      m_point_cloud_polygon_has_preview = false;
+      m_point_cloud_polygon_closed = true;
+      Draw_Point_Cloud_Selection_Polygon();
+    }
+    return;
+  }
+
   auto *interactor = Interactor();
   if (!interactor)
   {
@@ -530,6 +733,13 @@ void Robot_Model_View::On_Right_Down(wxMouseEvent &event)
 
 void Robot_Model_View::On_Right_Up(wxMouseEvent &event)
 {
+  if (m_point_cloud_edit_mode &&
+      m_point_cloud_selection_shape ==
+        Point_Cloud_Selection_Shape::Polygon)
+  {
+    return;
+  }
+
   if (auto *interactor = Interactor())
   {
     Set_Interactor_Event(event);
@@ -576,6 +786,11 @@ void Robot_Model_View::On_Middle_Up(wxMouseEvent &event)
 
 void Robot_Model_View::On_Mouse_Capture_Lost(wxMouseCaptureLostEvent &)
 {
+  if (m_point_cloud_selecting)
+  {
+    m_point_cloud_selecting = false;
+    Clear_Point_Cloud_Selection_Rectangle();
+  }
   const bool was_dragging = m_flange_interaction.Is_Dragging();
   m_drag_update_timer.Stop();
   m_drag_update_coordinator.Cancel();
@@ -585,6 +800,132 @@ void Robot_Model_View::On_Mouse_Capture_Lost(wxMouseCaptureLostEvent &)
   if (was_dragging)
     Finish_Flange_Drag_Performance();
   Render();
+}
+
+void Robot_Model_View::On_Key_Down(wxKeyEvent &event)
+{
+  if (!m_point_cloud_edit_mode)
+  {
+    event.Skip();
+    return;
+  }
+
+  if (event.GetKeyCode() == WXK_ESCAPE)
+  {
+    Cancel_Point_Cloud_Polygon_Selection();
+    m_point_cloud_selecting = false;
+    Clear_Point_Cloud_Selection_Rectangle();
+    if (HasCapture())
+    {
+      ReleaseMouse();
+    }
+    return;
+  }
+  if (event.GetKeyCode() == WXK_DELETE && m_on_point_cloud_delete)
+  {
+    m_on_point_cloud_delete();
+    return;
+  }
+  if (event.ControlDown() &&
+      (event.GetKeyCode() == 'Z' || event.GetKeyCode() == 'z') &&
+      m_on_point_cloud_undo)
+  {
+    m_on_point_cloud_undo();
+    return;
+  }
+  if (event.ControlDown() &&
+      (event.GetKeyCode() == 'Y' || event.GetKeyCode() == 'y') &&
+      m_on_point_cloud_redo)
+  {
+    m_on_point_cloud_redo();
+    return;
+  }
+  event.Skip();
+}
+
+void Robot_Model_View::Draw_Point_Cloud_Selection_Rectangle()
+{
+  wxClientDC dc(this);
+  wxDCOverlay overlay(m_point_cloud_selection_overlay, &dc);
+  overlay.Clear();
+  if (!m_point_cloud_selecting)
+  {
+    return;
+  }
+
+  dc.SetPen(wxPen(wxColour(255, 196, 32), 1, wxPENSTYLE_SHORT_DASH));
+  dc.SetBrush(*wxTRANSPARENT_BRUSH);
+  const int minimum_x = std::min(
+    m_point_cloud_selection_start.x, m_point_cloud_selection_end.x);
+  const int minimum_y = std::min(
+    m_point_cloud_selection_start.y, m_point_cloud_selection_end.y);
+  const int width = std::abs(
+    m_point_cloud_selection_end.x - m_point_cloud_selection_start.x);
+  const int height = std::abs(
+    m_point_cloud_selection_end.y - m_point_cloud_selection_start.y);
+  dc.DrawRectangle(minimum_x, minimum_y, width, height);
+}
+
+void Robot_Model_View::Clear_Point_Cloud_Selection_Rectangle()
+{
+  wxClientDC dc(this);
+  wxDCOverlay overlay(m_point_cloud_selection_overlay, &dc);
+  overlay.Clear();
+  m_point_cloud_selection_overlay.Reset();
+}
+
+void Robot_Model_View::Draw_Point_Cloud_Selection_Polygon()
+{
+  wxClientDC dc(this);
+  wxDCOverlay overlay(m_point_cloud_selection_overlay, &dc);
+  overlay.Clear();
+  if (m_point_cloud_polygon_vertices.empty())
+  {
+    return;
+  }
+
+  dc.SetPen(wxPen(wxColour(255, 196, 32), 2));
+  for (std::size_t index = 0;
+       index < m_point_cloud_polygon_vertices.size();
+       ++index)
+  {
+    if (index > 0)
+    {
+      dc.DrawLine(
+        m_point_cloud_polygon_vertices[index - 1],
+        m_point_cloud_polygon_vertices[index]);
+    }
+  }
+  if (m_point_cloud_polygon_closed &&
+      m_point_cloud_polygon_vertices.size() >= 3)
+  {
+    dc.DrawLine(
+      m_point_cloud_polygon_vertices.back(),
+      m_point_cloud_polygon_vertices.front());
+  }
+  else if (m_point_cloud_polygon_has_preview)
+  {
+    dc.SetPen(wxPen(
+      wxColour(255, 196, 32), 1, wxPENSTYLE_SHORT_DASH));
+    dc.DrawLine(
+      m_point_cloud_polygon_vertices.back(),
+      m_point_cloud_polygon_preview);
+  }
+}
+
+void Robot_Model_View::Cancel_Point_Cloud_Polygon_Selection()
+{
+  if (m_point_cloud_polygon_vertices.empty() &&
+      !m_point_cloud_polygon_closed)
+  {
+    return;
+  }
+  m_point_cloud_polygon_vertices.clear();
+  m_point_cloud_polygon_has_preview = false;
+  m_point_cloud_polygon_closed = false;
+  m_point_cloud_polygon_add = false;
+  m_point_cloud_polygon_toggle = false;
+  Clear_Point_Cloud_Selection_Rectangle();
 }
 
 void Robot_Model_View::On_Drag_Update_Timer(wxTimerEvent &)

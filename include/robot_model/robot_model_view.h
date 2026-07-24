@@ -11,9 +11,11 @@
 #include "robot_drag_performance_collector.h"
 
 #include <wx/glcanvas.h>
+#include <wx/overlay.h>
 #include <wx/timer.h>
 
 #include <memory>
+#include <array>
 #include <functional>
 #include <string>
 #include <vector>
@@ -30,6 +32,11 @@ class Robot_Model_View : public wxGLCanvas
 {
 public:
   using Flange_Interaction_Mode = robot_model::Flange_Interaction_Mode;
+  enum class Point_Cloud_Selection_Shape
+  {
+    Rectangle,
+    Polygon
+  };
 
   explicit Robot_Model_View(wxWindow *parent, wxWindowID id = wxID_ANY);
   ~Robot_Model_View() override;
@@ -65,6 +72,20 @@ public:
   void Set_On_Flange_Pose_Dragged(std::function<void(const robot_model::Robot_Pose_IK_Result &)> callback);
   void Set_On_Flange_Drag_State_Changed(std::function<void(bool)> callback);
   void Set_On_Flange_Drag_Performance(std::function<void(const robot_model::Robot_Drag_Performance_Stats &)> callback);
+  void Set_Point_Cloud_Edit_Mode(
+    bool enabled,
+    Point_Cloud_Selection_Shape shape =
+      Point_Cloud_Selection_Shape::Rectangle);
+  bool Point_Cloud_Edit_Mode() const { return m_point_cloud_edit_mode; }
+  void Set_On_Point_Cloud_Area_Selected(
+    std::function<void(int, int, int, int, bool, bool)> callback);
+  void Set_On_Point_Cloud_Polygon_Selected(
+    std::function<void(
+      const std::vector<std::array<int, 2>> &, bool, bool)> callback);
+  void Set_On_Point_Cloud_Delete(std::function<void()> callback);
+  void Set_On_Point_Cloud_Undo(std::function<void()> callback);
+  void Set_On_Point_Cloud_Redo(std::function<void()> callback);
+  void Clear_Point_Cloud_Selection_Outline();
 
 private:
   void Ensure_VTK();
@@ -80,6 +101,7 @@ private:
   void On_Middle_Down(wxMouseEvent &event);
   void On_Middle_Up(wxMouseEvent &event);
   void On_Mouse_Capture_Lost(wxMouseCaptureLostEvent &event);
+  void On_Key_Down(wxKeyEvent &event);
   void On_Drag_Update_Timer(wxTimerEvent &event);
 
   void Render();
@@ -91,6 +113,10 @@ private:
   void Apply_Pending_Flange_Drag_Update();
   void Finish_Flange_Drag_Performance();
   bool Queue_Collision_Rebuild(robot_model::Collision_Index_Build_Request request, bool settings_change);
+  void Draw_Point_Cloud_Selection_Rectangle();
+  void Clear_Point_Cloud_Selection_Rectangle();
+  void Draw_Point_Cloud_Selection_Polygon();
+  void Cancel_Point_Cloud_Polygon_Selection();
 
 private:
   wxGLContext *m_gl_context = nullptr;
@@ -109,6 +135,27 @@ private:
   std::function<void(const robot_model::Robot_Drag_Performance_Stats &)> m_on_flange_drag_performance;
   robot_model::Robot_Drag_Performance_Collector m_drag_performance_collector;
   double m_last_render_time_ms = 0.0;
+  bool m_point_cloud_edit_mode = false;
+  Point_Cloud_Selection_Shape m_point_cloud_selection_shape =
+    Point_Cloud_Selection_Shape::Rectangle;
+  bool m_point_cloud_selecting = false;
+  wxPoint m_point_cloud_selection_start;
+  wxPoint m_point_cloud_selection_end;
+  wxOverlay m_point_cloud_selection_overlay;
+  std::function<void(int, int, int, int, bool, bool)>
+    m_on_point_cloud_area_selected;
+  std::vector<wxPoint> m_point_cloud_polygon_vertices;
+  wxPoint m_point_cloud_polygon_preview;
+  bool m_point_cloud_polygon_has_preview = false;
+  bool m_point_cloud_polygon_closed = false;
+  bool m_point_cloud_polygon_add = false;
+  bool m_point_cloud_polygon_toggle = false;
+  std::function<void(
+    const std::vector<std::array<int, 2>> &, bool, bool)>
+    m_on_point_cloud_polygon_selected;
+  std::function<void()> m_on_point_cloud_delete;
+  std::function<void()> m_on_point_cloud_undo;
+  std::function<void()> m_on_point_cloud_redo;
 };
 
 #endif

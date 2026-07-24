@@ -257,6 +257,12 @@ if(BUILD_TESTING)
   add_project_test(point_cloud_persistence_tests point_cloud_persistence_tests.cpp)
   target_link_libraries(point_cloud_persistence_tests PRIVATE point_cloud)
 
+  add_project_test(point_cloud_document_tests point_cloud_document_tests.cpp)
+  target_link_libraries(point_cloud_document_tests PRIVATE point_cloud)
+
+  add_project_test(point_cloud_selection_tests point_cloud_selection_tests.cpp)
+  target_link_libraries(point_cloud_selection_tests PRIVATE point_cloud)
+
   add_project_test(robot_base_point_cloud_builder_tests
                    robot_base_point_cloud_builder_tests.cpp)
   target_link_libraries(robot_base_point_cloud_builder_tests PRIVATE point_cloud)

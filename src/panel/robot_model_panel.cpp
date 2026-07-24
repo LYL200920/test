@@ -352,6 +352,22 @@ Robot_Model_Panel::Robot_Model_Panel (
       }
       return true;
     };
+  overlay_callbacks.set_point_cloud_edit_mode =
+    [this] (bool enabled, bool polygon)
+  {
+    if( m_view )
+    {
+      m_view->Set_Point_Cloud_Edit_Mode (
+        enabled,
+        polygon
+          ? Robot_Model_View::Point_Cloud_Selection_Shape::Polygon
+          : Robot_Model_View::Point_Cloud_Selection_Shape::Rectangle);
+    }
+  };
+  overlay_callbacks.clear_point_cloud_selection_outline = [this]
+  {
+    if( m_view ) m_view->Clear_Point_Cloud_Selection_Outline ( );
+  };
   m_display_book->AddPage (m_view, wxEmptyString, true);
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
@@ -367,6 +383,48 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_right_tool_panel->Page_Parent ( ),
     camera_service,
     std::move (overlay_callbacks));
+  m_view->Set_On_Point_Cloud_Area_Selected (
+    [this] (
+      int start_x,
+      int start_y,
+      int end_x,
+      int end_y,
+      bool add,
+      bool toggle)
+    {
+      if( m_point_cloud_overlay_toolbar )
+      {
+        m_point_cloud_overlay_toolbar->Handle_Area_Selected (
+          start_x, start_y, end_x, end_y, add, toggle);
+      }
+    });
+  m_view->Set_On_Point_Cloud_Polygon_Selected (
+    [this] (
+      const std::vector<std::array<int, 2>>& polygon,
+      bool add,
+      bool toggle)
+    {
+      if( m_point_cloud_overlay_toolbar )
+      {
+        m_point_cloud_overlay_toolbar->Handle_Polygon_Selected (
+          polygon, add, toggle);
+      }
+    });
+  m_view->Set_On_Point_Cloud_Delete ([this]
+  {
+    if( m_point_cloud_overlay_toolbar )
+      m_point_cloud_overlay_toolbar->Delete_Selected ( );
+  });
+  m_view->Set_On_Point_Cloud_Undo ([this]
+  {
+    if( m_point_cloud_overlay_toolbar )
+      m_point_cloud_overlay_toolbar->Undo_Edit ( );
+  });
+  m_view->Set_On_Point_Cloud_Redo ([this]
+  {
+    if( m_point_cloud_overlay_toolbar )
+      m_point_cloud_overlay_toolbar->Redo_Edit ( );
+  });
   m_view->Set_On_Flange_Drag_State_Changed ([this] (bool dragging)
   {
     if( m_point_cloud_overlay_toolbar )

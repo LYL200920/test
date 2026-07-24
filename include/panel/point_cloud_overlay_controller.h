@@ -1,6 +1,9 @@
 #ifndef includeguard_point_cloud_overlay_controller_h_includeguard
 #define includeguard_point_cloud_overlay_controller_h_includeguard
 
+#include "point_cloud_document.h"
+#include "point_cloud_selection.h"
+
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -42,7 +45,7 @@ public:
   ~Point_Cloud_Overlay_Controller();
 
   Point_Cloud_Overlay_Result Load_Latest(vtkRenderer *renderer);
-  Point_Cloud_Save_Result Save_Latest_To_File(const std::filesystem::path &path, const std::string &robot_model_id);
+  Point_Cloud_Save_Result Save_Current_To_File(const std::filesystem::path &path, const std::string &robot_model_id);
   Point_Cloud_Overlay_Result Load_File(const std::filesystem::path &path,
                                        const std::string &expected_robot_model,
                                        vtkRenderer *renderer);
@@ -50,6 +53,23 @@ public:
   void Clear();
   bool Has_Point_Cloud() const;
   void Set_Interactive_LOD(bool enabled);
+  std::size_t Select_In_Display_Rect(vtkRenderer *renderer,
+                                     int minimum_x,
+                                     int minimum_y,
+                                     int maximum_x,
+                                     int maximum_y,
+                                     point_cloud::Point_Selection_Mode mode);
+  std::size_t Select_In_Display_Polygon(
+    vtkRenderer *renderer,
+    const std::vector<point_cloud::Display_Point> &polygon,
+    point_cloud::Point_Selection_Mode mode);
+  std::size_t Selection_Count() const;
+  void Clear_Selection();
+  std::size_t Delete_Selected(std::string *error_message = nullptr);
+  bool Undo(std::string *error_message = nullptr);
+  bool Redo(std::string *error_message = nullptr);
+  bool Can_Undo() const;
+  bool Can_Redo() const;
   std::size_t Displayed_Point_Count() const;
   std::size_t Interaction_Point_Count() const;
   std::shared_ptr<const std::vector<float>> Collision_Obstacle_Xyz() const;
