@@ -19,7 +19,14 @@ Teach_Point_List_Panel::Teach_Point_List_Panel (wxWindow* parent)
   header->Add (m_title, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
   header->Add (m_toggle_button, 0, wxALIGN_CENTER_VERTICAL);
 
-  m_point_list = new wxListBox (this, wxID_ANY);
+  m_point_list = new wxListBox (
+    this,
+    wxID_ANY,
+    wxDefaultPosition,
+    wxDefaultSize,
+    0,
+    nullptr,
+    wxLB_EXTENDED);
   m_toggle_button->Bind (
     wxEVT_BUTTON,
     [this] (wxCommandEvent&) { Toggle_Collapsed ( ); });
@@ -41,27 +48,82 @@ void Teach_Point_List_Panel::Set_Point_Names (
   const std::vector<wxString>& names)
 {
   if( !m_point_list ) return;
-  const int old_selection = m_point_list->GetSelection ( );
+  const std::vector<int> old_selections =
+    Selected_Point_Indices ( );
   m_point_list->Clear ( );
   for( const auto& name : names ) m_point_list->Append (name);
   if( names.empty ( ) ) return;
-  const int selection = old_selection == wxNOT_FOUND
-    ? static_cast<int> (names.size ( ) - 1)
-    : std::min (old_selection, static_cast<int> (names.size ( ) - 1));
-  m_point_list->SetSelection (selection);
-  m_point_list->EnsureVisible (selection);
+  std::vector<int> selections;
+  for( const int selection : old_selections )
+  {
+    if( selection >= 0 &&
+        selection < static_cast<int> (names.size ( )) )
+    {
+      selections.push_back (selection);
+    }
+  }
+  if( selections.empty ( ) )
+  {
+    selections.push_back (
+      static_cast<int> (names.size ( ) - 1));
+  }
+  Set_Point_Selections (selections);
 }
 
 int Teach_Point_List_Panel::Selected_Point_Index ( ) const
 {
-  return m_point_list ? m_point_list->GetSelection ( ) : wxNOT_FOUND;
+  const auto selections = Selected_Point_Indices ( );
+  return selections.size ( ) == 1 ? selections.front ( ) : wxNOT_FOUND;
+}
+
+std::vector<int> Teach_Point_List_Panel::Selected_Point_Indices ( ) const
+{
+  std::vector<int> selections;
+  if( !m_point_list ) return selections;
+  wxArrayInt selected;
+  m_point_list->GetSelections (selected);
+  selections.reserve (selected.size ( ));
+  for( const int index : selected )
+  {
+    selections.push_back (index);
+  }
+  return selections;
 }
 
 void Teach_Point_List_Panel::Set_Point_Selection (int selection)
 {
-  if( !m_point_list || selection == wxNOT_FOUND ) return;
-  m_point_list->SetSelection (selection);
-  m_point_list->EnsureVisible (selection);
+  Set_Point_Selections (
+    selection == wxNOT_FOUND
+      ? std::vector<int> { }
+      : std::vector<int> { selection });
+}
+
+void Teach_Point_List_Panel::Set_Point_Selections (
+  const std::vector<int>& selections)
+{
+  if( !m_point_list ) return;
+  m_point_list->DeselectAll ( );
+  for( const int selection : selections )
+  {
+    if( selection >= 0 &&
+        selection < static_cast<int> (m_point_list->GetCount ( )) )
+    {
+      m_point_list->SetSelection (selection, true);
+    }
+  }
+  if( !selections.empty ( ) )
+  {
+    m_point_list->EnsureVisible (selections.front ( ));
+  }
+}
+
+void Teach_Point_List_Panel::Set_Dirty (bool dirty)
+{
+  m_dirty = dirty;
+  if( m_title )
+  {
+    m_title->SetLabel (m_dirty ? "Progress *" : "Progress");
+  }
 }
 
 void Teach_Point_List_Panel::Set_List_Enabled (bool enabled)

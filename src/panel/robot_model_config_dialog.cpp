@@ -87,7 +87,10 @@ Robot_Model_Config_Dialog::Robot_Model_Config_Dialog(
   m_tool_list = new wxListBox(tool_page, wxID_ANY);
   m_tool_name = new wxTextCtrl(tool_page, wxID_ANY);
   const std::array<wxString, 6> labels = {
-    "X (mm)", "Y (mm)", "Z (mm)", "A (°)", "B (°)", "C (°)"};
+    "X (mm)", "Y (mm)", "Z (mm)",
+    wxString::FromUTF8(u8"A (°)"),
+    wxString::FromUTF8(u8"B (°)"),
+    wxString::FromUTF8(u8"C (°)")};
   auto *pose_grid = new wxFlexGridSizer(2, 6, 6);
   pose_grid->AddGrowableCol(1, 1);
   pose_grid->Add(

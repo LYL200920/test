@@ -43,16 +43,22 @@ namespace robot_model
     Update_Visibility();
   }
 
-  void Flange_Interaction_Controller::Update_Flange_Pose(const Matrix4 *world_from_flange)
+  void Flange_Interaction_Controller::Update_Poses(
+    const Matrix4 *world_from_flange,
+    const Matrix4 *world_from_interaction)
   {
     m_has_flange_pose = world_from_flange != nullptr;
     if (world_from_flange)
     {
       m_flange_frame_renderer.Set_World_From_Frame(*world_from_flange);
-      m_free_drag_handle_renderer.Set_World_From_Frame(*world_from_flange);
-      m_gizmo_renderer.Set_World_From_Flange(*world_from_flange);
     }
-    else
+    m_has_interaction_pose = world_from_interaction != nullptr;
+    if (world_from_interaction)
+    {
+      m_free_drag_handle_renderer.Set_World_From_Frame(*world_from_interaction);
+      m_gizmo_renderer.Set_World_From_Flange(*world_from_interaction);
+    }
+    if (!world_from_flange || !world_from_interaction)
     {
       End_Drag();
       Clear_Hover();
@@ -62,22 +68,26 @@ namespace robot_model
 
   bool Flange_Interaction_Controller::Begin_Drag(double display_x,
                                                  double display_y,
-                                                 const Matrix4 &world_from_flange)
+                                                 const Matrix4 &world_from_interaction)
   {
-    if (!m_has_flange_pose)
+    if (!m_has_interaction_pose)
       return false;
 
     if (m_mode == Flange_Interaction_Mode::Transform_6D)
     {
-      return m_axis_translation_dragger.Begin_Drag(display_x, display_y, world_from_flange) ||
-             m_orientation_dragger.Begin_Drag(display_x, display_y, world_from_flange);
+      return m_axis_translation_dragger.Begin_Drag(
+               display_x, display_y, world_from_interaction) ||
+             m_orientation_dragger.Begin_Drag(
+               display_x, display_y, world_from_interaction);
     }
     if (m_mode == Flange_Interaction_Mode::Free_Translation)
     {
-      const Point3 flange_world = {world_from_flange[0][3],
-                                   world_from_flange[1][3],
-                                   world_from_flange[2][3]};
-      return m_position_dragger.Begin_Drag(display_x, display_y, flange_world);
+      const Point3 interaction_origin_world = {
+        world_from_interaction[0][3],
+        world_from_interaction[1][3],
+        world_from_interaction[2][3]};
+      return m_position_dragger.Begin_Drag(
+        display_x, display_y, interaction_origin_world);
     }
     return false;
   }
@@ -131,27 +141,29 @@ namespace robot_model
 
   bool Flange_Interaction_Controller::Update_Hover(double display_x,
                                                    double display_y,
-                                                   const Matrix4 *world_from_flange,
+                                                   const Matrix4 *world_from_interaction,
                                                    bool *changed)
   {
     int translation_axis = -1;
     int rotation_axis = -1;
     bool free_translation = false;
-    if (world_from_flange)
+    if (world_from_interaction)
     {
       if (m_mode == Flange_Interaction_Mode::Transform_6D)
       {
-        translation_axis = m_axis_translation_dragger.Hit_Test(display_x, display_y, *world_from_flange);
+        translation_axis = m_axis_translation_dragger.Hit_Test(
+          display_x, display_y, *world_from_interaction);
         if (translation_axis < 0)
         {
-          rotation_axis = m_orientation_dragger.Hit_Test(display_x, display_y, *world_from_flange);
+          rotation_axis = m_orientation_dragger.Hit_Test(
+            display_x, display_y, *world_from_interaction);
         }
       }
       else if (m_mode == Flange_Interaction_Mode::Free_Translation)
       {
-        const Point3 origin = {(*world_from_flange)[0][3],
-                               (*world_from_flange)[1][3],
-                               (*world_from_flange)[2][3]};
+        const Point3 origin = {(*world_from_interaction)[0][3],
+                               (*world_from_interaction)[1][3],
+                               (*world_from_interaction)[2][3]};
         free_translation = m_position_dragger.Hit_Test(display_x, display_y, origin);
       }
     }
@@ -175,9 +187,11 @@ namespace robot_model
   void Flange_Interaction_Controller::Update_Visibility()
   {
     m_flange_frame_renderer.Set_Visible(m_frame_visible && m_has_flange_pose);
-    m_gizmo_renderer.Set_Visible(m_mode == Flange_Interaction_Mode::Transform_6D && m_has_flange_pose);
+    m_gizmo_renderer.Set_Visible(
+      m_mode == Flange_Interaction_Mode::Transform_6D &&
+      m_has_interaction_pose);
     m_free_drag_handle_renderer.Set_Visible(m_mode == Flange_Interaction_Mode::Free_Translation &&
-                                            m_has_flange_pose);
+                                            m_has_interaction_pose);
   }
 
   void Flange_Interaction_Controller::Clear_Hover()

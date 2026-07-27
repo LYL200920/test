@@ -10,6 +10,7 @@
 #include "trajectory_control_panel.h"
 #include "cartesian_pose_panel.h"
 #include "tool_coordinate.h"
+#include "tool_visualization.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -17,6 +18,7 @@
 #include <wx/timer.h>
 
 #include <array>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -28,7 +30,9 @@ class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class Teach_Point_Command_Panel;
 class Teach_Point_List_Panel;
+class Tool_Panel;
 class wxButton;
+class wxChoice;
 class wxSimplebook;
 class wxSplitterWindow;
 class wxToggleButton;
@@ -52,6 +56,8 @@ public:
 
 private:
   void On_Add_Trajectory_Point(wxCommandEvent &event);
+  void On_Update_Teach_Point(wxCommandEvent &event);
+  void On_Insert_Teach_Point(bool before);
   void On_Clear_Trajectory_Points(wxCommandEvent &event);
   void On_Go_To_Trajectory_Point(wxCommandEvent &event);
   void On_Delete_Trajectory_Point(wxCommandEvent &event);
@@ -71,10 +77,12 @@ private:
   void On_Toggle_Flange_Frame(wxCommandEvent &event);
   void On_Toggle_Flange_Free_Drag(wxCommandEvent &event);
   void On_Toggle_Flange_6D(wxCommandEvent &event);
+  void On_Interaction_Coordinate_Changed(wxCommandEvent &event);
   void Set_Flange_Interaction_Mode(Robot_Model_View::Flange_Interaction_Mode mode);
   void Select_Display_Page(Main_Display_Page page);
   void Update_Display_Menu();
   wxPanel *Build_Robot_Tool_Page(wxWindow *parent);
+  wxPanel *Build_Teach_Tool_Page(wxWindow *parent);
   void Apply_Joint_Limits(const robot_model::Robot_Kinematic_Params &params);
   void Update_Joint_State_From_Sliders();
   void Update_Cartesian_Pose();
@@ -90,19 +98,32 @@ private:
   void Update_Trajectory_Status();
   void Update_Trajectory_Speed_Label();
   void Update_Trajectory_Point_List();
+  void On_Teach_Point_Selection_Changed();
+  void Apply_Teach_Point_Bindings(std::size_t index);
   void Sync_Trajectory_From_Teach_Points();
   int Selected_Teach_Point_Index() const;
-  double Get_Trajectory_Speed_Scale() const;
+  std::vector<int> Selected_Teach_Point_Indices() const;
+  bool Read_Current_Teach_Point(
+    std::array<double, 6> *joint_angles,
+    robot_model::XyzabcPose *world_pose) const;
+  bool Capture_Current_Teach_Bindings(
+    std::string *point_cloud_path,
+    robot_model::Tool_Coordinate_Profile *coordinate);
+  void Set_Progress_Dirty(bool dirty);
+  double Get_Trajectory_Speed_Mps() const;
   int Get_Trajectory_Timer_Interval_Ms() const;
   bool Is_Trajectory_Active() const;
   void Stop_Trajectory_Playback();
-  void Resize_Right_Tool(bool collapsed);
+  void Resize_Right_Tool(int requested_width);
   void Resize_Teach_Point_List(bool collapsed);
   void Load_Model_List();
   void Load_Default_Model();
   bool Load_Model(size_t model_index, std::string *error_message = nullptr);
   const robot_model::Tool_Coordinate_Profile &Active_Tool() const;
+  const robot_model::Tool_Coordinate_Profile &Interaction_Tool() const;
   void Apply_Active_Tool();
+  void Refresh_Interaction_Coordinate_Choices();
+  void Apply_Tool_Visualization();
 
 private:
   wxStaticText *m_model_name_text = nullptr;
@@ -111,6 +132,7 @@ private:
   Camera_Image_View *m_camera_image_view = nullptr;
   Point_Cloud_View *m_point_cloud_view = nullptr;
   Point_Cloud_Overlay_Toolbar *m_point_cloud_overlay_toolbar = nullptr;
+  Tool_Panel *m_tool_panel = nullptr;
   wxSimplebook *m_display_book = nullptr;
   wxSplitterWindow *m_workspace_splitter = nullptr;
   wxSplitterWindow *m_content_splitter = nullptr;
@@ -120,6 +142,7 @@ private:
   wxToggleButton *m_flange_frame_button = nullptr;
   wxToggleButton *m_flange_free_drag_button = nullptr;
   wxToggleButton *m_flange_6d_button = nullptr;
+  wxChoice *m_interaction_coordinate_choice = nullptr;
   wxButton *m_reset_robot_button = nullptr;
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel *m_right_tool_panel = nullptr;
@@ -133,10 +156,15 @@ private:
   std::vector<robot_model::Robot_Model_Info> m_models;
   robot_model::Robot_Trajectory_Session m_trajectory_session;
   robot_model::Robot_Teach_Point_Store m_teach_point_store;
+  std::set<std::string> m_dirty_progress_models;
+  wxString m_last_progress_directory;
   std::string m_current_model_id;
   Camera_Pose_Controller m_camera_pose_controller;
   robot_model::Tool_Coordinate_Configuration m_tool_configuration;
-  int m_expanded_right_tool_width = 476;
+  robot_model::Tool_Visualization_Configuration
+    m_tool_visualization_configuration;
+  std::string m_interaction_tool_id;
+  bool m_speed_zero_paused_playback = false;
   int m_expanded_teach_point_width = 240;
 };
 

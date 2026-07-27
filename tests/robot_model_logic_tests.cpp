@@ -8,6 +8,7 @@
 #include "robot_inverse_kinematics.h"
 #include "robot_model_config_loader.h"
 #include "robot_model_repository.h"
+#include "robot_progress_io.h"
 #include "robot_trajectory_io.h"
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
@@ -109,6 +110,17 @@ void test_trajectory_planner ( )
                       "Multi-point start mismatch");
   require_point_near (multi_frames.back ( ), points.back ( ),
                       "Multi-point end mismatch");
+  const auto variable_frames =
+    robot_model::Build_Multi_Point_Joint_Ptp_Trajectory (
+      points, std::vector<std::size_t> { 3, 5 });
+  require (variable_frames.size ( ) == 7,
+           "Variable segment frame counts were not applied");
+  require_point_near (
+    variable_frames.front ( ), points.front ( ),
+    "Variable trajectory start mismatch");
+  require_point_near (
+    variable_frames.back ( ), points.back ( ),
+    "Variable trajectory end mismatch");
 }
 
 void test_trajectory_session ( )
@@ -223,18 +235,148 @@ void test_teach_point_store ( )
   require (store.Delete_Point ("robot-a", 0),
            "Teach point deletion failed");
   const auto third = store.Add_Point ("robot-a", joints_a, pose_a);
-  require (third.id == 3,
-           "Deleted teach point id was unexpectedly reused");
+  require (third.id == 2,
+           "Teach point ids should remain continuous after delete and add");
   store.Clear_Points ("robot-a");
   const auto fourth = store.Add_Point ("robot-a", joints_a, pose_a);
-  require (fourth.id == 4,
-           "Cleared teach point id was unexpectedly reused");
+  require (fourth.id == 1,
+           "Teach point ids should restart after clear");
 
   store.Add_Point ("robot-b", joints_a, pose_a);
   require (store.Point_Count ("robot-a") == 1,
            "Robot A teach point count mismatch");
   require (store.Point_Count ("robot-b") == 1,
            "Teach points were not isolated by robot model");
+
+  robot_model::Robot_Teach_Point_Store edit_store;
+  edit_store.Add_Point ("robot-edit", joints_a, pose_a);
+  edit_store.Add_Point ("robot-edit", joints_a, pose_a);
+  edit_store.Add_Point ("robot-edit", joints_a, pose_a);
+  const auto inserted = edit_store.Insert_Point (
+    "robot-edit", 1, joints_a, pose_a);
+  require (inserted.id == 2, "Inserted point id mismatch");
+  require (edit_store.Points ("robot-edit")[0].id == 1 &&
+           edit_store.Points ("robot-edit")[1].id == 2 &&
+           edit_store.Points ("robot-edit")[2].id == 3 &&
+           edit_store.Points ("robot-edit")[3].id == 4,
+           "Inserted point ids should follow list order");
+  const std::array<double, 6> updated_joints = {
+    6, 5, 4, 3, 2, 1 };
+  require (edit_store.Update_Point (
+             "robot-edit", 1, updated_joints, pose_a),
+           "Teach point update failed");
+  require (
+    edit_store.Points ("robot-edit")[1].joint_angles_deg ==
+      updated_joints,
+    "Teach point update did not replace joint state");
+  require (edit_store.Delete_Points (
+             "robot-edit", { 3, 1, 3 }) == 2,
+           "Batch teach point deletion count mismatch");
+  require (edit_store.Points ("robot-edit").size ( ) == 2 &&
+           edit_store.Points ("robot-edit")[0].id == 1 &&
+           edit_store.Points ("robot-edit")[1].id == 2,
+           "Batch deletion should renumber the remaining points");
+  const auto after_batch = edit_store.Add_Point (
+    "robot-edit", joints_a, pose_a);
+  require (after_batch.id == 3,
+           "Add after batch delete should keep ids continuous");
+  robot_model::Robot_Teach_Point loaded_a;
+  loaded_a.id = 7;
+  loaded_a.joint_angles_deg = joints_a;
+  robot_model::Robot_Teach_Point loaded_b = loaded_a;
+  loaded_b.id = 11;
+  edit_store.Replace_Points (
+    "robot-edit", { loaded_a, loaded_b });
+  require (edit_store.Points ("robot-edit")[0].id == 1 &&
+           edit_store.Points ("robot-edit")[1].id == 2,
+           "Loaded points should be renumbered by list order");
+  const auto after_replace = edit_store.Add_Point (
+    "robot-edit", joints_a, pose_a);
+  require (after_replace.id == 3,
+           "Add after load should keep ids continuous");
+}
+
+void test_robot_progress_io ( )
+{
+  robot_model::Robot_Progress_File progress;
+  progress.robot_model_id = "robot-progress";
+  robot_model::Robot_Teach_Point first;
+  first.id = 3;
+  first.robot_model_id = progress.robot_model_id;
+  first.joint_angles_deg = { 1, 2, 3, 4, 5, 6 };
+  first.world_pose = { 10, 20, 30, 40, 50, 60 };
+  first.has_world_pose = true;
+  first.point_cloud_path = "Resource/PointCloud/progress_1.ply";
+  first.coordinate_frame_id = "camera";
+  first.coordinate_frame_name = "Camera";
+  first.flange_from_coordinate_pose = { 1, 2, 3, 4, 5, 6 };
+  first.has_coordinate_frame = true;
+  robot_model::Robot_Teach_Point second = first;
+  second.id = 8;
+  second.joint_angles_deg = { -1, -2, -3, -4, -5, -6 };
+  progress.points = { first, second };
+
+  const auto path = std::filesystem::temp_directory_path ( ) /
+    "test_robot_progress.xml";
+  std::string error;
+  require (robot_model::Save_Robot_Progress (
+             path, progress, &error),
+           "Progress save failed: " + error);
+  robot_model::Robot_Progress_File loaded;
+  require (robot_model::Load_Robot_Progress (
+             path, &loaded, &error),
+           "Progress load failed: " + error);
+  require (loaded.robot_model_id == progress.robot_model_id,
+           "Progress model id mismatch");
+  require (loaded.points.size ( ) == 2 &&
+           loaded.points[0].id == 3 &&
+           loaded.points[1].id == 8,
+           "Progress point order or ids changed");
+  require (loaded.points[0].joint_angles_deg ==
+             first.joint_angles_deg &&
+           loaded.points[0].world_pose == first.world_pose,
+           "Progress point data mismatch");
+  require (
+    loaded.points[0].point_cloud_path == first.point_cloud_path &&
+    loaded.points[0].coordinate_frame_id ==
+      first.coordinate_frame_id &&
+    loaded.points[0].coordinate_frame_name ==
+      first.coordinate_frame_name &&
+    loaded.points[0].flange_from_coordinate_pose ==
+      first.flange_from_coordinate_pose &&
+    loaded.points[0].has_coordinate_frame,
+    "Progress point bindings did not round-trip");
+
+  {
+    std::ofstream legacy_file (path);
+    legacy_file
+      << "<RobotProgress version=\"1\" robotModel=\"robot-progress\">"
+      << "<Point id=\"1\" a1=\"0\" a2=\"0\" a3=\"0\" "
+      << "a4=\"0\" a5=\"0\" a6=\"0\" "
+      << "x=\"0\" y=\"0\" z=\"0\" "
+      << "a=\"0\" b=\"0\" c=\"0\" hasWorldPose=\"true\"/>"
+      << "</RobotProgress>";
+  }
+  require (robot_model::Load_Robot_Progress (
+             path, &loaded, &error),
+           "Legacy Progress should remain loadable: " + error);
+  require (loaded.points[0].point_cloud_path.empty ( ) &&
+           !loaded.points[0].has_coordinate_frame,
+           "Legacy Progress should use empty bindings");
+
+  {
+    std::ofstream invalid_file (path);
+    invalid_file
+      << "<RobotProgress version=\"1\" robotModel=\"robot-progress\">"
+      << "<Point id=\"1\" a1=\"0\" a2=\"0\" a3=\"0\" "
+      << "a4=\"0\" a5=\"0\" x=\"0\" y=\"0\" z=\"0\" "
+      << "a=\"0\" b=\"0\" c=\"0\" hasWorldPose=\"true\"/>"
+      << "</RobotProgress>";
+  }
+  require (!robot_model::Load_Robot_Progress (
+             path, &loaded, &error),
+           "Progress with a missing joint field should fail");
+  std::filesystem::remove (path);
 }
 
 void test_robot_resources_use_source_directory ( )
@@ -1046,6 +1188,7 @@ int main ( )
     test_trajectory_planner ( );
     test_trajectory_session ( );
     test_teach_point_store ( );
+    test_robot_progress_io ( );
     test_trajectory_csv_io ( );
     test_pose_transform_logic ( );
     test_pose_point_file_io ( );

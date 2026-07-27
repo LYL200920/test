@@ -83,6 +83,23 @@ namespace robot_model
     return true;
   }
 
+  bool Robot_Trajectory_Session::Start_Playback(
+      const std::vector<size_t> &frame_counts_per_segment)
+  {
+    if (!Has_Playable_Path())
+    {
+      return false;
+    }
+    auto frames = Build_Multi_Point_Joint_Ptp_Trajectory(
+      m_points, frame_counts_per_segment);
+    if (frames.empty())
+    {
+      return false;
+    }
+    m_player.Start(std::move(frames));
+    return true;
+  }
+
   void Robot_Trajectory_Session::Pause()
   {
     m_player.Pause();

@@ -6,6 +6,7 @@
 #include "collision_index_rebuild_coordinator.h"
 #include "coordinate_frame_renderer.h"
 #include "flange_interaction_controller.h"
+#include "fov_frame_renderer.h"
 #include "flange_drag_update_coordinator.h"
 #include "flange_drag_motion_executor.h"
 #include "robot_drag_performance_collector.h"
@@ -57,6 +58,14 @@ public:
   bool Get_World_From_Tool(robot_model::Matrix4 *pose) const;
   void Set_Tool_Coordinate(
     const robot_model::Tool_Coordinate_Profile &tool);
+  void Set_Interaction_Coordinate(
+    const robot_model::Tool_Coordinate_Profile &tool);
+  void Set_Fov_Configuration(
+    const robot_model::Fov_Visualization_Configuration &configuration,
+    const robot_model::Tool_Coordinate_Profile *bound_tool);
+  void Set_Tool_Frame_Configuration(
+    const robot_model::Tool_Frame_Visualization_Configuration
+      &configuration);
   bool Set_Collision_Obstacle_Points(const std::vector<float> &xyz, std::string *error_message = nullptr);
   bool Set_Collision_Obstacle_Points(std::shared_ptr<const std::vector<float>> xyz, std::string *error_message = nullptr);
   void Clear_Collision_Obstacle_Points();
@@ -130,6 +139,15 @@ private:
   robot_model::Coordinate_Frame_Renderer m_tool_frame_renderer{140.0, 10.0, true};
   robot_model::Tool_Coordinate_Profile m_tool_coordinate{
     "flange", "Flange", {}};
+  robot_model::Tool_Frame_Visualization_Configuration
+    m_tool_frame_configuration;
+  robot_model::Tool_Coordinate_Profile m_interaction_coordinate{
+    "flange", "Flange", {}};
+  robot_model::Fov_Visualization_Configuration m_fov_configuration;
+  robot_model::Tool_Coordinate_Profile m_fov_tool_coordinate;
+  bool m_has_fov_tool_coordinate = false;
+  robot_model::Fov_Frame_Renderer m_fov_renderer;
+  robot_model::Matrix4 m_drag_start_world_from_interaction = {};
   robot_model::Flange_Interaction_Controller m_flange_interaction;
   std::function<void(const robot_model::Robot_Position_IK_Result &)> m_on_flange_dragged;
   std::function<void(const robot_model::Robot_Pose_IK_Result &)> m_on_flange_pose_dragged;

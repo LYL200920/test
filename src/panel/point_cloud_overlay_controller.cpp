@@ -221,6 +221,44 @@ Point_Cloud_Overlay_Controller::Save_Current_To_File (
   return result;
 }
 
+Point_Cloud_Save_Result
+Point_Cloud_Overlay_Controller::Save_Current_To_Resource (
+  const std::string& robot_model_id)
+{
+  Point_Cloud_Save_Result result;
+  if( m_implementation->document.Point_Count ( ) == 0 )
+  {
+    result.error_message = "No point cloud is available to bind";
+    return result;
+  }
+
+  std::array<double, 6> bounds = {};
+  if( !point_cloud::Calculate_Point_Cloud_Bounds (
+        m_implementation->document.Data ( ),
+        &bounds,
+        &result.error_message) )
+  {
+    return result;
+  }
+  const auto saved = point_cloud::Save_Robot_Base_Point_Cloud_To_Resource (
+    m_implementation->document.Data ( ),
+    robot_model_id,
+    m_implementation->source_frame_number);
+  if( !saved.success )
+  {
+    result.error_message = saved.error_message;
+    return result;
+  }
+  result.success = true;
+  result.file_path = saved.path;
+  result.source_point_count = m_implementation->source_point_count;
+  result.filtered_point_count = m_implementation->filtered_point_count;
+  result.point_count = m_implementation->document.Point_Count ( );
+  result.median_depth_mm = m_implementation->median_depth_mm;
+  result.world_bounds_mm = bounds;
+  return result;
+}
+
 Point_Cloud_Overlay_Result Point_Cloud_Overlay_Controller::Load_File (
   const std::filesystem::path& path,
   const std::string& expected_robot_model,

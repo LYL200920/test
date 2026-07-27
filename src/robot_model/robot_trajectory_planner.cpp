@@ -59,4 +59,32 @@ namespace robot_model
     return frames;
   }
 
+  Robot_Joint_Trajectory Build_Multi_Point_Joint_Ptp_Trajectory(
+      const Robot_Joint_Trajectory &points,
+      const std::vector<size_t> &frame_counts_per_segment)
+  {
+    Robot_Joint_Trajectory frames;
+    if (points.size() < 2 ||
+        frame_counts_per_segment.size() != points.size() - 1)
+    {
+      return frames;
+    }
+    for (size_t point_index = 0;
+         point_index + 1 < points.size();
+         ++point_index)
+    {
+      auto segment_frames = Build_Joint_Ptp_Trajectory(
+        points[point_index],
+        points[point_index + 1],
+        frame_counts_per_segment[point_index]);
+      const size_t first_frame_index = point_index == 0 ? 0 : 1;
+      frames.insert(
+        frames.end(),
+        segment_frames.begin() +
+          static_cast<std::ptrdiff_t>(first_frame_index),
+        segment_frames.end());
+    }
+    return frames;
+  }
+
 } // namespace robot_model

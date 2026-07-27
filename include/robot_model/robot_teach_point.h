@@ -17,6 +17,11 @@ struct Robot_Teach_Point
   std::array<double, 6> joint_angles_deg = { };
   XyzabcPose world_pose = { };
   bool has_world_pose = false;
+  std::string point_cloud_path;
+  std::string coordinate_frame_id;
+  std::string coordinate_frame_name;
+  XyzabcPose flange_from_coordinate_pose = { };
+  bool has_coordinate_frame = false;
 };
 
 std::string Format_Teach_Point_Name (std::size_t id);

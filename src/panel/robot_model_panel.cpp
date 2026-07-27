@@ -6,8 +6,8 @@
 #include "robot_joint_state_builder.h"
 #include "robot_model_config_dialog.h"
 #include "robot_model_repository.h"
+#include "robot_progress_io.h"
 #include "tool_coordinate_repository.h"
-#include "robot_trajectory_io.h"
 #include "right_tool_panel.h"
 #include "net_panel.h"
 #include "flow_panel.h"
@@ -15,9 +15,13 @@
 #include "point_cloud_overlay_toolbar.h"
 #include "teach_point_command_panel.h"
 #include "teach_point_list_panel.h"
+#include "tool_panel.h"
+#include "tool_visualization_repository.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/filedlg.h>
+#include <wx/filename.h>
 #include <wx/msgdlg.h>
 #include <wx/scrolwin.h>
 #include <wx/sizer.h>
@@ -38,18 +42,31 @@ constexpr int DEFAULT_JOINT_MIN = -180;
 constexpr int DEFAULT_JOINT_MAX = 180;
 constexpr int TRAJECTORY_FRAME_COUNT = 120;
 constexpr int TRAJECTORY_TIMER_MS = 16;
-constexpr int TRAJECTORY_SPEED_DEFAULT_INDEX = 2;
+constexpr int TRAJECTORY_SPEED_DEFAULT_CM_PER_SECOND = 100;
 constexpr std::size_t ROBOT_JOINT_COUNT = 6;
 constexpr int RIGHT_TOOL_COLLAPSED_WIDTH = 72;
-constexpr int RIGHT_TOOL_DEFAULT_EXPANDED_WIDTH = 476;
 constexpr int DISPLAY_MINIMUM_WIDTH = 300;
 constexpr int TEACH_POINT_COLLAPSED_WIDTH = 38;
 constexpr int TEACH_POINT_DEFAULT_EXPANDED_WIDTH = 240;
 constexpr int WORKSPACE_MINIMUM_WIDTH = 500;
 constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR10_R1100_2";
-constexpr std::array<double, 5> TRAJECTORY_SPEED_SCALES = {
-  0.25, 0.5, 1.0, 2.0, 4.0
-};
+
+std::size_t frame_count_for_one_meter_per_second (
+  const robot_model::XyzabcPose& start,
+  const robot_model::XyzabcPose& target)
+{
+  const double dx = target[0] - start[0];
+  const double dy = target[1] - start[1];
+  const double dz = target[2] - start[2];
+  const double distance_mm = std::sqrt (dx * dx + dy * dy + dz * dz);
+  if( distance_mm <= 0.0 ) return TRAJECTORY_FRAME_COUNT;
+  const double millimeters_per_tick =
+    1000.0 * static_cast<double> (TRAJECTORY_TIMER_MS) / 1000.0;
+  return std::max<std::size_t> (
+    2,
+    static_cast<std::size_t> (
+      std::ceil (distance_mm / millimeters_per_tick)) + 1);
+}
 
 std::array<double, 6> configured_home_input_angles (
   const robot_model::Robot_Kinematic_Params& params)
@@ -197,7 +214,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_teach_point_list_panel = new Teach_Point_List_Panel (
     m_workspace_splitter);
   m_teach_point_list_panel->Set_On_Selection_Changed (
-    [this] { Update_Trajectory_Status ( ); });
+    [this] { On_Teach_Point_Selection_Changed ( ); });
   m_teach_point_list_panel->Set_On_Collapsed_Changed (
     [this] (bool collapsed) { Resize_Teach_Point_List (collapsed); });
 
@@ -373,17 +390,47 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
   m_right_tool_panel = new Right_Tool_Panel (m_content_splitter);
-  m_right_tool_panel->Set_On_Collapsed_Changed (
-    [this] (bool collapsed) { Resize_Right_Tool (collapsed); });
+  m_right_tool_panel->Set_On_Width_Changed (
+    [this] (int width) { Resize_Right_Tool (width); });
 
-  auto* tcp_panel = new Net_Panel (m_right_tool_panel->Page_Parent ( ));
-  auto* flow_panel = new Flow_Panel (m_right_tool_panel->Page_Parent ( ));
+  auto* tcp_panel = new Net_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp));
+  auto* flow_panel = new Flow_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Flow));
   m_camera_control_panel = new Camera_Control_Panel (
-    m_right_tool_panel->Page_Parent ( ), camera_service);
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
+    camera_service);
   m_point_cloud_overlay_toolbar = new Point_Cloud_Overlay_Toolbar (
-    m_right_tool_panel->Page_Parent ( ),
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::PointCloud),
     camera_service,
     std::move (overlay_callbacks));
+  m_tool_panel = new Tool_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Tool));
+  m_tool_panel->Set_On_Configuration_Changed (
+    [this] (
+      const robot_model::Tool_Visualization_Configuration& configuration)
+    {
+      std::string error_message;
+      if( !robot_model::Save_Tool_Visualization_Configuration (
+            robot_model::Tool_Visualization_Config_Path ( ),
+            configuration,
+            &error_message) )
+      {
+        if( m_status_text )
+        {
+          m_status_text->SetLabel (
+            wxString::FromUTF8 (error_message.c_str ( )));
+        }
+        return;
+      }
+      m_tool_visualization_configuration = configuration;
+      Apply_Tool_Visualization ( );
+      if( m_status_text )
+      {
+        m_status_text->SetLabel (
+          wxString::FromUTF8 (u8"FOV 设置已应用"));
+      }
+    });
   m_view->Set_On_Point_Cloud_Area_Selected (
     [this] (
       int start_x,
@@ -430,6 +477,8 @@ Robot_Model_Panel::Robot_Model_Panel (
   {
     if( m_point_cloud_overlay_toolbar )
       m_point_cloud_overlay_toolbar->Set_Interactive_LOD (dragging);
+    if( m_interaction_coordinate_choice )
+      m_interaction_coordinate_choice->Enable (!dragging);
   });
   m_view->Set_On_Flange_Drag_Performance (
     [this] (const robot_model::Robot_Drag_Performance_Stats& stats)
@@ -454,14 +503,21 @@ Robot_Model_Panel::Robot_Model_Panel (
         stats.ground_blocked_update_count));
     });
   auto* robot_tool_page = Build_Robot_Tool_Page (
-    m_right_tool_panel->Page_Parent ( ));
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Robot));
+  auto* teach_tool_page = Build_Teach_Tool_Page (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Teach));
+  m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Robot, robot_tool_page);
+  m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Teach, teach_tool_page);
   m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, tcp_panel);
   m_right_tool_panel->Add_Page (Right_Tool_Page::Flow, flow_panel);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera, m_camera_control_panel);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::PointCloud, m_point_cloud_overlay_toolbar);
-  m_right_tool_panel->Add_Page (Right_Tool_Page::Robot, robot_tool_page);
+  m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Tool, m_tool_panel);
   m_camera_control_panel->Set_On_Availability_Changed (
     [this] (bool enabled)
     {
@@ -517,6 +573,21 @@ Robot_Model_Panel::Robot_Model_Panel (
       robot_model::Default_Tool_Coordinate_Configuration ( );
   }
   Apply_Active_Tool ( );
+
+  std::string tool_visualization_error;
+  if( !robot_model::Load_Tool_Visualization_Configuration (
+        robot_model::Tool_Visualization_Config_Path ( ),
+        &m_tool_visualization_configuration,
+        &tool_visualization_error) )
+  {
+    m_tool_visualization_configuration = { };
+  }
+  if( m_tool_panel )
+  {
+    m_tool_panel->Set_Configuration (
+      m_tool_visualization_configuration);
+  }
+  Apply_Tool_Visualization ( );
 
   Load_Model_List ( );
   Load_Default_Model ( );
@@ -784,18 +855,106 @@ void Robot_Model_Panel::On_Add_Trajectory_Point (wxCommandEvent&)
     return;
   }
 
-  robot_model::Matrix4 world_from_flange = { };
-  if( !m_view->Get_World_From_Flange (&world_from_flange) ) return;
+  std::array<double, 6> joint_angles = { };
+  robot_model::XyzabcPose world_pose = { };
+  if( !Read_Current_Teach_Point (&joint_angles, &world_pose) ) return;
+  std::string point_cloud_path;
+  robot_model::Tool_Coordinate_Profile coordinate;
+  if( !Capture_Current_Teach_Bindings (
+        &point_cloud_path, &coordinate) ) return;
   const auto& point = m_teach_point_store.Add_Point (
     m_current_model_id,
-    Read_Joint_Input_Angles ( ),
-    robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange));
+    joint_angles,
+    world_pose,
+    point_cloud_path,
+    coordinate.id,
+    coordinate.name,
+    coordinate.flange_from_tool_pose);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection (
+      static_cast<int> (
+        m_teach_point_store.Point_Count (m_current_model_id) - 1));
+  }
+  Set_Progress_Dirty (true);
   Update_Trajectory_Status ( );
   m_status_text->SetLabel (wxString::FromUTF8 (u8"已记录示教点：") +
     wxString::FromUTF8 (
       robot_model::Format_Teach_Point_Name (point.id).c_str ( )));
+}
+
+void Robot_Model_Panel::On_Update_Teach_Point (wxCommandEvent&)
+{
+  if( Is_Trajectory_Active ( ) ) return;
+  const int selection = Selected_Teach_Point_Index ( );
+  if( selection == wxNOT_FOUND ) return;
+
+  std::array<double, 6> joint_angles = { };
+  robot_model::XyzabcPose world_pose = { };
+  if( !Read_Current_Teach_Point (&joint_angles, &world_pose) ) return;
+  std::string point_cloud_path;
+  robot_model::Tool_Coordinate_Profile coordinate;
+  if( !Capture_Current_Teach_Bindings (
+        &point_cloud_path, &coordinate) ) return;
+  if( !m_teach_point_store.Update_Point (
+        m_current_model_id,
+        static_cast<std::size_t> (selection),
+        joint_angles,
+        world_pose,
+        point_cloud_path,
+        coordinate.id,
+        coordinate.name,
+        coordinate.flange_from_tool_pose) )
+  {
+    return;
+  }
+  Sync_Trajectory_From_Teach_Points ( );
+  Set_Progress_Dirty (true);
+  Update_Trajectory_Status ( );
+  m_status_text->SetLabel (
+    wxString::FromUTF8 (u8"当前示教点已更新"));
+}
+
+void Robot_Model_Panel::On_Insert_Teach_Point (bool before)
+{
+  if( Is_Trajectory_Active ( ) ) return;
+  const int selection = Selected_Teach_Point_Index ( );
+  if( selection == wxNOT_FOUND ) return;
+
+  std::array<double, 6> joint_angles = { };
+  robot_model::XyzabcPose world_pose = { };
+  if( !Read_Current_Teach_Point (&joint_angles, &world_pose) ) return;
+  std::string point_cloud_path;
+  robot_model::Tool_Coordinate_Profile coordinate;
+  if( !Capture_Current_Teach_Bindings (
+        &point_cloud_path, &coordinate) ) return;
+  const std::size_t insertion_index =
+    static_cast<std::size_t> (selection) + (before ? 0 : 1);
+  const auto& point = m_teach_point_store.Insert_Point (
+    m_current_model_id,
+    insertion_index,
+    joint_angles,
+    world_pose,
+    point_cloud_path,
+    coordinate.id,
+    coordinate.name,
+    coordinate.flange_from_tool_pose);
+  const std::size_t point_id = point.id;
+  Sync_Trajectory_From_Teach_Points ( );
+  Update_Trajectory_Point_List ( );
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection (
+      static_cast<int> (insertion_index));
+  }
+  Set_Progress_Dirty (true);
+  Update_Trajectory_Status ( );
+  m_status_text->SetLabel (
+    wxString::FromUTF8 (u8"已插入示教点：") +
+    wxString::FromUTF8 (
+      robot_model::Format_Teach_Point_Name (point_id).c_str ( )));
 }
 
 void Robot_Model_Panel::On_Clear_Trajectory_Points (wxCommandEvent&)
@@ -805,15 +964,26 @@ void Robot_Model_Panel::On_Clear_Trajectory_Points (wxCommandEvent&)
     return;
   }
 
+  if( m_teach_point_store.Point_Count (m_current_model_id) == 0 ) return;
+  if( wxMessageBox (
+        wxString::FromUTF8 (u8"确定清空当前 Progress 吗？"),
+        wxString::FromUTF8 (u8"清空 Progress"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
+        this) != wxYES )
+  {
+    return;
+  }
   m_teach_point_store.Clear_Points (m_current_model_id);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
+  Set_Progress_Dirty (true);
   Update_Trajectory_Status ( );
 }
 
 void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
 {
-  if( Is_Trajectory_Active ( ) )
+  if( Is_Trajectory_Active ( ) ||
+      Get_Trajectory_Speed_Mps ( ) <= 0.0 )
   {
     return;
   }
@@ -826,11 +996,25 @@ void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
     return;
   }
 
+  Apply_Teach_Point_Bindings (
+    static_cast<std::size_t> (selection));
   const auto start_angles = Read_Joint_Input_Angles ( );
+  std::array<double, 6> ignored_angles = { };
+  robot_model::XyzabcPose start_pose = { };
+  std::size_t frame_count = TRAJECTORY_FRAME_COUNT;
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( Read_Current_Teach_Point (&ignored_angles, &start_pose) &&
+      static_cast<std::size_t> (selection) < points.size ( ) &&
+      points[static_cast<std::size_t> (selection)].has_world_pose )
+  {
+    frame_count = frame_count_for_one_meter_per_second (
+      start_pose,
+      points[static_cast<std::size_t> (selection)].world_pose);
+  }
   if( !m_trajectory_session.Start_Go_To (
         start_angles,
         static_cast<size_t> (selection),
-        TRAJECTORY_FRAME_COUNT) )
+        frame_count) )
   {
     return;
   }
@@ -847,23 +1031,46 @@ void Robot_Model_Panel::On_Delete_Trajectory_Point (wxCommandEvent&)
     return;
   }
 
-  const int selection = Selected_Teach_Point_Index ( );
-  if( selection == wxNOT_FOUND ||
-      selection < 0 ||
-      static_cast<size_t> (selection) >= m_trajectory_session.Point_Count ( ) )
+  const auto selections = Selected_Teach_Point_Indices ( );
+  if( selections.empty ( ) )
   {
     return;
   }
 
-  const size_t point_index = static_cast<size_t> (selection);
-  m_teach_point_store.Delete_Point (m_current_model_id, point_index);
+  if( selections.size ( ) > 1 )
+  {
+    const wxString prompt = wxString::Format (
+      wxString::FromUTF8 (u8"确定删除选中的 %zu 个示教点吗？"),
+      selections.size ( ));
+    if( wxMessageBox (
+          prompt,
+          wxString::FromUTF8 (u8"批量删除"),
+          wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
+          this) != wxYES )
+    {
+      return;
+    }
+  }
+
+  std::vector<std::size_t> point_indices;
+  point_indices.reserve (selections.size ( ));
+  for( const int selection : selections )
+  {
+    if( selection >= 0 )
+      point_indices.push_back (static_cast<std::size_t> (selection));
+  }
+  const std::size_t next_index = *std::min_element (
+    point_indices.begin ( ), point_indices.end ( ));
+  m_teach_point_store.Delete_Points (
+    m_current_model_id, point_indices);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
+  Set_Progress_Dirty (true);
 
   if( m_trajectory_session.Point_Count ( ) > 0 )
   {
     const int next_selection = static_cast<int> (
-      std::min (point_index, m_trajectory_session.Point_Count ( ) - 1));
+      std::min (next_index, m_trajectory_session.Point_Count ( ) - 1));
     if( m_teach_point_list_panel )
     {
       m_teach_point_list_panel->Set_Point_Selection (next_selection);
@@ -884,33 +1091,45 @@ void Robot_Model_Panel::On_Save_Trajectory (wxCommandEvent&)
   {
     if( m_status_text )
     {
-      m_status_text->SetLabel ("No trajectory points to save");
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (u8"没有可保存的示教点"));
     }
     return;
   }
 
   wxFileDialog dialog (
     this,
-    "Save trajectory",
-    "",
-    "trajectory.csv",
-    "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+    wxString::FromUTF8 (u8"保存 Progress"),
+    m_last_progress_directory,
+    "progress.xml",
+    "Progress XML (*.xml)|*.xml|All files (*.*)|*.*",
     wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
   if( dialog.ShowModal ( ) != wxID_OK )
   {
     return;
   }
 
+  robot_model::Robot_Progress_File progress;
+  progress.robot_model_id = m_current_model_id;
+  progress.points = m_teach_point_store.Points (m_current_model_id);
   std::string error_message;
-  const bool saved = robot_model::Save_Joint_Trajectory_Csv (
-    std::filesystem::path (dialog.GetPath ( ).ToStdString ( )),
-    m_trajectory_session.Points ( ),
+  const bool saved = robot_model::Save_Robot_Progress (
+    std::filesystem::path (dialog.GetPath ( ).ToStdWstring ( )),
+    progress,
     &error_message);
+  if( saved )
+  {
+    m_last_progress_directory =
+      wxFileName (dialog.GetPath ( )).GetPath ( );
+    Set_Progress_Dirty (false);
+  }
   if( m_status_text )
   {
     m_status_text->SetLabel (
-      saved ? "Trajectory saved" :
-              wxString::Format ("Save failed: %s", wxString (error_message)));
+      saved
+        ? wxString::FromUTF8 (u8"Progress 已保存")
+        : wxString::FromUTF8 (u8"保存失败：") +
+          wxString::FromUTF8 (error_message.c_str ( )));
   }
 }
 
@@ -923,52 +1142,98 @@ void Robot_Model_Panel::On_Load_Trajectory (wxCommandEvent&)
 
   wxFileDialog dialog (
     this,
-    "Load trajectory",
+    wxString::FromUTF8 (u8"加载 Progress"),
+    m_last_progress_directory,
     "",
-    "",
-    "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+    "Progress XML (*.xml)|*.xml|All files (*.*)|*.*",
     wxFD_OPEN | wxFD_FILE_MUST_EXIST);
   if( dialog.ShowModal ( ) != wxID_OK )
   {
     return;
   }
 
-  std::vector<std::array<double, 6>> loaded_points;
+  if( m_teach_point_store.Point_Count (m_current_model_id) > 0 &&
+      wxMessageBox (
+        wxString::FromUTF8 (
+          u8"加载会替换当前 Progress，是否继续？"),
+        wxString::FromUTF8 (u8"加载 Progress"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
+        this) != wxYES )
+  {
+    return;
+  }
+
+  robot_model::Robot_Progress_File progress;
   std::string error_message;
-  const bool loaded = robot_model::Load_Joint_Trajectory_Csv (
-    std::filesystem::path (dialog.GetPath ( ).ToStdString ( )),
-    &loaded_points,
+  const bool loaded = robot_model::Load_Robot_Progress (
+    std::filesystem::path (dialog.GetPath ( ).ToStdWstring ( )),
+    &progress,
     &error_message);
   if( !loaded )
   {
     if( m_status_text )
     {
       m_status_text->SetLabel (
-        wxString::Format ("Load failed: %s", wxString (error_message)));
+        wxString::FromUTF8 (u8"加载失败：") +
+        wxString::FromUTF8 (error_message.c_str ( )));
     }
     return;
   }
 
-  m_teach_point_store.Replace_Joint_Points (
-    m_current_model_id, loaded_points);
+  if( progress.robot_model_id != m_current_model_id )
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (u8"Progress 对应的机械臂模型为：") +
+      wxString::FromUTF8 (progress.robot_model_id.c_str ( )) +
+      wxString::FromUTF8 (u8"\n与当前模型不一致，未加载。"),
+      wxString::FromUTF8 (u8"模型不匹配"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  m_teach_point_store.Replace_Points (
+    m_current_model_id, progress.points);
+  m_last_progress_directory =
+    wxFileName (dialog.GetPath ( )).GetPath ( );
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection (0);
+  }
+  Apply_Teach_Point_Bindings (0);
+  Set_Progress_Dirty (false);
   Update_Trajectory_Status ( );
   if( m_status_text )
   {
-    m_status_text->SetLabel ("Trajectory loaded");
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"Progress 已加载"));
   }
 }
 
 void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
 {
   if( Is_Trajectory_Active ( ) ||
-      !m_trajectory_session.Has_Playable_Path ( ) )
+      !m_trajectory_session.Has_Playable_Path ( ) ||
+      Get_Trajectory_Speed_Mps ( ) <= 0.0 )
   {
     return;
   }
 
-  if( !m_trajectory_session.Start_Playback (TRAJECTORY_FRAME_COUNT) )
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  Apply_Teach_Point_Bindings (0);
+  std::vector<std::size_t> frame_counts;
+  frame_counts.reserve (points.size ( ) > 0 ? points.size ( ) - 1 : 0);
+  for( std::size_t index = 0; index + 1 < points.size ( ); ++index )
+  {
+    frame_counts.push_back (
+      points[index].has_world_pose && points[index + 1].has_world_pose
+        ? frame_count_for_one_meter_per_second (
+            points[index].world_pose, points[index + 1].world_pose)
+        : static_cast<std::size_t> (TRAJECTORY_FRAME_COUNT));
+  }
+  if( !m_trajectory_session.Start_Playback (frame_counts) )
   {
     return;
   }
@@ -985,6 +1250,7 @@ void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
       collision_summary (start_result.collision));
     return;
   }
+  m_speed_zero_paused_playback = false;
   Set_Joint_Controls_Enabled (false);
   m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   Update_Trajectory_Status ( );
@@ -1004,7 +1270,12 @@ void Robot_Model_Panel::On_Pause_Resume_Trajectory (wxCommandEvent&)
   }
   else if( m_trajectory_session.Is_Paused ( ) )
   {
+    if( Get_Trajectory_Speed_Mps ( ) <= 0.0 )
+    {
+      return;
+    }
     m_trajectory_session.Resume ( );
+    m_speed_zero_paused_playback = false;
     Set_Joint_Controls_Enabled (false);
     m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   }
@@ -1020,10 +1291,26 @@ void Robot_Model_Panel::On_Stop_Trajectory (wxCommandEvent&)
 void Robot_Model_Panel::On_Trajectory_Speed_Changed (wxCommandEvent&)
 {
   Update_Trajectory_Speed_Label ( );
-  if( m_trajectory_timer.IsRunning ( ) )
+  const double speed_mps = Get_Trajectory_Speed_Mps ( );
+  if( speed_mps <= 0.0 && m_trajectory_timer.IsRunning ( ) )
+  {
+    m_trajectory_timer.Stop ( );
+    m_trajectory_session.Pause ( );
+    m_speed_zero_paused_playback = true;
+  }
+  else if( speed_mps > 0.0 &&
+           m_speed_zero_paused_playback &&
+           m_trajectory_session.Is_Paused ( ) )
+  {
+    m_trajectory_session.Resume ( );
+    m_speed_zero_paused_playback = false;
+    m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
+  }
+  else if( m_trajectory_timer.IsRunning ( ) )
   {
     m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   }
+  Update_Trajectory_Status ( );
 }
 
 void Robot_Model_Panel::On_Trajectory_Timer (wxTimerEvent&)
@@ -1071,6 +1358,9 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
     panel, wxID_ANY, wxString::FromUTF8 (u8"自由拖拽"));
   m_flange_6d_button = new wxToggleButton (
     panel, wxID_ANY, wxString::FromUTF8 (u8"6D 操纵"));
+  auto* interaction_coordinate_label = new wxStaticText (
+    panel, wxID_ANY, wxString::FromUTF8 (u8"操作坐标系"));
+  m_interaction_coordinate_choice = new wxChoice (panel, wxID_ANY);
   m_reset_robot_button = new wxButton (
     panel, wxID_ANY, wxString::FromUTF8 (u8"机械臂复位"));
   m_reset_robot_button->Enable (false);
@@ -1082,10 +1372,17 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
     this);
   m_flange_6d_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Toggle_Flange_6D, this);
+  m_interaction_coordinate_choice->Bind (
+    wxEVT_CHOICE,
+    &Robot_Model_Panel::On_Interaction_Coordinate_Changed,
+    this);
   m_reset_robot_button->Bind (
     wxEVT_BUTTON, &Robot_Model_Panel::On_Reset_Robot, this);
 
   auto* operation_sizer = new wxGridSizer (2, 6, 6);
+  operation_sizer->Add (
+    interaction_coordinate_label, 0, wxALIGN_CENTER_VERTICAL);
+  operation_sizer->Add (m_interaction_coordinate_choice, 1, wxEXPAND);
   operation_sizer->Add (m_flange_frame_button, 1, wxEXPAND);
   operation_sizer->Add (m_flange_free_drag_button, 1, wxEXPAND);
   operation_sizer->Add (m_flange_6d_button, 1, wxEXPAND);
@@ -1107,50 +1404,84 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
       Apply_Cartesian_Pose_Target (target_pose);
     });
 
-  m_teach_point_command_panel = new Teach_Point_Command_Panel (panel);
-  m_teach_point_command_panel->Set_On_Record (
-    [this] { wxCommandEvent event; On_Add_Trajectory_Point (event); });
-
-  m_trajectory_panel = new Trajectory_Control_Panel (
-    panel,
-    TRAJECTORY_SPEED_DEFAULT_INDEX,
-    static_cast<int> (TRAJECTORY_SPEED_SCALES.size ( ) - 1));
-
-  Trajectory_Control_Panel::Callbacks callbacks;
-  callbacks.clear_points =
-    [this] { wxCommandEvent event; On_Clear_Trajectory_Points (event); };
-  callbacks.go_to_point =
-    [this] { wxCommandEvent event; On_Go_To_Trajectory_Point (event); };
-  callbacks.delete_point =
-    [this] { wxCommandEvent event; On_Delete_Trajectory_Point (event); };
-  callbacks.save =
-    [this] { wxCommandEvent event; On_Save_Trajectory (event); };
-  callbacks.load =
-    [this] { wxCommandEvent event; On_Load_Trajectory (event); };
-  callbacks.play =
-    [this] { wxCommandEvent event; On_Play_Trajectory (event); };
-  callbacks.pause_resume =
-    [this] { wxCommandEvent event; On_Pause_Resume_Trajectory (event); };
-  callbacks.stop =
-    [this] { wxCommandEvent event; On_Stop_Trajectory (event); };
-  callbacks.speed_changed =
-    [this] { wxCommandEvent event; On_Trajectory_Speed_Changed (event); };
-  m_trajectory_panel->Set_Callbacks (std::move (callbacks));
-
   auto* sizer = new wxBoxSizer (wxVERTICAL);
   sizer->Add (operation_title, 0, wxEXPAND | wxALL, 8);
   sizer->Add (operation_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->Add (m_joint_panel, 0, wxEXPAND | wxTOP, 6);
   sizer->Add (m_cartesian_pose_panel, 0, wxEXPAND | wxTOP, 14);
-  sizer->Add (m_teach_point_command_panel, 0, wxEXPAND | wxTOP, 14);
-  sizer->Add (m_trajectory_panel, 0, wxEXPAND | wxTOP, 8);
+  sizer->AddStretchSpacer (1);
+  panel->SetSizer (sizer);
+  panel->FitInside ( );
+  return panel;
+}
+
+wxPanel* Robot_Model_Panel::Build_Teach_Tool_Page (wxWindow* parent)
+{
+  auto* panel = new wxScrolledWindow (
+    parent, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    wxVSCROLL | wxTAB_TRAVERSAL);
+  panel->SetMinSize (wxSize (380, -1));
+  panel->SetScrollRate (0, 12);
+
+  auto* title = new wxStaticText (
+    panel, wxID_ANY, "Teach");
+  m_teach_point_command_panel =
+    new Teach_Point_Command_Panel (panel);
+  Teach_Point_Command_Panel::Callbacks edit_callbacks;
+  edit_callbacks.add =
+    [this] { wxCommandEvent event; On_Add_Trajectory_Point (event); };
+  edit_callbacks.update =
+    [this] { wxCommandEvent event; On_Update_Teach_Point (event); };
+  edit_callbacks.insert_before =
+    [this] { On_Insert_Teach_Point (true); };
+  edit_callbacks.insert_after =
+    [this] { On_Insert_Teach_Point (false); };
+  edit_callbacks.delete_selected =
+    [this] { wxCommandEvent event; On_Delete_Trajectory_Point (event); };
+  edit_callbacks.clear =
+    [this] { wxCommandEvent event; On_Clear_Trajectory_Points (event); };
+  edit_callbacks.save =
+    [this] { wxCommandEvent event; On_Save_Trajectory (event); };
+  edit_callbacks.load =
+    [this] { wxCommandEvent event; On_Load_Trajectory (event); };
+  m_teach_point_command_panel->Set_Callbacks (
+    std::move (edit_callbacks));
+
+  m_trajectory_panel = new Trajectory_Control_Panel (
+    panel,
+    TRAJECTORY_SPEED_DEFAULT_CM_PER_SECOND);
+  Trajectory_Control_Panel::Callbacks trajectory_callbacks;
+  trajectory_callbacks.go_to_point =
+    [this] { wxCommandEvent event; On_Go_To_Trajectory_Point (event); };
+  trajectory_callbacks.play =
+    [this] { wxCommandEvent event; On_Play_Trajectory (event); };
+  trajectory_callbacks.pause_resume =
+    [this] { wxCommandEvent event; On_Pause_Resume_Trajectory (event); };
+  trajectory_callbacks.stop =
+    [this] { wxCommandEvent event; On_Stop_Trajectory (event); };
+  trajectory_callbacks.speed_changed =
+    [this] { wxCommandEvent event; On_Trajectory_Speed_Changed (event); };
+  m_trajectory_panel->Set_Callbacks (
+    std::move (trajectory_callbacks));
+
+  auto* sizer = new wxBoxSizer (wxVERTICAL);
+  sizer->Add (title, 0, wxEXPAND | wxALL, 8);
+  sizer->Add (
+    m_teach_point_command_panel,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT,
+    8);
+  sizer->Add (
+    m_trajectory_panel,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxTOP,
+    8);
   sizer->AddStretchSpacer (1);
   panel->SetSizer (sizer);
   panel->FitInside ( );
   Update_Trajectory_Speed_Label ( );
   Update_Trajectory_Point_List ( );
   Update_Trajectory_Status ( );
-
   return panel;
 }
 
@@ -1398,7 +1729,10 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
   }
   if( m_teach_point_command_panel )
   {
-    m_teach_point_command_panel->Set_Record_Enabled (enabled);
+    m_teach_point_command_panel->Refresh_Command_State (
+      enabled && !m_current_model_id.empty ( ),
+      Selected_Teach_Point_Indices ( ).size ( ),
+      m_teach_point_store.Point_Count (m_current_model_id));
   }
   if( m_teach_point_list_panel )
   {
@@ -1409,6 +1743,14 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
 void Robot_Model_Panel::Update_Trajectory_Status ( )
 {
   const bool active = Is_Trajectory_Active ( );
+  const auto selections = Selected_Teach_Point_Indices ( );
+  if( m_teach_point_command_panel )
+  {
+    m_teach_point_command_panel->Refresh_Command_State (
+      !active && !m_current_model_id.empty ( ),
+      selections.size ( ),
+      m_teach_point_store.Point_Count (m_current_model_id));
+  }
   if( m_trajectory_panel == nullptr )
   {
     return;
@@ -1437,7 +1779,7 @@ void Robot_Model_Panel::Update_Trajectory_Status ( )
     m_trajectory_session.Is_Paused ( ),
     m_trajectory_timer.IsRunning ( ),
     m_trajectory_session.Point_Count ( ),
-    Selected_Teach_Point_Index ( ) != wxNOT_FOUND);
+    selections.size ( ) == 1);
 }
 
 void Robot_Model_Panel::Update_Trajectory_Speed_Label ( )
@@ -1448,7 +1790,8 @@ void Robot_Model_Panel::Update_Trajectory_Speed_Label ( )
   }
 
   m_trajectory_panel->Set_Speed_Label (
-    wxString::Format ("Speed: %.2gx", Get_Trajectory_Speed_Scale ( )));
+    wxString::Format (
+      "Speed: %.2f m/s", Get_Trajectory_Speed_Mps ( )));
 }
 
 void Robot_Model_Panel::Update_Trajectory_Point_List ( )
@@ -1460,10 +1803,88 @@ void Robot_Model_Panel::Update_Trajectory_Point_List ( )
   labels.reserve (points.size ( ));
   for( const auto& point : points )
   {
-    labels.push_back (wxString::FromUTF8 (
-      robot_model::Format_Teach_Point_Name (point.id).c_str ( )));
+    wxString label = wxString::FromUTF8 (
+      robot_model::Format_Teach_Point_Name (point.id).c_str ( ));
+    if( !point.point_cloud_path.empty ( ) )
+    {
+      label += "  [Cloud]";
+    }
+    if( point.has_coordinate_frame )
+    {
+      label += "  ";
+      label += wxString::FromUTF8 (
+        point.coordinate_frame_name.empty ( )
+          ? point.coordinate_frame_id.c_str ( )
+          : point.coordinate_frame_name.c_str ( ));
+    }
+    labels.push_back (std::move (label));
   }
   m_teach_point_list_panel->Set_Point_Names (labels);
+  m_teach_point_list_panel->Set_Dirty (
+    m_dirty_progress_models.count (m_current_model_id) != 0);
+}
+
+void Robot_Model_Panel::On_Teach_Point_Selection_Changed ( )
+{
+  Update_Trajectory_Status ( );
+  const int selection = Selected_Teach_Point_Index ( );
+  if( selection != wxNOT_FOUND && selection >= 0 &&
+      !Is_Trajectory_Active ( ) )
+  {
+    Apply_Teach_Point_Bindings (
+      static_cast<std::size_t> (selection));
+  }
+}
+
+void Robot_Model_Panel::Apply_Teach_Point_Bindings (std::size_t index)
+{
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( index >= points.size ( ) ) return;
+  const auto& point = points[index];
+
+  if( point.has_coordinate_frame && !point.coordinate_frame_id.empty ( ) )
+  {
+    m_interaction_tool_id = point.coordinate_frame_id;
+    if( m_interaction_coordinate_choice )
+    {
+      for( std::size_t choice_index = 0;
+           choice_index < m_tool_configuration.tools.size ( );
+           ++choice_index )
+      {
+        if( m_tool_configuration.tools[choice_index].id ==
+            point.coordinate_frame_id )
+        {
+          m_interaction_coordinate_choice->SetSelection (
+            static_cast<int> (choice_index));
+          break;
+        }
+      }
+    }
+    if( m_view )
+    {
+      robot_model::Tool_Coordinate_Profile coordinate;
+      coordinate.id = point.coordinate_frame_id;
+      coordinate.name = point.coordinate_frame_name;
+      coordinate.flange_from_tool_pose =
+        point.flange_from_coordinate_pose;
+      m_view->Set_Interaction_Coordinate (coordinate);
+    }
+  }
+
+  if( !point.point_cloud_path.empty ( ) &&
+      m_point_cloud_overlay_toolbar )
+  {
+    std::string error_message;
+    if( !m_point_cloud_overlay_toolbar->Load_Bound_Point_Cloud (
+          std::filesystem::u8path (point.point_cloud_path),
+          &error_message) &&
+        m_status_text )
+    {
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (u8"加载绑定点云失败：") +
+        wxString::FromUTF8 (error_message.c_str ( )));
+    }
+  }
 }
 
 void Robot_Model_Panel::Sync_Trajectory_From_Teach_Points ( )
@@ -1485,25 +1906,101 @@ int Robot_Model_Panel::Selected_Teach_Point_Index ( ) const
     : wxNOT_FOUND;
 }
 
-double Robot_Model_Panel::Get_Trajectory_Speed_Scale ( ) const
+std::vector<int> Robot_Model_Panel::Selected_Teach_Point_Indices ( ) const
+{
+  return m_teach_point_list_panel
+    ? m_teach_point_list_panel->Selected_Point_Indices ( )
+    : std::vector<int> { };
+}
+
+bool Robot_Model_Panel::Read_Current_Teach_Point (
+  std::array<double, 6>* joint_angles,
+  robot_model::XyzabcPose* world_pose) const
+{
+  if( !joint_angles || !world_pose || !m_view ||
+      m_current_model_id.empty ( ) )
+  {
+    return false;
+  }
+  robot_model::Matrix4 world_from_flange = { };
+  if( !m_view->Get_World_From_Flange (&world_from_flange) )
+  {
+    return false;
+  }
+  *joint_angles = Read_Joint_Input_Angles ( );
+  *world_pose =
+    robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
+  return true;
+}
+
+bool Robot_Model_Panel::Capture_Current_Teach_Bindings (
+  std::string* point_cloud_path,
+  robot_model::Tool_Coordinate_Profile* coordinate)
+{
+  if( !point_cloud_path || !coordinate ||
+      !m_point_cloud_overlay_toolbar ||
+      !m_point_cloud_overlay_toolbar->Has_Point_Cloud ( ) )
+  {
+    if( m_status_text )
+    {
+      m_status_text->SetLabel (wxString::FromUTF8 (
+        u8"请先加载或采集点云，再记录 Progress 点"));
+    }
+    return false;
+  }
+
+  std::filesystem::path snapshot_path;
+  std::string error_message;
+  if( !m_point_cloud_overlay_toolbar->Snapshot_Current_Point_Cloud (
+        &snapshot_path, &error_message) )
+  {
+    if( m_status_text )
+    {
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (u8"绑定点云失败：") +
+        wxString::FromUTF8 (error_message.c_str ( )));
+    }
+    return false;
+  }
+
+  *point_cloud_path = snapshot_path.u8string ( );
+  *coordinate = Interaction_Tool ( );
+  return true;
+}
+
+void Robot_Model_Panel::Set_Progress_Dirty (bool dirty)
+{
+  if( m_current_model_id.empty ( ) ) return;
+  if( dirty )
+  {
+    m_dirty_progress_models.insert (m_current_model_id);
+  }
+  else
+  {
+    m_dirty_progress_models.erase (m_current_model_id);
+  }
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Dirty (dirty);
+  }
+}
+
+double Robot_Model_Panel::Get_Trajectory_Speed_Mps ( ) const
 {
   if( m_trajectory_panel == nullptr )
   {
     return 1.0;
   }
-
-  const int index = std::clamp (
-    m_trajectory_panel->Speed_Index ( ),
-    0,
-    static_cast<int> (TRAJECTORY_SPEED_SCALES.size ( ) - 1));
-  return TRAJECTORY_SPEED_SCALES[static_cast<size_t> (index)];
+  return std::clamp (
+    m_trajectory_panel->Speed_Meters_Per_Second ( ), 0.0, 2.0);
 }
 
 int Robot_Model_Panel::Get_Trajectory_Timer_Interval_Ms ( ) const
 {
-  const double speed_scale = Get_Trajectory_Speed_Scale ( );
+  const double speed_mps = Get_Trajectory_Speed_Mps ( );
+  if( speed_mps <= 0.0 ) return TRAJECTORY_TIMER_MS;
   const int interval = static_cast<int> (
-    std::lround (static_cast<double> (TRAJECTORY_TIMER_MS) / speed_scale));
+    std::lround (static_cast<double> (TRAJECTORY_TIMER_MS) / speed_mps));
   return std::max (interval, 1);
 }
 
@@ -1520,11 +2017,12 @@ void Robot_Model_Panel::Stop_Trajectory_Playback ( )
   }
 
   m_trajectory_session.Stop ( );
+  m_speed_zero_paused_playback = false;
   Set_Joint_Controls_Enabled (true);
   Update_Trajectory_Status ( );
 }
 
-void Robot_Model_Panel::Resize_Right_Tool (bool collapsed)
+void Robot_Model_Panel::Resize_Right_Tool (int requested_width)
 {
   if( !m_content_splitter || !m_right_tool_panel ||
       !m_content_splitter->IsSplit ( ) ) return;
@@ -1532,22 +2030,9 @@ void Robot_Model_Panel::Resize_Right_Tool (bool collapsed)
   const int total_width = m_content_splitter->GetClientSize ( ).x;
   if( total_width <= RIGHT_TOOL_COLLAPSED_WIDTH ) return;
 
-  if( collapsed )
-  {
-    const int current_width = m_right_tool_panel->GetSize ( ).x;
-    if( current_width > RIGHT_TOOL_COLLAPSED_WIDTH + 40 )
-    {
-      m_expanded_right_tool_width = current_width;
-    }
-  }
-
   const int maximum_right_width = std::max (
     RIGHT_TOOL_COLLAPSED_WIDTH,
     total_width - DISPLAY_MINIMUM_WIDTH);
-  const int requested_width = collapsed
-    ? RIGHT_TOOL_COLLAPSED_WIDTH
-    : std::max (m_expanded_right_tool_width,
-                RIGHT_TOOL_DEFAULT_EXPANDED_WIDTH);
   const int right_width = std::clamp (
     requested_width,
     RIGHT_TOOL_COLLAPSED_WIDTH,
@@ -1601,18 +2086,110 @@ Robot_Model_Panel::Active_Tool ( ) const
   return fallback;
 }
 
+const robot_model::Tool_Coordinate_Profile&
+Robot_Model_Panel::Interaction_Tool ( ) const
+{
+  const auto* tool = robot_model::Find_Tool_Coordinate (
+    m_tool_configuration,
+    m_interaction_tool_id);
+  return tool ? *tool : Active_Tool ( );
+}
+
+void Robot_Model_Panel::On_Interaction_Coordinate_Changed (wxCommandEvent&)
+{
+  if( !m_interaction_coordinate_choice ) return;
+  const int selection = m_interaction_coordinate_choice->GetSelection ( );
+  if( selection == wxNOT_FOUND ||
+      static_cast<std::size_t> (selection) >=
+        m_tool_configuration.tools.size ( ) )
+  {
+    return;
+  }
+
+  m_interaction_tool_id =
+    m_tool_configuration.tools[static_cast<std::size_t> (selection)].id;
+  if( m_view )
+  {
+    m_view->Set_Interaction_Coordinate (Interaction_Tool ( ));
+  }
+  if( m_status_text )
+  {
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"操作坐标系：") +
+      wxString::FromUTF8 (Interaction_Tool ( ).name.c_str ( )));
+  }
+}
+
+void Robot_Model_Panel::Refresh_Interaction_Coordinate_Choices ( )
+{
+  robot_model::Normalize_Tool_Coordinate_Configuration (
+    &m_tool_configuration);
+  if( !robot_model::Find_Tool_Coordinate (
+        m_tool_configuration,
+        m_interaction_tool_id) )
+  {
+    m_interaction_tool_id = m_tool_configuration.active_tool_id;
+  }
+
+  if( m_interaction_coordinate_choice )
+  {
+    m_interaction_coordinate_choice->Clear ( );
+    int selection = wxNOT_FOUND;
+    for( std::size_t index = 0;
+         index < m_tool_configuration.tools.size ( );
+         ++index )
+    {
+      const auto& tool = m_tool_configuration.tools[index];
+      m_interaction_coordinate_choice->Append (
+        wxString::FromUTF8 (tool.name.c_str ( )));
+      if( tool.id == m_interaction_tool_id )
+      {
+        selection = static_cast<int> (index);
+      }
+    }
+    if( selection != wxNOT_FOUND )
+    {
+      m_interaction_coordinate_choice->SetSelection (selection);
+    }
+  }
+}
+
 void Robot_Model_Panel::Apply_Active_Tool ( )
 {
   robot_model::Normalize_Tool_Coordinate_Configuration (
     &m_tool_configuration);
+  Refresh_Interaction_Coordinate_Choices ( );
   const auto& tool = Active_Tool ( );
   if( m_view )
   {
     m_view->Set_Tool_Coordinate (tool);
+    m_view->Set_Interaction_Coordinate (Interaction_Tool ( ));
   }
   if( m_cartesian_pose_panel )
   {
     m_cartesian_pose_panel->Set_Control_Frame_Name (tool.name);
+  }
+  if( m_tool_panel )
+  {
+    m_tool_panel->Set_Tool_Coordinates (m_tool_configuration);
+  }
+  Apply_Tool_Visualization ( );
+}
+
+void Robot_Model_Panel::Apply_Tool_Visualization ( )
+{
+  robot_model::Normalize_Tool_Visualization_Configuration (
+    &m_tool_visualization_configuration);
+  const auto* bound_tool = robot_model::Find_Tool_Coordinate (
+    m_tool_configuration,
+    m_tool_visualization_configuration.fov.tool_coordinate_id);
+  if( m_view )
+  {
+    m_view->Set_Tool_Frame_Configuration (
+      m_tool_visualization_configuration.tool_frame);
+    m_view->Set_Fov_Configuration (
+      m_tool_visualization_configuration.fov,
+      bound_tool);
   }
 }
 

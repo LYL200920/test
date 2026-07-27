@@ -39,6 +39,7 @@ Robot_Model_View::~Robot_Model_View()
   m_drag_update_timer.Stop();
   m_collision_index_rebuild_coordinator.Shutdown();
   m_flange_interaction.Detach_Renderer();
+  m_fov_renderer.Detach_Renderer();
   m_tool_frame_renderer.Detach_Renderer();
   m_world_frame_renderer.Detach_Renderer();
   m_render_controller.Detach_Scene();
@@ -55,6 +56,7 @@ void Robot_Model_View::Load_Model(const robot_model::Robot_Model_Info &model)
   if (m_scene)
   {
     m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+    m_fov_renderer.Attach_Renderer(m_scene->Renderer());
     m_tool_frame_renderer.Attach_Renderer(m_scene->Renderer());
     m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
     m_world_frame_renderer.Set_Visible(m_world_frame_renderer.Is_Visible());
@@ -209,6 +211,51 @@ void Robot_Model_View::Set_Tool_Coordinate(
   const robot_model::Tool_Coordinate_Profile &tool)
 {
   m_tool_coordinate = tool;
+  Update_Flange_Frame();
+  Render();
+}
+
+void Robot_Model_View::Set_Interaction_Coordinate(
+  const robot_model::Tool_Coordinate_Profile &tool)
+{
+  if (m_flange_interaction.Is_Dragging())
+  {
+    return;
+  }
+  m_interaction_coordinate = tool;
+  Update_Flange_Frame();
+  Render();
+}
+
+void Robot_Model_View::Set_Fov_Configuration(
+  const robot_model::Fov_Visualization_Configuration &configuration,
+  const robot_model::Tool_Coordinate_Profile *bound_tool)
+{
+  m_fov_configuration = configuration;
+  robot_model::Tool_Visualization_Configuration wrapper;
+  wrapper.fov = m_fov_configuration;
+  robot_model::Normalize_Tool_Visualization_Configuration(&wrapper);
+  m_fov_configuration = wrapper.fov;
+  m_has_fov_tool_coordinate = bound_tool != nullptr;
+  if (bound_tool)
+  {
+    m_fov_tool_coordinate = *bound_tool;
+  }
+  m_fov_renderer.Set_Configuration(m_fov_configuration);
+  Update_Flange_Frame();
+  Render();
+}
+
+void Robot_Model_View::Set_Tool_Frame_Configuration(
+  const robot_model::Tool_Frame_Visualization_Configuration
+    &configuration)
+{
+  robot_model::Tool_Visualization_Configuration wrapper;
+  wrapper.tool_frame = configuration;
+  robot_model::Normalize_Tool_Visualization_Configuration(&wrapper);
+  m_tool_frame_configuration = wrapper.tool_frame;
+  m_tool_frame_renderer.Set_Size_Scale(
+    m_tool_frame_configuration.size_scale);
   Update_Flange_Frame();
   Render();
 }
@@ -383,6 +430,7 @@ void Robot_Model_View::Ensure_VTK()
   m_scene->Init(this, m_gl_context);
   m_render_controller.Attach_Scene(m_scene.get());
   m_flange_interaction.Attach_Renderer(m_scene->Renderer());
+  m_fov_renderer.Attach_Renderer(m_scene->Renderer());
   m_tool_frame_renderer.Attach_Renderer(m_scene->Renderer());
   m_world_frame_renderer.Attach_Renderer(m_scene->Renderer());
   robot_model::Matrix4 identity = {};
@@ -396,17 +444,39 @@ void Robot_Model_View::Update_Flange_Frame()
 {
   if (m_render_controller.Has_Flange_Pose())
   {
-    m_flange_interaction.Update_Flange_Pose(&m_render_controller.World_From_Flange());
+    const robot_model::Matrix4 world_from_interaction =
+      robot_model::Build_World_From_Tool(
+        m_render_controller.World_From_Flange(),
+        m_interaction_coordinate);
+    m_flange_interaction.Update_Poses(
+      &m_render_controller.World_From_Flange(),
+      &world_from_interaction);
     m_tool_frame_renderer.Set_World_From_Frame(
       robot_model::Build_World_From_Tool(
         m_render_controller.World_From_Flange(),
         m_tool_coordinate));
-    m_tool_frame_renderer.Set_Visible(m_tool_coordinate.id != "flange");
+    m_tool_frame_renderer.Set_Visible(
+      m_tool_frame_configuration.visible &&
+      m_tool_coordinate.id != "flange");
+    if (m_fov_configuration.visible &&
+        m_has_fov_tool_coordinate)
+    {
+      m_fov_renderer.Set_World_From_Fov(
+        robot_model::Build_World_From_Tool(
+          m_render_controller.World_From_Flange(),
+          m_fov_tool_coordinate));
+      m_fov_renderer.Set_Visible(true);
+    }
+    else
+    {
+      m_fov_renderer.Set_Visible(false);
+    }
   }
   else
   {
-    m_flange_interaction.Update_Flange_Pose(nullptr);
+    m_flange_interaction.Update_Poses(nullptr, nullptr);
     m_tool_frame_renderer.Set_Visible(false);
+    m_fov_renderer.Set_Visible(false);
   }
 }
 
@@ -601,9 +671,16 @@ void Robot_Model_View::On_Left_Down(wxMouseEvent &event)
   {
     const auto position = event.GetPosition();
     const auto size = GetClientSize();
-    const auto &pose = m_render_controller.World_From_Flange();
-    if (m_flange_interaction.Begin_Drag(position.x, size.y - 1 - position.y, pose))
+    const robot_model::Matrix4 world_from_interaction =
+      robot_model::Build_World_From_Tool(
+        m_render_controller.World_From_Flange(),
+        m_interaction_coordinate);
+    if (m_flange_interaction.Begin_Drag(
+          position.x,
+          size.y - 1 - position.y,
+          world_from_interaction))
     {
+      m_drag_start_world_from_interaction = world_from_interaction;
       SetFocus();
       if (!HasCapture())
       {
@@ -993,8 +1070,42 @@ void Robot_Model_View::Apply_Pending_Flange_Drag_Update()
     return;
   }
 
-  const auto execution = m_drag_motion_executor.Execute(update, [this](const robot_model::Point3 &target)
-                                                        {
+  robot_model::Flange_Drag_Update motion_update = update;
+  const bool unconstrained_flange_free_drag =
+    motion_update.target_type ==
+      robot_model::Flange_Drag_Update::Target_Type::Position &&
+    m_flange_interaction.Mode() ==
+      robot_model::Flange_Interaction_Mode::Free_Translation &&
+    m_interaction_coordinate.id == "flange";
+  if (motion_update.target_type ==
+        robot_model::Flange_Drag_Update::Target_Type::Position &&
+      !unconstrained_flange_free_drag)
+  {
+    robot_model::Matrix4 target_world_from_interaction =
+      m_drag_start_world_from_interaction;
+    for (std::size_t axis = 0; axis < 3; ++axis)
+    {
+      target_world_from_interaction[axis][3] =
+        motion_update.target_position_world[axis];
+    }
+    motion_update.target_type =
+      robot_model::Flange_Drag_Update::Target_Type::Pose;
+    motion_update.target_world_from_flange =
+      robot_model::Build_World_From_Flange_Target(
+        target_world_from_interaction,
+        m_interaction_coordinate);
+  }
+  else if (motion_update.target_type ==
+             robot_model::Flange_Drag_Update::Target_Type::Pose)
+  {
+    motion_update.target_world_from_flange =
+      robot_model::Build_World_From_Flange_Target(
+        motion_update.target_world_from_flange,
+        m_interaction_coordinate);
+  }
+
+  const auto execution = m_drag_motion_executor.Execute(motion_update, [this](const robot_model::Point3 &target)
+                                                         {
                                                           robot_model::Flange_Position_Motion_Outcome outcome;
                                                           outcome.ik_result = m_render_controller.Move_Flange_To(target);
                                                           outcome.apply_result =m_render_controller.Last_Joint_State_Apply_Result();
@@ -1093,8 +1204,15 @@ void Robot_Model_View::Update_Flange_Hover(const wxMouseEvent &event)
 {
   const auto position = event.GetPosition();
   const auto size = GetClientSize();
-  const robot_model::Matrix4 *pose = m_render_controller.Has_Flange_Pose() ? &m_render_controller.World_From_Flange()
-                                                                           : nullptr;
+  robot_model::Matrix4 world_from_interaction = {};
+  const robot_model::Matrix4 *pose = nullptr;
+  if (m_render_controller.Has_Flange_Pose())
+  {
+    world_from_interaction = robot_model::Build_World_From_Tool(
+      m_render_controller.World_From_Flange(),
+      m_interaction_coordinate);
+    pose = &world_from_interaction;
+  }
   bool hover_changed = false;
   const bool over_handle = m_flange_interaction.Update_Hover(position.x, size.y - 1 - position.y, pose, &hover_changed);
   if (!hover_changed)

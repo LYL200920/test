@@ -6,6 +6,8 @@
 #include <vtkSphereSource.h>
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 
 namespace robot_model
 {
@@ -40,13 +42,25 @@ namespace robot_model
 
   void Coordinate_Frame_Renderer::Set_Origin_Highlighted(bool highlighted)
   {
+    m_origin_highlighted = highlighted;
     Ensure_Actors();
     if (!m_origin_actor)
       return;
     m_origin_actor->GetProperty()->SetColor(highlighted ? 1.0 : 1.0,
                                             highlighted ? 1.0 : 0.85,
                                             highlighted ? 0.35 : 0.1);
-    m_origin_actor->SetScale(highlighted ? 1.18 : 1.0);
+    Apply_Actor_Scales();
+  }
+
+  void Coordinate_Frame_Renderer::Set_Size_Scale(double scale)
+  {
+    if (!std::isfinite(scale) || scale <= 0.0)
+    {
+      return;
+    }
+    m_size_scale = scale;
+    Ensure_Actors();
+    Apply_Actor_Scales();
   }
 
   void Coordinate_Frame_Renderer::Attach_Renderer(vtkRenderer *renderer)
@@ -128,6 +142,19 @@ namespace robot_model
       {
         item->SetUserMatrix(m_world_from_frame);
       }
+    }
+    Apply_Actor_Scales();
+  }
+
+  void Coordinate_Frame_Renderer::Apply_Actor_Scales()
+  {
+    for (const auto &actor : m_actors)
+    {
+      const double scale =
+        actor == m_origin_actor && m_origin_highlighted
+          ? m_size_scale * 1.18
+          : m_size_scale;
+      actor->SetScale(scale, scale, scale);
     }
   }
 

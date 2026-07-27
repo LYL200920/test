@@ -10,37 +10,23 @@
 
 Trajectory_Control_Panel::Trajectory_Control_Panel (
   wxWindow* parent,
-  int speed_default_index,
-  int speed_max_index)
+  int speed_default_centimeters_per_second)
   : wxPanel (parent, wxID_ANY)
 {
-  m_clear_points_button = new wxButton (this, wxID_ANY, "Clear");
   m_go_to_point_button = new wxButton (this, wxID_ANY, "Go To");
-  m_delete_point_button = new wxButton (this, wxID_ANY, "Delete");
-  m_save_button = new wxButton (this, wxID_ANY, "Save");
-  m_load_button = new wxButton (this, wxID_ANY, "Load");
   m_play_button = new wxButton (this, wxID_ANY, "Play");
   m_pause_resume_button = new wxButton (this, wxID_ANY, "Pause");
   m_stop_button = new wxButton (this, wxID_ANY, "Stop");
-  m_speed_label = new wxStaticText (this, wxID_ANY, "Speed: 1.0x");
+  m_speed_label = new wxStaticText (this, wxID_ANY, "Speed: 1.00 m/s");
   m_speed_slider = new wxSlider (
-    this, wxID_ANY, speed_default_index, 0, speed_max_index,
+    this, wxID_ANY,
+    std::clamp (speed_default_centimeters_per_second, 0, 200),
+    0, 200,
     wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL);
   m_status_text = new wxStaticText (this, wxID_ANY, "Points: 0 / need 2");
 
   auto* sizer = new wxBoxSizer (wxVERTICAL);
-
-  sizer->Add (m_delete_point_button, 0, wxEXPAND | wxTOP, 14);
-
-  auto* edit_buttons = new wxBoxSizer (wxHORIZONTAL);
-  edit_buttons->Add (m_go_to_point_button, 1, wxRIGHT, 4);
-  edit_buttons->Add (m_clear_points_button, 1, wxLEFT, 4);
-  sizer->Add (edit_buttons, 0, wxEXPAND | wxTOP, 6);
-
-  auto* file_buttons = new wxBoxSizer (wxHORIZONTAL);
-  file_buttons->Add (m_save_button, 1, wxRIGHT, 4);
-  file_buttons->Add (m_load_button, 1, wxLEFT, 4);
-  sizer->Add (file_buttons, 0, wxEXPAND | wxTOP, 6);
+  sizer->Add (m_go_to_point_button, 0, wxEXPAND | wxTOP, 14);
 
   sizer->Add (m_play_button, 0, wxEXPAND | wxTOP, 6);
 
@@ -51,6 +37,15 @@ Trajectory_Control_Panel::Trajectory_Control_Panel (
 
   sizer->Add (m_speed_label, 0, wxEXPAND | wxTOP, 10);
   sizer->Add (m_speed_slider, 0, wxEXPAND | wxTOP, 2);
+  auto* speed_range = new wxBoxSizer (wxHORIZONTAL);
+  speed_range->Add (
+    new wxStaticText (this, wxID_ANY, "0.00 m/s"),
+    0, wxALIGN_CENTER_VERTICAL);
+  speed_range->AddStretchSpacer (1);
+  speed_range->Add (
+    new wxStaticText (this, wxID_ANY, "2.00 m/s"),
+    0, wxALIGN_CENTER_VERTICAL);
+  sizer->Add (speed_range, 0, wxEXPAND | wxTOP, 1);
   sizer->Add (m_status_text, 0, wxEXPAND | wxTOP, 6);
   SetSizer (sizer);
 }
@@ -59,11 +54,7 @@ void Trajectory_Control_Panel::Set_Callbacks (Callbacks callbacks)
 {
   m_callbacks = std::move (callbacks);
 
-  Bind_Button (m_clear_points_button, m_callbacks.clear_points);
   Bind_Button (m_go_to_point_button, m_callbacks.go_to_point);
-  Bind_Button (m_delete_point_button, m_callbacks.delete_point);
-  Bind_Button (m_save_button, m_callbacks.save);
-  Bind_Button (m_load_button, m_callbacks.load);
   Bind_Button (m_play_button, m_callbacks.play);
   Bind_Button (m_pause_resume_button, m_callbacks.pause_resume);
   Bind_Button (m_stop_button, m_callbacks.stop);
@@ -83,9 +74,11 @@ void Trajectory_Control_Panel::Set_Callbacks (Callbacks callbacks)
 
 }
 
-int Trajectory_Control_Panel::Speed_Index ( ) const
+double Trajectory_Control_Panel::Speed_Meters_Per_Second ( ) const
 {
-  return m_speed_slider ? m_speed_slider->GetValue ( ) : 0;
+  return m_speed_slider
+    ? static_cast<double> (m_speed_slider->GetValue ( )) / 100.0
+    : 0.0;
 }
 
 void Trajectory_Control_Panel::Set_Speed_Label (const wxString& label)
@@ -111,29 +104,15 @@ void Trajectory_Control_Panel::Refresh_Command_State (
   size_t point_count,
   bool has_selected_point)
 {
-  if( m_clear_points_button )
-  {
-    m_clear_points_button->Enable (!active && point_count > 0);
-  }
   if( m_go_to_point_button )
   {
     m_go_to_point_button->Enable (!active && has_selected_point);
   }
-  if( m_delete_point_button )
-  {
-    m_delete_point_button->Enable (!active && has_selected_point);
-  }
-  if( m_save_button )
-  {
-    m_save_button->Enable (!active && point_count > 0);
-  }
-  if( m_load_button )
-  {
-    m_load_button->Enable (!active);
-  }
   if( m_play_button )
   {
-    m_play_button->Enable (!active && point_count >= 2);
+    m_play_button->Enable (
+      !active && point_count >= 2 &&
+      Speed_Meters_Per_Second ( ) > 0.0);
   }
   if( m_pause_resume_button )
   {

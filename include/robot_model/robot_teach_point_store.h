@@ -15,10 +15,38 @@ namespace robot_model
     const Robot_Teach_Point &Add_Point(
         const std::string &robot_model_id,
         const std::array<double, 6> &joint_angles_deg,
-        const XyzabcPose &world_pose);
+        const XyzabcPose &world_pose,
+        const std::string &point_cloud_path = {},
+        const std::string &coordinate_frame_id = {},
+        const std::string &coordinate_frame_name = {},
+        const XyzabcPose &flange_from_coordinate_pose = {});
+    const Robot_Teach_Point &Insert_Point(
+        const std::string &robot_model_id,
+        std::size_t index,
+        const std::array<double, 6> &joint_angles_deg,
+        const XyzabcPose &world_pose,
+        const std::string &point_cloud_path = {},
+        const std::string &coordinate_frame_id = {},
+        const std::string &coordinate_frame_name = {},
+        const XyzabcPose &flange_from_coordinate_pose = {});
+    bool Update_Point(
+        const std::string &robot_model_id,
+        std::size_t index,
+        const std::array<double, 6> &joint_angles_deg,
+        const XyzabcPose &world_pose,
+        const std::string &point_cloud_path = {},
+        const std::string &coordinate_frame_id = {},
+        const std::string &coordinate_frame_name = {},
+        const XyzabcPose &flange_from_coordinate_pose = {});
 
     void Replace_Joint_Points(const std::string &robot_model_id, const std::vector<std::array<double, 6>> &joint_points);
+    void Replace_Points(
+        const std::string &robot_model_id,
+        const std::vector<Robot_Teach_Point> &points);
     bool Delete_Point(const std::string &robot_model_id, std::size_t index);
+    std::size_t Delete_Points(
+        const std::string &robot_model_id,
+        const std::vector<std::size_t> &indices);
     void Clear_Points(const std::string &robot_model_id);
 
     const std::vector<Robot_Teach_Point> &Points(const std::string &robot_model_id) const;
@@ -28,8 +56,9 @@ namespace robot_model
     struct Model_Points
     {
       std::vector<Robot_Teach_Point> points;
-      std::size_t next_id = 1;
     };
+
+    static void Renumber_Points(Model_Points &model_points);
 
     std::map<std::string, Model_Points> m_points_by_model;
   };

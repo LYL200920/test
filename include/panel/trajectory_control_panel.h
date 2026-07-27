@@ -17,22 +17,20 @@ class Trajectory_Control_Panel : public wxPanel
 public:
   struct Callbacks
   {
-    std::function<void()> clear_points;
     std::function<void()> go_to_point;
-    std::function<void()> delete_point;
-    std::function<void()> save;
-    std::function<void()> load;
     std::function<void()> play;
     std::function<void()> pause_resume;
     std::function<void()> stop;
     std::function<void()> speed_changed;
   };
 
-  Trajectory_Control_Panel(wxWindow *parent, int speed_default_index, int speed_max_index);
+  Trajectory_Control_Panel(
+    wxWindow *parent,
+    int speed_default_centimeters_per_second);
 
   void Set_Callbacks(Callbacks callbacks);
 
-  int Speed_Index() const;
+  double Speed_Meters_Per_Second() const;
   void Set_Speed_Label(const wxString &label);
   void Set_Status_Text(const wxString &label);
 
@@ -48,11 +46,7 @@ private:
 private:
   Callbacks m_callbacks;
 
-  wxButton *m_clear_points_button = nullptr;
   wxButton *m_go_to_point_button = nullptr;
-  wxButton *m_delete_point_button = nullptr;
-  wxButton *m_save_button = nullptr;
-  wxButton *m_load_button = nullptr;
   wxButton *m_play_button = nullptr;
   wxButton *m_pause_resume_button = nullptr;
   wxButton *m_stop_button = nullptr;

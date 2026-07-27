@@ -26,11 +26,13 @@ public:
   void Detach_Renderer ( );
   void Set_World_From_Frame (const Matrix4& world_from_frame);
   void Set_Visible (bool visible);
+  void Set_Size_Scale(double scale);
   void Set_Origin_Highlighted (bool highlighted);
   bool Is_Visible ( ) const { return m_visible; }
 
 private:
   void Ensure_Actors ( );
+  void Apply_Actor_Scales();
   void Add_Actors ( );
   void Remove_Actors ( );
 
@@ -43,6 +45,8 @@ private:
   std::vector<vtkSmartPointer<vtkActor>> m_actors;
   vtkSmartPointer<vtkActor> m_origin_actor;
   bool m_visible = false;
+  bool m_origin_highlighted = false;
+  double m_size_scale = 1.0;
 };
 
 } // namespace robot_model

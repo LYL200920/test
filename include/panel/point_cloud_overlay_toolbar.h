@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <array>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,12 @@ public:
 
   void Attach_Renderer(vtkRenderer *renderer);
   bool Has_Point_Cloud() const;
+  bool Snapshot_Current_Point_Cloud(
+    std::filesystem::path *path,
+    std::string *error_message = nullptr);
+  bool Load_Bound_Point_Cloud(
+    const std::filesystem::path &path,
+    std::string *error_message = nullptr);
   void Set_Camera_Connected(bool connected);
   void Set_Interactive_LOD(bool enabled);
   void Handle_Area_Selected(int start_x,

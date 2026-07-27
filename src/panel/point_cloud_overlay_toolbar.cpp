@@ -154,6 +154,39 @@ bool Point_Cloud_Overlay_Toolbar::Has_Point_Cloud ( ) const
   return m_controller.Has_Point_Cloud ( );
 }
 
+bool Point_Cloud_Overlay_Toolbar::Snapshot_Current_Point_Cloud (
+  std::filesystem::path* path,
+  std::string* error_message)
+{
+  if( path ) path->clear ( );
+  if( error_message ) error_message->clear ( );
+  const auto result =
+    m_controller.Save_Current_To_Resource (Robot_Model_Id ( ));
+  if( !result.success )
+  {
+    if( error_message ) *error_message = result.error_message;
+    return false;
+  }
+  if( path ) *path = result.file_path;
+  return true;
+}
+
+bool Point_Cloud_Overlay_Toolbar::Load_Bound_Point_Cloud (
+  const std::filesystem::path& path,
+  std::string* error_message)
+{
+  if( error_message ) error_message->clear ( );
+  const auto result = m_controller.Load_File (
+    path, Robot_Model_Id ( ), Renderer ( ));
+  if( !result.success )
+  {
+    if( error_message ) *error_message = result.error_message;
+    return false;
+  }
+  Show_And_Render ( );
+  return true;
+}
+
 void Point_Cloud_Overlay_Toolbar::Set_Camera_Connected (bool connected)
 {
   if( m_load_latest_button ) m_load_latest_button->Enable (connected);

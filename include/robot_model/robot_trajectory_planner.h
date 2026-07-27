@@ -16,6 +16,9 @@ namespace robot_model
                                                     size_t frame_count);
 
   Robot_Joint_Trajectory Build_Multi_Point_Joint_Ptp_Trajectory(const Robot_Joint_Trajectory &points, size_t frame_count_per_segment);
+  Robot_Joint_Trajectory Build_Multi_Point_Joint_Ptp_Trajectory(
+    const Robot_Joint_Trajectory &points,
+    const std::vector<size_t> &frame_counts_per_segment);
 
 } // namespace robot_model
 

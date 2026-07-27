@@ -18,7 +18,10 @@ public:
 
   void Set_Point_Names(const std::vector<wxString> &names);
   int Selected_Point_Index() const;
+  std::vector<int> Selected_Point_Indices() const;
   void Set_Point_Selection(int selection);
+  void Set_Point_Selections(const std::vector<int> &selections);
+  void Set_Dirty(bool dirty);
   void Set_List_Enabled(bool enabled);
   void Set_On_Selection_Changed(std::function<void()> callback);
   void Set_On_Collapsed_Changed(std::function<void(bool)> callback);
@@ -34,6 +37,7 @@ private:
   std::function<void()> m_on_selection_changed;
   std::function<void(bool)> m_on_collapsed_changed;
   bool m_collapsed = false;
+  bool m_dirty = false;
 };
 
 #endif

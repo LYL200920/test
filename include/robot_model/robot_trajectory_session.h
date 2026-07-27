@@ -27,6 +27,8 @@ public:
                     size_t target_index,
                     size_t frame_count);
   bool Start_Playback (size_t frame_count);
+  bool Start_Playback (
+    const std::vector<size_t> &frame_counts_per_segment);
   void Pause ( );
   void Resume ( );
   void Stop ( );
