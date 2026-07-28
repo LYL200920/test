@@ -135,6 +135,16 @@ namespace robot_model
     return m_player.Is_Finished();
   }
 
+  size_t Robot_Trajectory_Session::Frame_Index() const
+  {
+    return m_player.Frame_Index();
+  }
+
+  size_t Robot_Trajectory_Session::Frame_Count() const
+  {
+    return m_player.Frame_Count();
+  }
+
   const Robot_Trajectory_Session::Joint_Point *Robot_Trajectory_Session::Step()
   {
     return m_player.Step();

@@ -68,7 +68,7 @@ bool Save_Robot_Progress(
 
   pugi::xml_document document;
   auto root = document.append_child("RobotProgress");
-  root.append_attribute("version") = 2;
+  root.append_attribute("version") = 3;
   root.append_attribute("robotModel") =
     progress.robot_model_id.c_str();
   std::unordered_set<std::size_t> ids;
@@ -87,6 +87,8 @@ bool Save_Robot_Progress(
       static_cast<unsigned long long>(point.id);
     node.append_attribute("name") =
       Format_Teach_Point_Name(point.id).c_str();
+    node.append_attribute("type") =
+      Robot_Teach_Point_Type_Id(point.type);
     for (std::size_t index = 0; index < 6; ++index)
     {
       const std::string name = "a" + std::to_string(index + 1);
@@ -101,6 +103,8 @@ bool Save_Robot_Progress(
     node.append_attribute("c") = point.world_pose[5];
     node.append_attribute("hasWorldPose") = point.has_world_pose;
     node.append_attribute("pointCloud") = point.point_cloud_path.c_str();
+    node.append_attribute("pointCloudName") =
+      point.point_cloud_name.c_str();
     node.append_attribute("coordinateId") =
       point.coordinate_frame_id.c_str();
     node.append_attribute("coordinateName") =
@@ -180,6 +184,13 @@ bool Load_Robot_Progress(
     point.id = static_cast<std::size_t>(
       node.attribute("id").as_ullong());
     point.robot_model_id = model_id;
+    if (!Parse_Robot_Teach_Point_Type(
+          node.attribute("type").as_string(),
+          &point.type))
+    {
+      Set_Error(error_message, "Progress point type is invalid");
+      return false;
+    }
     for (std::size_t index = 0; index < 6; ++index)
     {
       const std::string name = "a" + std::to_string(index + 1);
@@ -204,6 +215,8 @@ bool Load_Robot_Progress(
       node.attribute("hasWorldPose").as_bool(false);
     point.point_cloud_path =
       node.attribute("pointCloud").as_string();
+    point.point_cloud_name =
+      node.attribute("pointCloudName").as_string();
     point.coordinate_frame_id =
       node.attribute("coordinateId").as_string();
     point.coordinate_frame_name =

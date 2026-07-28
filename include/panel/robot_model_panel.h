@@ -98,8 +98,11 @@ private:
   void Update_Trajectory_Status();
   void Update_Trajectory_Speed_Label();
   void Update_Trajectory_Point_List();
+  void Update_Teach_Point_Details();
   void On_Teach_Point_Selection_Changed();
-  void Apply_Teach_Point_Bindings(std::size_t index);
+  bool Apply_Teach_Point_Bindings(
+    std::size_t index,
+    bool require_point_cloud = false);
   void Sync_Trajectory_From_Teach_Points();
   int Selected_Teach_Point_Index() const;
   std::vector<int> Selected_Teach_Point_Indices() const;
@@ -108,6 +111,7 @@ private:
     robot_model::XyzabcPose *world_pose) const;
   bool Capture_Current_Teach_Bindings(
     std::string *point_cloud_path,
+    std::string *point_cloud_name,
     robot_model::Tool_Coordinate_Profile *coordinate);
   void Set_Progress_Dirty(bool dirty);
   double Get_Trajectory_Speed_Mps() const;
@@ -126,6 +130,12 @@ private:
   void Apply_Tool_Visualization();
 
 private:
+  struct Playback_Cloud_Switch
+  {
+    std::size_t frame_index = 0;
+    std::size_t point_index = 0;
+  };
+
   wxStaticText *m_model_name_text = nullptr;
   wxStaticText *m_status_text = nullptr;
   Robot_Model_View *m_view = nullptr;
@@ -165,6 +175,12 @@ private:
     m_tool_visualization_configuration;
   std::string m_interaction_tool_id;
   bool m_speed_zero_paused_playback = false;
+  std::vector<std::size_t> m_playback_waypoint_frame_indices;
+  std::size_t m_next_playback_waypoint_index = 0;
+  std::vector<Playback_Cloud_Switch> m_playback_cloud_switches;
+  std::size_t m_next_playback_cloud_switch = 0;
+  bool m_waiting_for_playback_cloud = false;
+  bool m_playback_cloud_switch_blocked = false;
   int m_expanded_teach_point_width = 240;
 };
 

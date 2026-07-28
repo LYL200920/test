@@ -19,7 +19,9 @@ namespace robot_model
         const std::string &point_cloud_path = {},
         const std::string &coordinate_frame_id = {},
         const std::string &coordinate_frame_name = {},
-        const XyzabcPose &flange_from_coordinate_pose = {});
+        const XyzabcPose &flange_from_coordinate_pose = {},
+        const std::string &point_cloud_name = {},
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
     const Robot_Teach_Point &Insert_Point(
         const std::string &robot_model_id,
         std::size_t index,
@@ -28,7 +30,9 @@ namespace robot_model
         const std::string &point_cloud_path = {},
         const std::string &coordinate_frame_id = {},
         const std::string &coordinate_frame_name = {},
-        const XyzabcPose &flange_from_coordinate_pose = {});
+        const XyzabcPose &flange_from_coordinate_pose = {},
+        const std::string &point_cloud_name = {},
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
     bool Update_Point(
         const std::string &robot_model_id,
         std::size_t index,
@@ -37,7 +41,9 @@ namespace robot_model
         const std::string &point_cloud_path = {},
         const std::string &coordinate_frame_id = {},
         const std::string &coordinate_frame_name = {},
-        const XyzabcPose &flange_from_coordinate_pose = {});
+        const XyzabcPose &flange_from_coordinate_pose = {},
+        const std::string &point_cloud_name = {},
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
 
     void Replace_Joint_Points(const std::string &robot_model_id, const std::vector<std::array<double, 6>> &joint_points);
     void Replace_Points(

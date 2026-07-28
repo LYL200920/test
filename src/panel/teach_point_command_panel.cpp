@@ -1,6 +1,7 @@
 #include "teach_point_command_panel.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
@@ -28,8 +29,21 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
   m_load_button = new wxButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"加载 Progress"));
 
+  auto* type_label = new wxStaticText (
+    this, wxID_ANY, wxString::FromUTF8 (u8"类型"));
+  m_type_choice = new wxChoice (this, wxID_ANY);
+  m_type_choice->Append (wxString::FromUTF8 (u8"运动点"));
+  m_type_choice->Append (wxString::FromUTF8 (u8"过渡点"));
+  m_type_choice->Append (wxString::FromUTF8 (u8"等待点"));
+  m_type_choice->SetSelection (0);
+
   auto* root = new wxBoxSizer (wxVERTICAL);
   root->Add (title, 0, wxEXPAND | wxBOTTOM, 4);
+  auto* type_sizer = new wxBoxSizer (wxHORIZONTAL);
+  type_sizer->Add (
+    type_label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+  type_sizer->Add (m_type_choice, 1, wxEXPAND);
+  root->Add (type_sizer, 0, wxEXPAND | wxBOTTOM, 6);
   root->Add (m_add_button, 0, wxEXPAND);
   root->Add (m_update_button, 0, wxEXPAND | wxTOP, 6);
   auto* insert_sizer = new wxBoxSizer (wxHORIZONTAL);
@@ -45,6 +59,31 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
   file_sizer->Add (m_load_button, 1, wxLEFT, 3);
   root->Add (file_sizer, 0, wxEXPAND | wxTOP, 12);
   SetSizer (root);
+}
+
+robot_model::Robot_Teach_Point_Type
+Teach_Point_Command_Panel::Selected_Point_Type ( ) const
+{
+  if( !m_type_choice ) return robot_model::Robot_Teach_Point_Type::Motion;
+  switch( m_type_choice->GetSelection ( ) )
+  {
+    case 1:
+      return robot_model::Robot_Teach_Point_Type::Transition;
+    case 2:
+      return robot_model::Robot_Teach_Point_Type::Wait;
+    default:
+      return robot_model::Robot_Teach_Point_Type::Motion;
+  }
+}
+
+void Teach_Point_Command_Panel::Set_Selected_Point_Type (
+  robot_model::Robot_Teach_Point_Type type)
+{
+  if( !m_type_choice ) return;
+  m_type_choice->SetSelection (
+    type == robot_model::Robot_Teach_Point_Type::Transition
+      ? 1
+      : type == robot_model::Robot_Teach_Point_Type::Wait ? 2 : 0);
 }
 
 void Teach_Point_Command_Panel::Set_Callbacks (Callbacks callbacks)
@@ -66,6 +105,7 @@ void Teach_Point_Command_Panel::Refresh_Command_State (
   std::size_t point_count)
 {
   const bool single_selection = selected_count == 1;
+  if( m_type_choice ) m_type_choice->Enable (enabled);
   if( m_add_button ) m_add_button->Enable (enabled);
   if( m_update_button )
     m_update_button->Enable (enabled && single_selection);

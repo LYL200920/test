@@ -1,12 +1,15 @@
 #ifndef includeguard_teach_point_command_panel_h_includeguard
 #define includeguard_teach_point_command_panel_h_includeguard
 
+#include "robot_teach_point.h"
+
 #include <wx/panel.h>
 
 #include <functional>
 #include <cstddef>
 
 class wxButton;
+class wxChoice;
 
 class Teach_Point_Command_Panel : public wxPanel
 {
@@ -26,6 +29,8 @@ public:
   explicit Teach_Point_Command_Panel (wxWindow* parent);
 
   void Set_Callbacks(Callbacks callbacks);
+  robot_model::Robot_Teach_Point_Type Selected_Point_Type() const;
+  void Set_Selected_Point_Type(robot_model::Robot_Teach_Point_Type type);
   void Refresh_Command_State(
     bool enabled,
     std::size_t selected_count,
@@ -46,6 +51,7 @@ private:
   wxButton* m_clear_button = nullptr;
   wxButton* m_save_button = nullptr;
   wxButton* m_load_button = nullptr;
+  wxChoice* m_type_choice = nullptr;
 };
 
 #endif

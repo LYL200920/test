@@ -154,28 +154,46 @@ bool Point_Cloud_Overlay_Toolbar::Has_Point_Cloud ( ) const
   return m_controller.Has_Point_Cloud ( );
 }
 
-bool Point_Cloud_Overlay_Toolbar::Snapshot_Current_Point_Cloud (
+bool Point_Cloud_Overlay_Toolbar::Current_Point_Cloud_Binding (
   std::filesystem::path* path,
-  std::string* error_message)
+  std::string* display_name,
+  std::string* error_message) const
 {
   if( path ) path->clear ( );
+  if( display_name ) display_name->clear ( );
   if( error_message ) error_message->clear ( );
-  const auto result =
-    m_controller.Save_Current_To_Resource (Robot_Model_Id ( ));
-  if( !result.success )
+  if( !m_controller.Has_Point_Cloud ( ) )
   {
-    if( error_message ) *error_message = result.error_message;
+    if( error_message ) *error_message = "No point cloud is loaded";
     return false;
   }
-  if( path ) *path = result.file_path;
+  if( m_current_point_cloud_path.empty ( ) )
+  {
+    if( error_message )
+      *error_message =
+        "Current point cloud has not been saved to a file";
+    return false;
+  }
+  if( path ) *path = m_current_point_cloud_path;
+  if( display_name ) *display_name = m_current_point_cloud_name;
   return true;
 }
 
 bool Point_Cloud_Overlay_Toolbar::Load_Bound_Point_Cloud (
   const std::filesystem::path& path,
+  const std::string& display_name,
   std::string* error_message)
 {
   if( error_message ) error_message->clear ( );
+  if( m_controller.Has_Point_Cloud ( ) &&
+      path.lexically_normal ( ) ==
+        m_current_point_cloud_path.lexically_normal ( ) )
+  {
+    m_current_point_cloud_name = display_name.empty ( )
+      ? path.stem ( ).u8string ( )
+      : display_name;
+    return true;
+  }
   const auto result = m_controller.Load_File (
     path, Robot_Model_Id ( ), Renderer ( ));
   if( !result.success )
@@ -183,6 +201,10 @@ bool Point_Cloud_Overlay_Toolbar::Load_Bound_Point_Cloud (
     if( error_message ) *error_message = result.error_message;
     return false;
   }
+  m_current_point_cloud_path = path;
+  m_current_point_cloud_name = display_name.empty ( )
+    ? path.stem ( ).u8string ( )
+    : display_name;
   Show_And_Render ( );
   return true;
 }
@@ -342,6 +364,8 @@ void Point_Cloud_Overlay_Toolbar::On_Load_Latest (wxCommandEvent&)
                   result.error_message);
     return;
   }
+  m_current_point_cloud_path.clear ( );
+  m_current_point_cloud_name = u8"实时点云";
   Set_Status (wxString::Format (
     wxString::FromUTF8 (
       u8"点云已叠加：显示 %zu / 有效 %zu / 原始 %zu 点；Depth 中值 %.1f mm；基坐标 X[%.0f, %.0f] Y[%.0f, %.0f] Z[%.0f, %.0f] mm"),
@@ -377,6 +401,9 @@ void Point_Cloud_Overlay_Toolbar::On_Save_Latest (wxCommandEvent&)
                   result.error_message);
     return;
   }
+  m_current_point_cloud_path = result.file_path;
+  m_current_point_cloud_name =
+    result.file_path.stem ( ).u8string ( );
   Set_Status (wxString::Format (
     wxString::FromUTF8 (u8"点云已保存：%s，%zu 点，Depth 中值 %.1f mm"),
     wxString (result.file_path.filename ( ).wstring ( )).c_str ( ),
@@ -406,6 +433,9 @@ void Point_Cloud_Overlay_Toolbar::On_Load_File (wxCommandEvent&)
                   result.error_message);
     return;
   }
+  m_current_point_cloud_path = selected_path;
+  m_current_point_cloud_name =
+    selected_path.stem ( ).u8string ( );
   Set_Status (wxString::Format (
     wxString::FromUTF8 (
       u8"文件点云已叠加：%s，%zu 点；基坐标 X[%.0f, %.0f] Y[%.0f, %.0f] Z[%.0f, %.0f] mm"),
@@ -424,6 +454,8 @@ void Point_Cloud_Overlay_Toolbar::On_Clear (wxCommandEvent&)
   if( m_callbacks.set_point_cloud_edit_mode )
     m_callbacks.set_point_cloud_edit_mode (false, false);
   m_controller.Clear ( );
+  m_current_point_cloud_path.clear ( );
+  m_current_point_cloud_name.clear ( );
   if( m_callbacks.clear_collision_obstacle_points )
   {
     m_callbacks.clear_collision_obstacle_points ( );

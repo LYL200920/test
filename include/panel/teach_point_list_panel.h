@@ -1,14 +1,19 @@
 #ifndef includeguard_teach_point_list_panel_h_includeguard
 #define includeguard_teach_point_list_panel_h_includeguard
 
+#include "robot_teach_point.h"
+
 #include <wx/panel.h>
 #include <wx/string.h>
 
 #include <functional>
+#include <set>
+#include <string>
 #include <vector>
 
 class wxButton;
-class wxListBox;
+class wxGrid;
+class wxTreeCtrl;
 class wxStaticText;
 
 class Teach_Point_List_Panel : public wxPanel
@@ -16,7 +21,20 @@ class Teach_Point_List_Panel : public wxPanel
 public:
   explicit Teach_Point_List_Panel(wxWindow *parent);
 
-  void Set_Point_Names(const std::vector<wxString> &names);
+  void Set_Point_Names(
+    const std::vector<wxString> &names,
+    const std::vector<robot_model::Robot_Teach_Point_Type> &types,
+    const std::vector<wxString> &cloud_names,
+    const std::vector<std::string> &cloud_keys);
+  void Set_Point_Details(
+    const wxString &type,
+    const wxString &coordinate,
+    const wxString &cloud,
+    robot_model::Robot_Teach_Point_Type point_type,
+    bool highlight_type);
+  void Set_Point_Pose(
+    const robot_model::XyzabcPose &pose,
+    bool has_pose);
   int Selected_Point_Index() const;
   std::vector<int> Selected_Point_Indices() const;
   void Set_Point_Selection(int selection);
@@ -33,11 +51,15 @@ private:
 private:
   wxStaticText *m_title = nullptr;
   wxButton *m_toggle_button = nullptr;
-  wxListBox *m_point_list = nullptr;
+  wxTreeCtrl *m_point_list = nullptr;
+  wxGrid *m_info_grid = nullptr;
+  wxGrid *m_pose_grid = nullptr;
   std::function<void()> m_on_selection_changed;
   std::function<void(bool)> m_on_collapsed_changed;
   bool m_collapsed = false;
   bool m_dirty = false;
+  bool m_updating_selection = false;
+  std::set<std::string> m_collapsed_group_keys;
 };
 
 #endif

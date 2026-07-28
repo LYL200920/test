@@ -17,6 +17,46 @@ namespace robot_model
     return "P[" + std::to_string(id) + "]";
   }
 
+  const char *Robot_Teach_Point_Type_Id(Robot_Teach_Point_Type type)
+  {
+    switch (type)
+    {
+      case Robot_Teach_Point_Type::Transition:
+        return "transition";
+      case Robot_Teach_Point_Type::Wait:
+        return "wait";
+      case Robot_Teach_Point_Type::Motion:
+      default:
+        return "motion";
+    }
+  }
+
+  bool Parse_Robot_Teach_Point_Type(
+      const std::string &text,
+      Robot_Teach_Point_Type *type)
+  {
+    if (!type)
+    {
+      return false;
+    }
+    if (text.empty() || text == "motion")
+    {
+      *type = Robot_Teach_Point_Type::Motion;
+      return true;
+    }
+    if (text == "transition")
+    {
+      *type = Robot_Teach_Point_Type::Transition;
+      return true;
+    }
+    if (text == "wait")
+    {
+      *type = Robot_Teach_Point_Type::Wait;
+      return true;
+    }
+    return false;
+  }
+
   void Robot_Teach_Point_Store::Renumber_Points(
       Model_Points &model_points)
   {
@@ -32,7 +72,9 @@ namespace robot_model
                                                               const std::string &point_cloud_path,
                                                               const std::string &coordinate_frame_id,
                                                               const std::string &coordinate_frame_name,
-                                                              const XyzabcPose &flange_from_coordinate_pose)
+                                                              const XyzabcPose &flange_from_coordinate_pose,
+                                                              const std::string &point_cloud_name,
+                                                              Robot_Teach_Point_Type type)
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
@@ -42,10 +84,12 @@ namespace robot_model
     point.world_pose = world_pose;
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
+    point.point_cloud_name = point_cloud_name;
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
     point.has_coordinate_frame = !coordinate_frame_id.empty();
+    point.type = type;
     model_points.points.push_back(point);
     return model_points.points.back();
   }
@@ -58,7 +102,9 @@ namespace robot_model
       const std::string &point_cloud_path,
       const std::string &coordinate_frame_id,
       const std::string &coordinate_frame_name,
-      const XyzabcPose &flange_from_coordinate_pose)
+      const XyzabcPose &flange_from_coordinate_pose,
+      const std::string &point_cloud_name,
+      Robot_Teach_Point_Type type)
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
@@ -67,10 +113,12 @@ namespace robot_model
     point.world_pose = world_pose;
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
+    point.point_cloud_name = point_cloud_name;
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
     point.has_coordinate_frame = !coordinate_frame_id.empty();
+    point.type = type;
     const auto insertion = model_points.points.begin() +
       static_cast<std::ptrdiff_t>(
         std::min(index, model_points.points.size()));
@@ -89,7 +137,9 @@ namespace robot_model
       const std::string &point_cloud_path,
       const std::string &coordinate_frame_id,
       const std::string &coordinate_frame_name,
-      const XyzabcPose &flange_from_coordinate_pose)
+      const XyzabcPose &flange_from_coordinate_pose,
+      const std::string &point_cloud_name,
+      Robot_Teach_Point_Type type)
   {
     auto found = m_points_by_model.find(robot_model_id);
     if (found == m_points_by_model.end() ||
@@ -102,10 +152,12 @@ namespace robot_model
     point.world_pose = world_pose;
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
+    point.point_cloud_name = point_cloud_name;
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
     point.has_coordinate_frame = !coordinate_frame_id.empty();
+    point.type = type;
     return true;
   }
 

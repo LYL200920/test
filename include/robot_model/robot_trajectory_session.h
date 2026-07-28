@@ -37,6 +37,8 @@ public:
   bool Is_Paused ( ) const;
   bool Is_Active ( ) const;
   bool Is_Finished ( ) const;
+  size_t Frame_Index ( ) const;
+  size_t Frame_Count ( ) const;
 
   const Joint_Point* Step ( );
 

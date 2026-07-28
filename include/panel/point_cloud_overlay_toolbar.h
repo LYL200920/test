@@ -43,11 +43,13 @@ public:
 
   void Attach_Renderer(vtkRenderer *renderer);
   bool Has_Point_Cloud() const;
-  bool Snapshot_Current_Point_Cloud(
+  bool Current_Point_Cloud_Binding(
     std::filesystem::path *path,
-    std::string *error_message = nullptr);
+    std::string *display_name,
+    std::string *error_message = nullptr) const;
   bool Load_Bound_Point_Cloud(
     const std::filesystem::path &path,
+    const std::string &display_name,
     std::string *error_message = nullptr);
   void Set_Camera_Connected(bool connected);
   void Set_Interactive_LOD(bool enabled);
@@ -103,6 +105,8 @@ private:
   wxSpinCtrlDouble *m_robot_exclusion_ctrl = nullptr;
   wxCheckBox *m_exclude_robot_points = nullptr;
   bool m_camera_pose_visible = false;
+  std::filesystem::path m_current_point_cloud_path;
+  std::string m_current_point_cloud_name;
 };
 
 #endif

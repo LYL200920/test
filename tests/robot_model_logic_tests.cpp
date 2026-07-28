@@ -136,11 +136,17 @@ void test_trajectory_session ( )
   require (session.Point_Count ( ) == 3, "Session point count mismatch");
   require (session.Has_Playable_Path ( ), "Session should be playable");
   require (session.Start_Playback (3), "Session playback should start");
+  require (session.Frame_Count ( ) == 5,
+           "Session exposed frame count mismatch");
+  require (session.Frame_Index ( ) == 0,
+           "Session should start at frame zero");
 
   size_t stepped_frames = 0;
   while( session.Step ( ) != nullptr )
   {
     ++stepped_frames;
+    require (session.Frame_Index ( ) == stepped_frames,
+             "Session exposed frame index did not advance");
   }
   require (stepped_frames == 5, "Session playback frame count mismatch");
   require (session.Is_Finished ( ), "Session should be finished");
@@ -222,6 +228,18 @@ void test_teach_point_store ( )
   const robot_model::XyzabcPose pose_a = { 10, 20, 30, 40, 50, 60 };
   const auto first = store.Add_Point ("robot-a", joints_a, pose_a);
   require (first.id == 1, "First teach point id mismatch");
+  require (
+    first.type == robot_model::Robot_Teach_Point_Type::Motion,
+    "Teach point should default to motion type");
+  robot_model::Robot_Teach_Point_Type parsed_type =
+    robot_model::Robot_Teach_Point_Type::Motion;
+  require (
+    robot_model::Parse_Robot_Teach_Point_Type (
+      "transition", &parsed_type) &&
+    parsed_type == robot_model::Robot_Teach_Point_Type::Transition &&
+    std::string (robot_model::Robot_Teach_Point_Type_Id (
+      robot_model::Robot_Teach_Point_Type::Wait)) == "wait",
+    "Teach point type serialization mismatch");
   require (robot_model::Format_Teach_Point_Name (first.id) == "P[1]",
            "Teach point name format mismatch");
   require (robot_model::Format_Teach_Point_Name (101) == "P[101]",
@@ -307,10 +325,12 @@ void test_robot_progress_io ( )
   first.world_pose = { 10, 20, 30, 40, 50, 60 };
   first.has_world_pose = true;
   first.point_cloud_path = "Resource/PointCloud/progress_1.ply";
+  first.point_cloud_name = "top1_point_cloud";
   first.coordinate_frame_id = "camera";
   first.coordinate_frame_name = "Camera";
   first.flange_from_coordinate_pose = { 1, 2, 3, 4, 5, 6 };
   first.has_coordinate_frame = true;
+  first.type = robot_model::Robot_Teach_Point_Type::Wait;
   robot_model::Robot_Teach_Point second = first;
   second.id = 8;
   second.joint_angles_deg = { -1, -2, -3, -4, -5, -6 };
@@ -338,13 +358,15 @@ void test_robot_progress_io ( )
            "Progress point data mismatch");
   require (
     loaded.points[0].point_cloud_path == first.point_cloud_path &&
+    loaded.points[0].point_cloud_name == first.point_cloud_name &&
     loaded.points[0].coordinate_frame_id ==
       first.coordinate_frame_id &&
     loaded.points[0].coordinate_frame_name ==
       first.coordinate_frame_name &&
     loaded.points[0].flange_from_coordinate_pose ==
       first.flange_from_coordinate_pose &&
-    loaded.points[0].has_coordinate_frame,
+    loaded.points[0].has_coordinate_frame &&
+    loaded.points[0].type == robot_model::Robot_Teach_Point_Type::Wait,
     "Progress point bindings did not round-trip");
 
   {
@@ -361,7 +383,9 @@ void test_robot_progress_io ( )
              path, &loaded, &error),
            "Legacy Progress should remain loadable: " + error);
   require (loaded.points[0].point_cloud_path.empty ( ) &&
-           !loaded.points[0].has_coordinate_frame,
+           !loaded.points[0].has_coordinate_frame &&
+           loaded.points[0].type ==
+             robot_model::Robot_Teach_Point_Type::Motion,
            "Legacy Progress should use empty bindings");
 
   {
