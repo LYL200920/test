@@ -2,6 +2,8 @@
 
 #include "camera_service.h"
 #include "point_cloud_file_repository.h"
+#include "point_cloud_template_binding_repository.h"
+#include "template_configuration_repository.h"
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
@@ -12,6 +14,7 @@
 #include <wx/spinctrl.h>
 #include <wx/tglbtn.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <utility>
 
@@ -142,6 +145,7 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
   SetSizer (sizer);
   Set_Camera_Connected (false);
   Update_Edit_Buttons ( );
+  Refresh_Template_Configuration ( );
 }
 
 void Point_Cloud_Overlay_Toolbar::Attach_Renderer (vtkRenderer* renderer)
@@ -152,6 +156,66 @@ void Point_Cloud_Overlay_Toolbar::Attach_Renderer (vtkRenderer* renderer)
 bool Point_Cloud_Overlay_Toolbar::Has_Point_Cloud ( ) const
 {
   return m_controller.Has_Point_Cloud ( );
+}
+
+bool Point_Cloud_Overlay_Toolbar::Current_Template_Profile (
+  robot_model::Template_Profile* profile,
+  bool* has_binding) const
+{
+  if( has_binding ) *has_binding = false;
+  if( !profile || m_current_point_cloud_path.empty ( ) )
+  {
+    return false;
+  }
+  const auto* binding =
+    robot_model::Find_Point_Cloud_Template_Binding (
+      m_template_bindings, m_current_point_cloud_path);
+  if( !binding )
+  {
+    return false;
+  }
+  if( has_binding ) *has_binding = true;
+  const auto* found = robot_model::Find_Template_Profile (
+    m_template_configuration, binding->template_id);
+  if( !found )
+  {
+    return false;
+  }
+  *profile = *found;
+  return true;
+}
+
+void Point_Cloud_Overlay_Toolbar::Refresh_Template_Configuration ( )
+{
+  std::string error_message;
+  robot_model::Template_Configuration templates;
+  if( robot_model::Load_Template_Configuration (
+        robot_model::Template_Configuration_Path ( ),
+        &templates,
+        &error_message) )
+  {
+    m_template_configuration = std::move (templates);
+  }
+  else
+  {
+    Report_Error (
+      wxString::FromUTF8 (u8"模板配置加载失败"), error_message);
+  }
+
+  robot_model::Point_Cloud_Template_Binding_Configuration bindings;
+  error_message.clear ( );
+  if( robot_model::Load_Point_Cloud_Template_Bindings (
+        robot_model::Point_Cloud_Template_Binding_Config_Path ( ),
+        &bindings,
+        &error_message) )
+  {
+    m_template_bindings = std::move (bindings);
+  }
+  else
+  {
+    Report_Error (
+      wxString::FromUTF8 (u8"模板绑定加载失败"), error_message);
+  }
 }
 
 bool Point_Cloud_Overlay_Toolbar::Current_Point_Cloud_Binding (
@@ -463,6 +527,58 @@ void Point_Cloud_Overlay_Toolbar::On_Clear (wxCommandEvent&)
   Set_Status (wxString::FromUTF8 (u8"点云叠加已清除"));
   if( m_callbacks.render_scene ) m_callbacks.render_scene ( );
   Update_Edit_Buttons ( );
+}
+
+bool Point_Cloud_Overlay_Toolbar::Bind_Point_Cloud_Template (
+  const std::filesystem::path& point_cloud_path,
+  const std::string& point_cloud_name,
+  const robot_model::Template_Profile& profile,
+  std::string* error_message)
+{
+  if( error_message ) error_message->clear ( );
+  if( point_cloud_path.empty ( ) ||
+      !robot_model::Is_Valid_Template_Profile (profile) )
+  {
+    if( error_message )
+      *error_message = "Point cloud path or template is invalid";
+    return false;
+  }
+
+  robot_model::Set_Point_Cloud_Template_Binding (
+    &m_template_bindings,
+    point_cloud_path,
+    point_cloud_name,
+    profile.id);
+  m_template_configuration.templates.erase (
+    std::remove_if (
+      m_template_configuration.templates.begin ( ),
+      m_template_configuration.templates.end ( ),
+      [&profile] (const robot_model::Template_Profile& value)
+      {
+        return value.id == profile.id;
+      }),
+    m_template_configuration.templates.end ( ));
+  m_template_configuration.templates.push_back (profile);
+  return robot_model::Save_Point_Cloud_Template_Bindings (
+    robot_model::Point_Cloud_Template_Binding_Config_Path ( ),
+    m_template_bindings,
+    error_message);
+}
+
+bool Point_Cloud_Overlay_Toolbar::Unbind_Point_Cloud_Template (
+  const std::filesystem::path& point_cloud_path,
+  std::string* error_message)
+{
+  if( error_message ) error_message->clear ( );
+  if( !robot_model::Remove_Point_Cloud_Template_Binding (
+        &m_template_bindings, point_cloud_path) )
+  {
+    return true;
+  }
+  return robot_model::Save_Point_Cloud_Template_Bindings (
+    robot_model::Point_Cloud_Template_Binding_Config_Path ( ),
+    m_template_bindings,
+    error_message);
 }
 
 void Point_Cloud_Overlay_Toolbar::On_Toggle_Edit (wxCommandEvent&)

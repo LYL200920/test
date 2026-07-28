@@ -2,6 +2,8 @@
 #define includeguard_point_cloud_overlay_toolbar_h_includeguard
 
 #include "point_cloud_overlay_controller.h"
+#include "point_cloud_template_binding.h"
+#include "template_configuration.h"
 
 #include <wx/panel.h>
 #include <wx/string.h>
@@ -51,6 +53,18 @@ public:
     const std::filesystem::path &path,
     const std::string &display_name,
     std::string *error_message = nullptr);
+  bool Current_Template_Profile(
+    robot_model::Template_Profile *profile,
+    bool *has_binding = nullptr) const;
+  bool Bind_Point_Cloud_Template(
+    const std::filesystem::path &point_cloud_path,
+    const std::string &point_cloud_name,
+    const robot_model::Template_Profile &profile,
+    std::string *error_message = nullptr);
+  bool Unbind_Point_Cloud_Template(
+    const std::filesystem::path &point_cloud_path,
+    std::string *error_message = nullptr);
+  void Refresh_Template_Configuration();
   void Set_Camera_Connected(bool connected);
   void Set_Interactive_LOD(bool enabled);
   void Handle_Area_Selected(int start_x,
@@ -104,6 +118,9 @@ private:
   wxSpinCtrlDouble *m_voxel_size_ctrl = nullptr;
   wxSpinCtrlDouble *m_robot_exclusion_ctrl = nullptr;
   wxCheckBox *m_exclude_robot_points = nullptr;
+  robot_model::Template_Configuration m_template_configuration;
+  robot_model::Point_Cloud_Template_Binding_Configuration
+    m_template_bindings;
   bool m_camera_pose_visible = false;
   std::filesystem::path m_current_point_cloud_path;
   std::string m_current_point_cloud_name;

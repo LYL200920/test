@@ -86,6 +86,44 @@ namespace robot_model
     return true;
   }
 
+  bool Parse_Xyzabc_Poses_Text(
+      const std::string &text,
+      std::size_t pose_count,
+      std::vector<XyzabcPose> *poses,
+      std::string *error_message)
+  {
+    if (poses == nullptr || pose_count == 0)
+    {
+      set_error(error_message, "Pose output or count is invalid.");
+      return false;
+    }
+    const std::vector<double> numbers = extract_numbers(text);
+    const std::size_t required = pose_count * 6;
+    if (numbers.size() < required)
+    {
+      std::ostringstream message;
+      message << "Expected " << required
+              << " numeric values for " << pose_count
+              << " template poses, parsed " << numbers.size() << ".";
+      set_error(error_message, message.str());
+      return false;
+    }
+    poses->clear();
+    poses->reserve(pose_count);
+    for (std::size_t pose_index = 0;
+         pose_index < pose_count;
+         ++pose_index)
+    {
+      XyzabcPose pose = {};
+      for (std::size_t value_index = 0; value_index < 6; ++value_index)
+      {
+        pose[value_index] = numbers[pose_index * 6 + value_index];
+      }
+      poses->push_back(pose);
+    }
+    return true;
+  }
+
   Matrix4 Build_Zyx_Pose_Matrix(const XyzabcPose &pose)
   {
     const double a = deg_to_rad(pose[3]);

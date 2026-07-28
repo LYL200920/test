@@ -24,6 +24,7 @@ public:
     std::function<void()> clear;
     std::function<void()> save;
     std::function<void()> load;
+    std::function<void()> complete;
   };
 
   explicit Teach_Point_Command_Panel (wxWindow* parent);
@@ -51,6 +52,7 @@ private:
   wxButton* m_clear_button = nullptr;
   wxButton* m_save_button = nullptr;
   wxButton* m_load_button = nullptr;
+  wxButton* m_complete_button = nullptr;
   wxChoice* m_type_choice = nullptr;
 };
 

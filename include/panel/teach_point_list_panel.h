@@ -12,6 +12,7 @@
 #include <vector>
 
 class wxButton;
+class wxChoice;
 class wxGrid;
 class wxTreeCtrl;
 class wxStaticText;
@@ -30,11 +31,15 @@ public:
     const wxString &type,
     const wxString &coordinate,
     const wxString &cloud,
+    const wxString &template_name,
     robot_model::Robot_Teach_Point_Type point_type,
     bool highlight_type);
   void Set_Point_Pose(
     const robot_model::XyzabcPose &pose,
     bool has_pose);
+  void Set_Pose_Coordinate_Choices(
+    const std::vector<wxString> &names,
+    int selection);
   int Selected_Point_Index() const;
   std::vector<int> Selected_Point_Indices() const;
   void Set_Point_Selection(int selection);
@@ -43,6 +48,12 @@ public:
   void Set_List_Enabled(bool enabled);
   void Set_On_Selection_Changed(std::function<void()> callback);
   void Set_On_Collapsed_Changed(std::function<void(bool)> callback);
+  void Set_On_Bind_Cloud_Template(
+    std::function<void(int)> callback);
+  void Set_On_Unbind_Cloud_Template(
+    std::function<void(int)> callback);
+  void Set_On_Pose_Coordinate_Changed(
+    std::function<void(int)> callback);
 
 private:
   void Toggle_Collapsed();
@@ -53,9 +64,14 @@ private:
   wxButton *m_toggle_button = nullptr;
   wxTreeCtrl *m_point_list = nullptr;
   wxGrid *m_info_grid = nullptr;
+  wxStaticText *m_pose_coordinate_label = nullptr;
+  wxChoice *m_pose_coordinate_choice = nullptr;
   wxGrid *m_pose_grid = nullptr;
   std::function<void()> m_on_selection_changed;
   std::function<void(bool)> m_on_collapsed_changed;
+  std::function<void(int)> m_on_bind_cloud_template;
+  std::function<void(int)> m_on_unbind_cloud_template;
+  std::function<void(int)> m_on_pose_coordinate_changed;
   bool m_collapsed = false;
   bool m_dirty = false;
   bool m_updating_selection = false;

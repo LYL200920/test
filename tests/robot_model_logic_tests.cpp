@@ -9,6 +9,7 @@
 #include "robot_model_config_loader.h"
 #include "robot_model_repository.h"
 #include "robot_progress_io.h"
+#include "progress_flow_transform.h"
 #include "robot_trajectory_io.h"
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
@@ -312,6 +313,37 @@ void test_teach_point_store ( )
     "robot-edit", joints_a, pose_a);
   require (after_replace.id == 3,
            "Add after load should keep ids continuous");
+
+  robot_model::Robot_Teach_Point_Store template_store;
+  template_store.Add_Point(
+    "robot-template",
+    joints_a,
+    pose_a,
+    "Resource/PointCloud/cloud_a.ply");
+  template_store.Add_Point(
+    "robot-template",
+    joints_a,
+    pose_a,
+    "Resource/PointCloud/cloud_b.ply");
+  const robot_model::XyzabcPose reference_pose =
+    {100, 200, 300, 10, 20, 30};
+  require(
+    template_store.Apply_Template_To_Point_Cloud(
+      "robot-template",
+      "Resource/PointCloud/cloud_a.ply",
+      "template_1",
+      "Top",
+      reference_pose) == 1,
+    "Template sync should update only matching point cloud points");
+  const auto &template_points =
+    template_store.Points("robot-template");
+  require(
+    template_points[0].has_template &&
+    template_points[0].template_id == "template_1" &&
+    template_points[0].template_name == "Top" &&
+    template_points[0].template_reference_pose == reference_pose &&
+    !template_points[1].has_template,
+    "Template sync data mismatch");
 }
 
 void test_robot_progress_io ( )
@@ -326,6 +358,10 @@ void test_robot_progress_io ( )
   first.has_world_pose = true;
   first.point_cloud_path = "Resource/PointCloud/progress_1.ply";
   first.point_cloud_name = "top1_point_cloud";
+  first.template_id = "template_1";
+  first.template_name = "Top template";
+  first.template_reference_pose = { 100, 200, 300, 10, 20, 30 };
+  first.has_template = true;
   first.coordinate_frame_id = "camera";
   first.coordinate_frame_name = "Camera";
   first.flange_from_coordinate_pose = { 1, 2, 3, 4, 5, 6 };
@@ -359,6 +395,11 @@ void test_robot_progress_io ( )
   require (
     loaded.points[0].point_cloud_path == first.point_cloud_path &&
     loaded.points[0].point_cloud_name == first.point_cloud_name &&
+    loaded.points[0].template_id == first.template_id &&
+    loaded.points[0].template_name == first.template_name &&
+    loaded.points[0].template_reference_pose ==
+      first.template_reference_pose &&
+    loaded.points[0].has_template &&
     loaded.points[0].coordinate_frame_id ==
       first.coordinate_frame_id &&
     loaded.points[0].coordinate_frame_name ==
@@ -383,6 +424,7 @@ void test_robot_progress_io ( )
              path, &loaded, &error),
            "Legacy Progress should remain loadable: " + error);
   require (loaded.points[0].point_cloud_path.empty ( ) &&
+           !loaded.points[0].has_template &&
            !loaded.points[0].has_coordinate_frame &&
            loaded.points[0].type ==
              robot_model::Robot_Teach_Point_Type::Motion,
@@ -401,6 +443,79 @@ void test_robot_progress_io ( )
              path, &loaded, &error),
            "Progress with a missing joint field should fail");
   std::filesystem::remove (path);
+}
+
+void test_progress_flow_transform ( )
+{
+  robot_model::Robot_Teach_Point first;
+  first.id = 1;
+  first.has_world_pose = true;
+  first.world_pose = { 10, 0, 0, 0, 0, 0 };
+  first.has_template = true;
+  first.template_id = "top";
+  first.template_name = "Top";
+  first.template_reference_pose = { 0, 0, 0, 0, 0, 0 };
+
+  robot_model::Robot_Teach_Point second = first;
+  second.id = 2;
+  second.world_pose = { 0, 20, 0, 0, 0, 0 };
+  second.template_id = "side";
+  second.template_name = "Side";
+  second.template_reference_pose = { 0, 10, 0, 0, 0, 0 };
+
+  const std::vector<robot_model::Robot_Teach_Point> points =
+    { first, second };
+  std::vector<robot_model::Progress_Template_Reference> references;
+  std::string error;
+  require (
+    robot_model::Collect_Progress_Template_References (
+      points, &references, &error),
+    "Progress template collection failed: " + error);
+  require (
+    references.size ( ) == 2 &&
+    references[0].id == "top" &&
+    references[1].id == "side",
+    "Progress template order mismatch");
+
+  std::vector<robot_model::XyzabcPose> recognized;
+  require (
+    robot_model::Parse_Xyzabc_Poses_Text (
+      "100,0,0,0,0,0, 0,30,0,0,0,0",
+      2,
+      &recognized,
+      &error),
+    "Multiple HIK poses failed to parse: " + error);
+  std::vector<robot_model::XyzabcPose> transformed;
+  require (
+    robot_model::Transform_Progress_Teach_Points (
+      points, recognized, &transformed, nullptr, &error),
+    "Progress point transform failed: " + error);
+  require_near (
+    transformed[0][0], 110.0,
+    "First template translation mismatch");
+  require_near (
+    transformed[1][1], 40.0,
+    "Second template translation mismatch");
+
+  std::vector<robot_model::XyzabcPose> coordinate_sources;
+  const robot_model::XyzabcPose flange_from_coordinate =
+    { 5, 0, 0, 0, 0, 0 };
+  require (
+    robot_model::Transform_Progress_Teach_Points_In_Coordinate (
+      points,
+      recognized,
+      flange_from_coordinate,
+      &transformed,
+      &coordinate_sources,
+      nullptr,
+      &error),
+    "Coordinate Progress point transform failed: " + error);
+  require_near (
+    coordinate_sources[0][0], 15.0,
+    "Selected coordinate source pose mismatch");
+  require_near (
+    transformed[0][0], 115.0,
+    "Selected coordinate transformed pose mismatch");
 }
 
 void test_robot_resources_use_source_directory ( )
@@ -491,6 +606,8 @@ void test_kr10_r1100_2_resource_config ( )
                 "KR10_R1100_2 flange Y mismatch");
   require_near (params.neutral_flange_pose[2], 985.0,
                 "KR10_R1100_2 flange Z mismatch");
+  require_near (params.neutral_flange_pose[4], 90.0,
+                "KR10_R1100_2 flange frame correction mismatch");
   require_near (params.self_collision_clearance_mm, 3.0,
                 "KR10_R1100_2 self-collision clearance mismatch");
   require (params.self_collision_pairs.size ( ) == 15,
@@ -605,6 +722,37 @@ void test_kr10_r1100_2_resource_config ( )
                 "KR10_R1100_2 flange did not follow A1 in Y");
   require_near (rotated_forward.world_from_flange[2][3], 985.0,
                 "KR10_R1100_2 flange did not preserve Z under A1");
+
+  // Real KR10 controller sample. Compare the rotation matrices instead of
+  // Euler values because C=180 and C=-180 describe the same orientation.
+  const std::array<double, 6> controller_sample_input = {
+    1.44, -103.44, 110.06, 0.0, 83.38, 181.44
+  };
+  const auto controller_sample_state =
+    robot_model::Build_Joint_State_From_Input_Angles (
+      params, controller_sample_input);
+  const auto controller_sample_forward =
+    robot_model::Compute_Forward_Kinematics (
+      forward_model, controller_sample_state);
+  const auto expected_controller_pose =
+    robot_model::Build_Zyx_Pose_Matrix (
+      { 409.16, -10.29, 820.13, 0.0, 0.0, 180.0 });
+  for( std::size_t axis = 0; axis < 3; ++axis )
+  {
+    require (
+      std::abs (
+        controller_sample_forward.world_from_flange[axis][3] -
+        expected_controller_pose[axis][3]) < 0.2,
+      "KR10_R1100_2 controller sample position mismatch");
+    for( std::size_t column = 0; column < 3; ++column )
+    {
+      require (
+        std::abs (
+          controller_sample_forward.world_from_flange[axis][column] -
+          expected_controller_pose[axis][column]) < 1.0e-9,
+        "KR10_R1100_2 controller sample orientation mismatch");
+    }
+  }
 }
 
 void test_pose_transform_logic ( )
@@ -1213,6 +1361,7 @@ int main ( )
     test_trajectory_session ( );
     test_teach_point_store ( );
     test_robot_progress_io ( );
+    test_progress_flow_transform ( );
     test_trajectory_csv_io ( );
     test_pose_transform_logic ( );
     test_pose_point_file_io ( );

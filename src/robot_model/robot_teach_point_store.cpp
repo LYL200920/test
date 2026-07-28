@@ -1,4 +1,5 @@
 #include "robot_teach_point_store.h"
+#include "point_cloud_template_binding.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -74,7 +75,10 @@ namespace robot_model
                                                               const std::string &coordinate_frame_name,
                                                               const XyzabcPose &flange_from_coordinate_pose,
                                                               const std::string &point_cloud_name,
-                                                              Robot_Teach_Point_Type type)
+                                                              Robot_Teach_Point_Type type,
+                                                              const std::string &template_id,
+                                                              const std::string &template_name,
+                                                              const XyzabcPose &template_reference_pose)
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
@@ -85,6 +89,10 @@ namespace robot_model
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
     point.point_cloud_name = point_cloud_name;
+    point.template_id = template_id;
+    point.template_name = template_name;
+    point.template_reference_pose = template_reference_pose;
+    point.has_template = !template_id.empty();
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
@@ -104,7 +112,10 @@ namespace robot_model
       const std::string &coordinate_frame_name,
       const XyzabcPose &flange_from_coordinate_pose,
       const std::string &point_cloud_name,
-      Robot_Teach_Point_Type type)
+      Robot_Teach_Point_Type type,
+      const std::string &template_id,
+      const std::string &template_name,
+      const XyzabcPose &template_reference_pose)
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
@@ -114,6 +125,10 @@ namespace robot_model
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
     point.point_cloud_name = point_cloud_name;
+    point.template_id = template_id;
+    point.template_name = template_name;
+    point.template_reference_pose = template_reference_pose;
+    point.has_template = !template_id.empty();
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
@@ -139,7 +154,10 @@ namespace robot_model
       const std::string &coordinate_frame_name,
       const XyzabcPose &flange_from_coordinate_pose,
       const std::string &point_cloud_name,
-      Robot_Teach_Point_Type type)
+      Robot_Teach_Point_Type type,
+      const std::string &template_id,
+      const std::string &template_name,
+      const XyzabcPose &template_reference_pose)
   {
     auto found = m_points_by_model.find(robot_model_id);
     if (found == m_points_by_model.end() ||
@@ -153,6 +171,10 @@ namespace robot_model
     point.has_world_pose = true;
     point.point_cloud_path = point_cloud_path;
     point.point_cloud_name = point_cloud_name;
+    point.template_id = template_id;
+    point.template_name = template_name;
+    point.template_reference_pose = template_reference_pose;
+    point.has_template = !template_id.empty();
     point.coordinate_frame_id = coordinate_frame_id;
     point.coordinate_frame_name = coordinate_frame_name;
     point.flange_from_coordinate_pose = flange_from_coordinate_pose;
@@ -236,6 +258,37 @@ namespace robot_model
     auto found = m_points_by_model.find(robot_model_id);
     if (found != m_points_by_model.end())
       found->second.points.clear();
+  }
+
+  std::size_t Robot_Teach_Point_Store::Apply_Template_To_Point_Cloud(
+      const std::string &robot_model_id,
+      const std::string &point_cloud_path,
+      const std::string &template_id,
+      const std::string &template_name,
+      const XyzabcPose &template_reference_pose)
+  {
+    const auto found = m_points_by_model.find(robot_model_id);
+    if (found == m_points_by_model.end())
+    {
+      return 0;
+    }
+    const std::string target_key = Point_Cloud_Binding_Key(
+      std::filesystem::u8path(point_cloud_path));
+    std::size_t updated = 0;
+    for (auto &point : found->second.points)
+    {
+      if (Point_Cloud_Binding_Key(
+            std::filesystem::u8path(point.point_cloud_path)) != target_key)
+      {
+        continue;
+      }
+      point.template_id = template_id;
+      point.template_name = template_name;
+      point.template_reference_pose = template_reference_pose;
+      point.has_template = !template_id.empty();
+      ++updated;
+    }
+    return updated;
   }
 
   const std::vector<Robot_Teach_Point> &Robot_Teach_Point_Store::Points(const std::string &robot_model_id) const

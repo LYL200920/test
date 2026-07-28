@@ -157,7 +157,7 @@ Tool_Panel::Tool_Panel(wxWindow *parent)
   m_length_control->SetDigits(2);
   m_width_axis_choice = new wxChoice(fov_page, wxID_ANY);
   m_length_axis_choice = new wxChoice(fov_page, wxID_ANY);
-  for (const char *axis : {"X", "Y", "Z"})
+  for (const char *axis : {"X", "Y"})
   {
     m_width_axis_choice->Append(axis);
     m_length_axis_choice->Append(axis);
@@ -190,6 +190,20 @@ Tool_Panel::Tool_Panel(wxWindow *parent)
     form_sizer,
     u8"长度对应轴",
     m_length_axis_choice);
+  form_sizer->Add(
+    new wxStaticText(
+      fov_page,
+      wxID_ANY,
+      wxString::FromUTF8(u8"相机光轴")),
+    0,
+    wxALIGN_CENTER_VERTICAL);
+  form_sizer->Add(
+    new wxStaticText(
+      fov_page,
+      wxID_ANY,
+      wxString::FromUTF8(u8"+Z（右手坐标系）")),
+    1,
+    wxEXPAND | wxALIGN_CENTER_VERTICAL);
 
   auto *apply_button = new wxButton(
     fov_page,

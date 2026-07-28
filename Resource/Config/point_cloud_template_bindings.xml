@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<PointCloudTemplateBindings version="1">
+  <Binding pointCloud="F:/LYL/Github/test/Resource/PointCloud/test_0.ply" pointCloudName="test_0" templateId="template_1" />
+</PointCloudTemplateBindings>

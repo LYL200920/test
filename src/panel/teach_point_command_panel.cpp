@@ -28,6 +28,8 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
     this, wxID_ANY, wxString::FromUTF8 (u8"保存 Progress"));
   m_load_button = new wxButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"加载 Progress"));
+  m_complete_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"Progress 完成"));
 
   auto* type_label = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"类型"));
@@ -58,6 +60,7 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
   file_sizer->Add (m_save_button, 1, wxRIGHT, 3);
   file_sizer->Add (m_load_button, 1, wxLEFT, 3);
   root->Add (file_sizer, 0, wxEXPAND | wxTOP, 12);
+  root->Add (m_complete_button, 0, wxEXPAND | wxTOP, 12);
   SetSizer (root);
 }
 
@@ -97,6 +100,7 @@ void Teach_Point_Command_Panel::Set_Callbacks (Callbacks callbacks)
   Bind_Button (m_clear_button, m_callbacks.clear);
   Bind_Button (m_save_button, m_callbacks.save);
   Bind_Button (m_load_button, m_callbacks.load);
+  Bind_Button (m_complete_button, m_callbacks.complete);
 }
 
 void Teach_Point_Command_Panel::Refresh_Command_State (
@@ -120,6 +124,8 @@ void Teach_Point_Command_Panel::Refresh_Command_State (
   if( m_save_button )
     m_save_button->Enable (enabled && point_count > 0);
   if( m_load_button ) m_load_button->Enable (enabled);
+  if( m_complete_button )
+    m_complete_button->Enable (enabled && point_count > 0);
 }
 
 void Teach_Point_Command_Panel::Bind_Button (

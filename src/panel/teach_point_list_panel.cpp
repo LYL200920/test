@@ -1,8 +1,10 @@
 #include "teach_point_list_panel.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/colour.h>
 #include <wx/grid.h>
+#include <wx/menu.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/treectrl.h>
@@ -22,13 +24,15 @@ public:
   {
   }
 
-  explicit Teach_Point_Item_Data(std::string group_key)
-    : group_key(std::move(group_key))
+  Teach_Point_Item_Data(std::string group_key, int first_point_index)
+    : group_key(std::move(group_key)),
+      first_point_index(first_point_index)
   {
   }
 
   int point_index = wxNOT_FOUND;
   std::string group_key;
+  int first_point_index = wxNOT_FOUND;
 };
 
 Teach_Point_Item_Data *item_data(
@@ -109,19 +113,29 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
   m_point_list->AddRoot("Progress");
 
   m_info_grid = new wxGrid(this, wxID_ANY);
-  configure_read_only_grid(m_info_grid, 3, 2);
-  const std::array<wxString, 3> info_names = {
+  configure_read_only_grid(m_info_grid, 4, 2);
+  const std::array<wxString, 4> info_names = {
     wxString::FromUTF8(u8"类型"),
-    wxString::FromUTF8(u8"坐标系"),
-    wxString::FromUTF8(u8"点云")};
-  for (int row = 0; row < 3; ++row)
+    wxString::FromUTF8(u8"绑定坐标系"),
+    wxString::FromUTF8(u8"点云"),
+    wxString::FromUTF8(u8"模板")};
+  for (int row = 0; row < 4; ++row)
   {
     m_info_grid->SetCellValue(row, 0, info_names[row]);
     m_info_grid->SetCellValue(row, 1, wxString::FromUTF8(u8"未选择"));
     m_info_grid->SetCellBackgroundColour(row, 0, wxColour(238, 238, 238));
     m_info_grid->SetRowSize(row, 24);
   }
-  m_info_grid->SetMinSize(wxSize(210, 74));
+  m_info_grid->SetMinSize(wxSize(210, 98));
+
+  auto *pose_coordinate_row = new wxBoxSizer(wxHORIZONTAL);
+  m_pose_coordinate_label = new wxStaticText(
+    this, wxID_ANY, wxString::FromUTF8(u8"姿态显示坐标系"));
+  pose_coordinate_row->Add(
+    m_pose_coordinate_label,
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+  m_pose_coordinate_choice = new wxChoice(this, wxID_ANY);
+  pose_coordinate_row->Add(m_pose_coordinate_choice, 1, wxEXPAND);
 
   m_pose_grid = new wxGrid(this, wxID_ANY);
   configure_read_only_grid(m_pose_grid, 4, 3);
@@ -150,6 +164,16 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
   m_toggle_button->Bind(
     wxEVT_BUTTON,
     [this](wxCommandEvent &) { Toggle_Collapsed(); });
+  m_pose_coordinate_choice->Bind(
+    wxEVT_CHOICE,
+    [this](wxCommandEvent &)
+    {
+      if (m_on_pose_coordinate_changed)
+      {
+        m_on_pose_coordinate_changed(
+          m_pose_coordinate_choice->GetSelection());
+      }
+    });
   m_point_list->Bind(
     wxEVT_TREE_SEL_CHANGED,
     [this](wxTreeEvent &)
@@ -158,6 +182,53 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
       {
         m_on_selection_changed();
       }
+    });
+  m_point_list->Bind(
+    wxEVT_TREE_ITEM_MENU,
+    [this](wxTreeEvent &event)
+    {
+      wxTreeItemId group = event.GetItem();
+      auto *data = item_data(m_point_list, group);
+      if (data && data->group_key.empty())
+      {
+        group = m_point_list->GetItemParent(group);
+        data = item_data(m_point_list, group);
+      }
+      if (!data || data->group_key.empty() ||
+          data->first_point_index == wxNOT_FOUND)
+      {
+        return;
+      }
+
+      const int first_point_index = data->first_point_index;
+      wxMenu menu;
+      const int bind_id = wxWindow::NewControlId();
+      const int unbind_id = wxWindow::NewControlId();
+      menu.Append(
+        bind_id, wxString::FromUTF8(u8"绑定模板..."));
+      menu.Append(
+        unbind_id, wxString::FromUTF8(u8"解绑模板"));
+      menu.Bind(
+        wxEVT_MENU,
+        [this, first_point_index](wxCommandEvent &)
+        {
+          if (m_on_bind_cloud_template)
+          {
+            m_on_bind_cloud_template(first_point_index);
+          }
+        },
+        bind_id);
+      menu.Bind(
+        wxEVT_MENU,
+        [this, first_point_index](wxCommandEvent &)
+        {
+          if (m_on_unbind_cloud_template)
+          {
+            m_on_unbind_cloud_template(first_point_index);
+          }
+        },
+        unbind_id);
+      m_point_list->PopupMenu(&menu);
     });
   Bind(
     wxEVT_SIZE,
@@ -205,6 +276,11 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
   root->Add(header, 0, wxEXPAND | wxALL, 4);
   root->Add(m_point_list, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
   root->Add(m_info_grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+  root->Add(
+    pose_coordinate_row,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+    6);
   root->Add(m_pose_grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
   SetSizer(root);
   SetMinSize(wxSize(220, -1));
@@ -214,6 +290,7 @@ void Teach_Point_List_Panel::Set_Point_Details(
   const wxString &type,
   const wxString &coordinate,
   const wxString &cloud,
+  const wxString &template_name,
   robot_model::Robot_Teach_Point_Type point_type,
   bool highlight_type)
 {
@@ -224,6 +301,7 @@ void Teach_Point_List_Panel::Set_Point_Details(
   m_info_grid->SetCellValue(0, 1, type);
   m_info_grid->SetCellValue(1, 1, coordinate);
   m_info_grid->SetCellValue(2, 1, cloud);
+  m_info_grid->SetCellValue(3, 1, template_name);
   wxColour type_colour = *wxWHITE;
   if (highlight_type &&
       point_type == robot_model::Robot_Teach_Point_Type::Transition)
@@ -257,6 +335,26 @@ void Teach_Point_List_Panel::Set_Point_Pose(
       has_pose ? wxString::Format("%.2f", pose[column + 3]) : "-");
   }
   m_pose_grid->ForceRefresh();
+}
+
+void Teach_Point_List_Panel::Set_Pose_Coordinate_Choices(
+  const std::vector<wxString> &names,
+  int selection)
+{
+  if (!m_pose_coordinate_choice)
+  {
+    return;
+  }
+  m_pose_coordinate_choice->Clear();
+  for (const auto &name : names)
+  {
+    m_pose_coordinate_choice->Append(name);
+  }
+  if (selection >= 0 &&
+      selection < static_cast<int>(names.size()))
+  {
+    m_pose_coordinate_choice->SetSelection(selection);
+  }
 }
 
 void Teach_Point_List_Panel::Set_Point_Names(
@@ -304,7 +402,8 @@ void Teach_Point_List_Panel::Set_Point_Names(
       wxString::Format("%s (%zu)", cloud_name.c_str(), end - start),
       -1,
       -1,
-      new Teach_Point_Item_Data(group_key));
+      new Teach_Point_Item_Data(
+        group_key, static_cast<int>(start)));
     m_point_list->SetItemBold(group, true);
     m_point_list->SetItemBackgroundColour(
       group, wxColour(235, 235, 235));
@@ -450,6 +549,24 @@ void Teach_Point_List_Panel::Set_On_Collapsed_Changed(
   m_on_collapsed_changed = std::move(callback);
 }
 
+void Teach_Point_List_Panel::Set_On_Bind_Cloud_Template(
+  std::function<void(int)> callback)
+{
+  m_on_bind_cloud_template = std::move(callback);
+}
+
+void Teach_Point_List_Panel::Set_On_Unbind_Cloud_Template(
+  std::function<void(int)> callback)
+{
+  m_on_unbind_cloud_template = std::move(callback);
+}
+
+void Teach_Point_List_Panel::Set_On_Pose_Coordinate_Changed(
+  std::function<void(int)> callback)
+{
+  m_on_pose_coordinate_changed = std::move(callback);
+}
+
 void Teach_Point_List_Panel::Toggle_Collapsed()
 {
   m_collapsed = !m_collapsed;
@@ -473,6 +590,14 @@ void Teach_Point_List_Panel::Update_Collapsed_State()
   if (m_pose_grid)
   {
     m_pose_grid->Show(!m_collapsed);
+  }
+  if (m_pose_coordinate_choice)
+  {
+    m_pose_coordinate_choice->Show(!m_collapsed);
+  }
+  if (m_pose_coordinate_label)
+  {
+    m_pose_coordinate_label->Show(!m_collapsed);
   }
   if (m_toggle_button)
   {

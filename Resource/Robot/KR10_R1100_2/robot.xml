@@ -153,13 +153,14 @@
         <Item keyname="JointAxis_6_Y" name="A6轴向Y" valuetype="float" value="0" />
         <Item keyname="JointAxis_6_Z" name="A6轴向Z" valuetype="float" value="0" />
 
-        <!-- Neutral world pose of the mounting flange. Position is in
+        <!-- Neutral world pose of the KUKA mounting flange. The STL terminal
+             frame differs from $FLANGE by +90 degrees about Y. Position is in
              millimeters; A/B/C use the project's ZYX degree convention. -->
         <Item keyname="FlangePose_X" name="中立法兰X" valuetype="float" value="629.89" />
         <Item keyname="FlangePose_Y" name="中立法兰Y" valuetype="float" value="0" />
         <Item keyname="FlangePose_Z" name="中立法兰Z" valuetype="float" value="985" />
         <Item keyname="FlangePose_A" name="中立法兰A" valuetype="float" value="0" />
-        <Item keyname="FlangePose_B" name="中立法兰B" valuetype="float" value="0" />
+        <Item keyname="FlangePose_B" name="中立法兰B" valuetype="float" value="90" />
         <Item keyname="FlangePose_C" name="中立法兰C" valuetype="float" value="0" />
 
         <Item keyname="BaseCsX" name="基坐标系X轴向" valuetype="int" value="4" />

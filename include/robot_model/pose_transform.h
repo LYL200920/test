@@ -3,6 +3,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 namespace robot_model
 {
@@ -14,6 +15,11 @@ using Matrix4 = std::array<std::array<double, 4>, 4>;
 bool Parse_Xyzabc_Pose_Text (const std::string& text,
                              XyzabcPose* pose,
                              std::string* error_message);
+bool Parse_Xyzabc_Poses_Text(
+  const std::string &text,
+  std::size_t pose_count,
+  std::vector<XyzabcPose> *poses,
+  std::string *error_message);
 
 Matrix4 Build_Zyx_Pose_Matrix (const XyzabcPose& pose);
 XyzabcPose Build_Xyzabc_From_Zyx_Matrix (const Matrix4& matrix);

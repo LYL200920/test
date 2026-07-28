@@ -26,6 +26,10 @@ struct Robot_Teach_Point
   bool has_world_pose = false;
   std::string point_cloud_path;
   std::string point_cloud_name;
+  std::string template_id;
+  std::string template_name;
+  XyzabcPose template_reference_pose = { };
+  bool has_template = false;
   std::string coordinate_frame_id;
   std::string coordinate_frame_name;
   XyzabcPose flange_from_coordinate_pose = { };

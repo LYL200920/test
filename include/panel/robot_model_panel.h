@@ -11,6 +11,7 @@
 #include "cartesian_pose_panel.h"
 #include "tool_coordinate.h"
 #include "tool_visualization.h"
+#include "template_configuration.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -26,6 +27,7 @@ class Right_Tool_Panel;
 class Camera_Control_Panel;
 class Camera_Image_View;
 class Camera_Service;
+class Flow_Panel;
 class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class Teach_Point_Command_Panel;
@@ -53,6 +55,7 @@ public:
       wxWindowID id = wxID_ANY);
 
   void Show_Model_Configuration(wxWindow *parent = nullptr);
+  void Refresh_Template_Configuration();
 
 private:
   void On_Add_Trajectory_Point(wxCommandEvent &event);
@@ -63,6 +66,7 @@ private:
   void On_Delete_Trajectory_Point(wxCommandEvent &event);
   void On_Save_Trajectory(wxCommandEvent &event);
   void On_Load_Trajectory(wxCommandEvent &event);
+  void On_Complete_Progress();
   void On_Play_Trajectory(wxCommandEvent &event);
   void On_Pause_Resume_Trajectory(wxCommandEvent &event);
   void On_Stop_Trajectory(wxCommandEvent &event);
@@ -100,6 +104,9 @@ private:
   void Update_Trajectory_Point_List();
   void Update_Teach_Point_Details();
   void On_Teach_Point_Selection_Changed();
+  void On_Teach_Pose_Coordinate_Changed(int selection);
+  void Bind_Template_To_Teach_Point_Cloud(std::size_t point_index);
+  void Unbind_Template_From_Teach_Point_Cloud(std::size_t point_index);
   bool Apply_Teach_Point_Bindings(
     std::size_t index,
     bool require_point_cloud = false);
@@ -112,8 +119,10 @@ private:
   bool Capture_Current_Teach_Bindings(
     std::string *point_cloud_path,
     std::string *point_cloud_name,
-    robot_model::Tool_Coordinate_Profile *coordinate);
+    robot_model::Tool_Coordinate_Profile *coordinate,
+    robot_model::Template_Profile *template_profile);
   void Set_Progress_Dirty(bool dirty);
+  void Invalidate_Completed_Progress();
   double Get_Trajectory_Speed_Mps() const;
   int Get_Trajectory_Timer_Interval_Ms() const;
   bool Is_Trajectory_Active() const;
@@ -127,6 +136,7 @@ private:
   const robot_model::Tool_Coordinate_Profile &Interaction_Tool() const;
   void Apply_Active_Tool();
   void Refresh_Interaction_Coordinate_Choices();
+  void Refresh_Teach_Pose_Coordinate_Choices();
   void Apply_Tool_Visualization();
 
 private:
@@ -157,6 +167,7 @@ private:
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel *m_right_tool_panel = nullptr;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
+  Flow_Panel *m_flow_panel = nullptr;
   Joint_Control_Panel *m_joint_panel = nullptr;
   Cartesian_Pose_Panel *m_cartesian_pose_panel = nullptr;
   Teach_Point_Command_Panel *m_teach_point_command_panel = nullptr;
@@ -174,6 +185,7 @@ private:
   robot_model::Tool_Visualization_Configuration
     m_tool_visualization_configuration;
   std::string m_interaction_tool_id;
+  std::string m_teach_pose_coordinate_id;
   bool m_speed_zero_paused_playback = false;
   std::vector<std::size_t> m_playback_waypoint_frame_indices;
   std::size_t m_next_playback_waypoint_index = 0;
@@ -181,6 +193,7 @@ private:
   std::size_t m_next_playback_cloud_switch = 0;
   bool m_waiting_for_playback_cloud = false;
   bool m_playback_cloud_switch_blocked = false;
+  bool m_progress_completed = false;
   int m_expanded_teach_point_width = 240;
 };
 

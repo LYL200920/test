@@ -97,10 +97,9 @@ void Test_Repository_Round_Trip()
 
 void Test_Fov_Axis_Mappings()
 {
-  const std::array<robot_model::Coordinate_Axis, 3> axes = {
+  const std::array<robot_model::Coordinate_Axis, 2> axes = {
     robot_model::Coordinate_Axis::X,
-    robot_model::Coordinate_Axis::Y,
-    robot_model::Coordinate_Axis::Z};
+    robot_model::Coordinate_Axis::Y};
   for (const auto width_axis : axes)
   {
     for (const auto length_axis : axes)
@@ -123,18 +122,37 @@ void Test_Fov_Axis_Mappings()
         robot_model::Coordinate_Axis_Index(length_axis);
       const std::size_t normal_index =
         3 - width_index - length_index;
+      assert(normal_index ==
+             robot_model::Coordinate_Axis_Index(
+               robot_model::Coordinate_Axis::Z));
       for (const auto &corner : corners)
       {
         Require_Near(std::abs(corner[width_index]), 50.0);
         Require_Near(std::abs(corner[length_index]), 120.0);
         Require_Near(corner[normal_index], 0.0);
       }
+      const robot_model::Point3 first_edge = {
+        corners[1][0] - corners[0][0],
+        corners[1][1] - corners[0][1],
+        corners[1][2] - corners[0][2]};
+      const robot_model::Point3 second_edge = {
+        corners[2][0] - corners[1][0],
+        corners[2][1] - corners[1][1],
+        corners[2][2] - corners[1][2]};
+      const double normal_z =
+        first_edge[0] * second_edge[1] -
+        first_edge[1] * second_edge[0];
+      assert(normal_z > 0.0);
     }
   }
 
   robot_model::Fov_Visualization_Configuration invalid;
   invalid.width_axis = robot_model::Coordinate_Axis::Y;
   invalid.length_axis = robot_model::Coordinate_Axis::Y;
+  assert(!robot_model::Is_Valid_Fov_Configuration(invalid));
+
+  invalid.width_axis = robot_model::Coordinate_Axis::Y;
+  invalid.length_axis = robot_model::Coordinate_Axis::Z;
   assert(!robot_model::Is_Valid_Fov_Configuration(invalid));
 }
 
@@ -173,6 +191,33 @@ void Test_Fov_Bound_Tool_Center()
   }
 }
 
+void Test_Camera_Tool_Right_Handed_Convention()
+{
+  const auto flange_from_camera =
+    robot_model::Build_Zyx_Pose_Matrix(
+      {164.46, -1.95, 191.62, 7.19, -89.99, 172.81});
+  const std::array<double, 3> camera_x = {
+    flange_from_camera[0][0],
+    flange_from_camera[1][0],
+    flange_from_camera[2][0]};
+  const std::array<double, 3> camera_y = {
+    flange_from_camera[0][1],
+    flange_from_camera[1][1],
+    flange_from_camera[2][1]};
+  const std::array<double, 3> camera_z = {
+    flange_from_camera[0][2],
+    flange_from_camera[1][2],
+    flange_from_camera[2][2]};
+  const std::array<double, 3> x_cross_y = {
+    camera_x[1] * camera_y[2] - camera_x[2] * camera_y[1],
+    camera_x[2] * camera_y[0] - camera_x[0] * camera_y[2],
+    camera_x[0] * camera_y[1] - camera_x[1] * camera_y[0]};
+  for (std::size_t axis = 0; axis < 3; ++axis)
+  {
+    Require_Near(x_cross_y[axis], camera_z[axis]);
+  }
+}
+
 void Test_Fov_Configuration_Round_Trip()
 {
   robot_model::Tool_Visualization_Configuration configuration;
@@ -202,9 +247,9 @@ void Test_Fov_Configuration_Round_Trip()
   Require_Near(loaded.fov.width_mm, 1280.5);
   Require_Near(loaded.fov.length_mm, 960.25);
   assert(
-    loaded.fov.width_axis == robot_model::Coordinate_Axis::Z);
+    loaded.fov.width_axis == robot_model::Coordinate_Axis::X);
   assert(
-    loaded.fov.length_axis == robot_model::Coordinate_Axis::X);
+    loaded.fov.length_axis == robot_model::Coordinate_Axis::Y);
   assert(loaded.tool_frame.visible);
   Require_Near(loaded.tool_frame.size_scale, 0.35);
   std::filesystem::remove(path);
@@ -219,6 +264,7 @@ int main()
   Test_Repository_Round_Trip();
   Test_Fov_Axis_Mappings();
   Test_Fov_Bound_Tool_Center();
+  Test_Camera_Tool_Right_Handed_Convention();
   Test_Fov_Configuration_Round_Trip();
   return 0;
 }

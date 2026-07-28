@@ -49,6 +49,9 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_robot_button->Enable (false);
   m_robot_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在设置中加载机械臂模型"));
+  m_flow_button->Enable (false);
+  m_flow_button->SetToolTip (
+    wxString::FromUTF8 (u8"请先在 Teach 中完成 Progress 检查"));
 
   m_robot_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Robot_Click, this);
@@ -162,6 +165,23 @@ void Right_Tool_Panel::Set_Camera_Tool_Enabled (bool enabled)
   }
 }
 
+void Right_Tool_Panel::Set_Flow_Tool_Enabled (bool enabled)
+{
+  m_flow_tool_enabled = enabled;
+  if( m_flow_button )
+  {
+    m_flow_button->Enable (enabled);
+    m_flow_button->SetToolTip (
+      enabled ? wxString ( ) :
+        wxString::FromUTF8 (u8"请先在 Teach 中完成 Progress 检查"));
+  }
+  if( !enabled && m_right_expanded &&
+      m_active_page == Right_Tool_Page::Flow )
+  {
+    Set_Right_Expanded (false);
+  }
+}
+
 void Right_Tool_Panel::Set_On_Width_Changed (
   std::function<void (int)> callback)
 {
@@ -175,6 +195,7 @@ void Right_Tool_Panel::On_Tcp_Click (wxCommandEvent&)
 
 void Right_Tool_Panel::On_Flow_Click (wxCommandEvent&)
 {
+  if( !m_flow_tool_enabled ) return;
   Toggle_Right_Page (Right_Tool_Page::Flow);
 }
 

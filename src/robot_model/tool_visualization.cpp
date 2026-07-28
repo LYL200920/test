@@ -54,10 +54,17 @@ bool Parse_Coordinate_Axis(
 bool Is_Valid_Fov_Configuration(
   const Fov_Visualization_Configuration &configuration)
 {
+  const auto is_image_plane_axis = [](Coordinate_Axis axis)
+  {
+    return axis == Coordinate_Axis::X ||
+           axis == Coordinate_Axis::Y;
+  };
   return std::isfinite(configuration.width_mm) &&
          configuration.width_mm > 0.0 &&
          std::isfinite(configuration.length_mm) &&
          configuration.length_mm > 0.0 &&
+         is_image_plane_axis(configuration.width_axis) &&
+         is_image_plane_axis(configuration.length_axis) &&
          configuration.width_axis != configuration.length_axis;
 }
 
@@ -77,11 +84,19 @@ void Normalize_Tool_Visualization_Configuration(
   {
     fov.length_mm = 300.0;
   }
-  if (fov.width_axis == fov.length_axis)
+  if (fov.width_axis != Coordinate_Axis::X &&
+      fov.width_axis != Coordinate_Axis::Y)
   {
-    const auto next =
-      (Coordinate_Axis_Index(fov.width_axis) + 1) % 3;
-    fov.length_axis = static_cast<Coordinate_Axis>(next);
+    fov.width_axis = Coordinate_Axis::X;
+  }
+  if ((fov.length_axis != Coordinate_Axis::X &&
+       fov.length_axis != Coordinate_Axis::Y) ||
+      fov.width_axis == fov.length_axis)
+  {
+    fov.length_axis =
+      fov.width_axis == Coordinate_Axis::X
+        ? Coordinate_Axis::Y
+        : Coordinate_Axis::X;
   }
   auto &tool_frame = configuration->tool_frame;
   if (!std::isfinite(tool_frame.size_scale))
@@ -101,23 +116,25 @@ std::array<Point3, 4> Build_Fov_Local_Corners(
   Normalize_Tool_Visualization_Configuration(&wrapper);
   normalized = wrapper.fov;
 
-  const std::size_t width_axis =
-    Coordinate_Axis_Index(normalized.width_axis);
-  const std::size_t length_axis =
-    Coordinate_Axis_Index(normalized.length_axis);
   const double half_width = normalized.width_mm * 0.5;
   const double half_length = normalized.length_mm * 0.5;
+  const double half_x =
+    normalized.width_axis == Coordinate_Axis::X
+      ? half_width
+      : half_length;
+  const double half_y =
+    normalized.width_axis == Coordinate_Axis::Y
+      ? half_width
+      : half_length;
 
-  std::array<Point3, 4> corners = {};
-  corners[0][width_axis] = -half_width;
-  corners[0][length_axis] = -half_length;
-  corners[1][width_axis] = half_width;
-  corners[1][length_axis] = -half_length;
-  corners[2][width_axis] = half_width;
-  corners[2][length_axis] = half_length;
-  corners[3][width_axis] = -half_width;
-  corners[3][length_axis] = half_length;
-  return corners;
+  // Counter-clockwise when viewed from +Z, so edge X edge follows the
+  // right-hand rule and always points along the camera optical axis +Z.
+  return {{
+    {-half_x, -half_y, 0.0},
+    { half_x, -half_y, 0.0},
+    { half_x,  half_y, 0.0},
+    {-half_x,  half_y, 0.0}
+  }};
 }
 
 } // namespace robot_model

@@ -41,6 +41,13 @@ bool Is_Finite_Point(const Robot_Teach_Point &point)
       return false;
     }
   }
+  for (const double value : point.template_reference_pose)
+  {
+    if (!std::isfinite(value))
+    {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -68,7 +75,7 @@ bool Save_Robot_Progress(
 
   pugi::xml_document document;
   auto root = document.append_child("RobotProgress");
-  root.append_attribute("version") = 3;
+  root.append_attribute("version") = 4;
   root.append_attribute("robotModel") =
     progress.robot_model_id.c_str();
   std::unordered_set<std::size_t> ids;
@@ -105,6 +112,24 @@ bool Save_Robot_Progress(
     node.append_attribute("pointCloud") = point.point_cloud_path.c_str();
     node.append_attribute("pointCloudName") =
       point.point_cloud_name.c_str();
+    node.append_attribute("templateId") =
+      point.template_id.c_str();
+    node.append_attribute("templateName") =
+      point.template_name.c_str();
+    node.append_attribute("hasTemplate") =
+      point.has_template;
+    node.append_attribute("templateX") =
+      point.template_reference_pose[0];
+    node.append_attribute("templateY") =
+      point.template_reference_pose[1];
+    node.append_attribute("templateZ") =
+      point.template_reference_pose[2];
+    node.append_attribute("templateA") =
+      point.template_reference_pose[3];
+    node.append_attribute("templateB") =
+      point.template_reference_pose[4];
+    node.append_attribute("templateC") =
+      point.template_reference_pose[5];
     node.append_attribute("coordinateId") =
       point.coordinate_frame_id.c_str();
     node.append_attribute("coordinateName") =
@@ -217,6 +242,20 @@ bool Load_Robot_Progress(
       node.attribute("pointCloud").as_string();
     point.point_cloud_name =
       node.attribute("pointCloudName").as_string();
+    point.template_id =
+      node.attribute("templateId").as_string();
+    point.template_name =
+      node.attribute("templateName").as_string();
+    point.has_template =
+      node.attribute("hasTemplate").as_bool(
+        !point.template_id.empty());
+    point.template_reference_pose = {
+      node.attribute("templateX").as_double(),
+      node.attribute("templateY").as_double(),
+      node.attribute("templateZ").as_double(),
+      node.attribute("templateA").as_double(),
+      node.attribute("templateB").as_double(),
+      node.attribute("templateC").as_double()};
     point.coordinate_frame_id =
       node.attribute("coordinateId").as_string();
     point.coordinate_frame_name =

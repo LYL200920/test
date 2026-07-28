@@ -15,11 +15,13 @@
 #include "point_cloud_overlay_toolbar.h"
 #include "teach_point_command_panel.h"
 #include "teach_point_list_panel.h"
+#include "template_configuration_repository.h"
 #include "tool_panel.h"
 #include "tool_visualization_repository.h"
 
 #include <wx/button.h>
 #include <wx/choice.h>
+#include <wx/choicdlg.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
@@ -34,6 +36,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <unordered_map>
 #include <utility>
 
 namespace
@@ -230,8 +233,31 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_workspace_splitter);
   m_teach_point_list_panel->Set_On_Selection_Changed (
     [this] { On_Teach_Point_Selection_Changed ( ); });
+  m_teach_point_list_panel->Set_On_Pose_Coordinate_Changed (
+    [this] (int selection)
+    {
+      On_Teach_Pose_Coordinate_Changed (selection);
+    });
   m_teach_point_list_panel->Set_On_Collapsed_Changed (
     [this] (bool collapsed) { Resize_Teach_Point_List (collapsed); });
+  m_teach_point_list_panel->Set_On_Bind_Cloud_Template (
+    [this] (int point_index)
+    {
+      if( point_index >= 0 )
+      {
+        Bind_Template_To_Teach_Point_Cloud (
+          static_cast<std::size_t> (point_index));
+      }
+    });
+  m_teach_point_list_panel->Set_On_Unbind_Cloud_Template (
+    [this] (int point_index)
+    {
+      if( point_index >= 0 )
+      {
+        Unbind_Template_From_Teach_Point_Cloud (
+          static_cast<std::size_t> (point_index));
+      }
+    });
 
   m_content_splitter = new wxSplitterWindow (
     m_workspace_splitter,
@@ -420,7 +446,7 @@ Robot_Model_Panel::Robot_Model_Panel (
 
   auto* tcp_panel = new Net_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp));
-  auto* flow_panel = new Flow_Panel (
+  m_flow_panel = new Flow_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Flow));
   m_camera_control_panel = new Camera_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
@@ -536,7 +562,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Teach, teach_tool_page);
   m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, tcp_panel);
-  m_right_tool_panel->Add_Page (Right_Tool_Page::Flow, flow_panel);
+  m_right_tool_panel->Add_Page (Right_Tool_Page::Flow, m_flow_panel);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera, m_camera_control_panel);
   m_right_tool_panel->Add_Page (
@@ -849,6 +875,7 @@ void Robot_Model_Panel::Show_Model_Configuration (wxWindow* parent)
       return;
     }
     m_tool_configuration = dialog.Tool_Configuration ( );
+    Invalidate_Completed_Progress ( );
     Apply_Active_Tool ( );
     Update_Cartesian_Pose ( );
     m_status_text->SetLabel (
@@ -873,6 +900,14 @@ void Robot_Model_Panel::Show_Model_Configuration (wxWindow* parent)
   }
 }
 
+void Robot_Model_Panel::Refresh_Template_Configuration ( )
+{
+  if( m_point_cloud_overlay_toolbar )
+  {
+    m_point_cloud_overlay_toolbar->Refresh_Template_Configuration ( );
+  }
+}
+
 void Robot_Model_Panel::On_Add_Trajectory_Point (wxCommandEvent&)
 {
   if( Is_Trajectory_Active ( ) || m_current_model_id.empty ( ) || !m_view )
@@ -886,8 +921,10 @@ void Robot_Model_Panel::On_Add_Trajectory_Point (wxCommandEvent&)
   std::string point_cloud_path;
   std::string point_cloud_name;
   robot_model::Tool_Coordinate_Profile coordinate;
+  robot_model::Template_Profile template_profile;
   if( !Capture_Current_Teach_Bindings (
-        &point_cloud_path, &point_cloud_name, &coordinate) ) return;
+        &point_cloud_path, &point_cloud_name, &coordinate,
+        &template_profile) ) return;
   const auto& point = m_teach_point_store.Add_Point (
     m_current_model_id,
     joint_angles,
@@ -897,9 +934,12 @@ void Robot_Model_Panel::On_Add_Trajectory_Point (wxCommandEvent&)
     coordinate.name,
     coordinate.flange_from_tool_pose,
     point_cloud_name,
-    m_teach_point_command_panel
+      m_teach_point_command_panel
       ? m_teach_point_command_panel->Selected_Point_Type ( )
-      : robot_model::Robot_Teach_Point_Type::Motion);
+      : robot_model::Robot_Teach_Point_Type::Motion,
+    template_profile.id,
+    template_profile.name,
+    template_profile.reference_pose);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
   if( m_teach_point_list_panel )
@@ -928,8 +968,10 @@ void Robot_Model_Panel::On_Update_Teach_Point (wxCommandEvent&)
   std::string point_cloud_path;
   std::string point_cloud_name;
   robot_model::Tool_Coordinate_Profile coordinate;
+  robot_model::Template_Profile template_profile;
   if( !Capture_Current_Teach_Bindings (
-        &point_cloud_path, &point_cloud_name, &coordinate) ) return;
+        &point_cloud_path, &point_cloud_name, &coordinate,
+        &template_profile) ) return;
   if( !m_teach_point_store.Update_Point (
         m_current_model_id,
         static_cast<std::size_t> (selection),
@@ -942,7 +984,10 @@ void Robot_Model_Panel::On_Update_Teach_Point (wxCommandEvent&)
         point_cloud_name,
         m_teach_point_command_panel
           ? m_teach_point_command_panel->Selected_Point_Type ( )
-          : robot_model::Robot_Teach_Point_Type::Motion) )
+          : robot_model::Robot_Teach_Point_Type::Motion,
+        template_profile.id,
+        template_profile.name,
+        template_profile.reference_pose) )
   {
     return;
   }
@@ -966,8 +1011,10 @@ void Robot_Model_Panel::On_Insert_Teach_Point (bool before)
   std::string point_cloud_path;
   std::string point_cloud_name;
   robot_model::Tool_Coordinate_Profile coordinate;
+  robot_model::Template_Profile template_profile;
   if( !Capture_Current_Teach_Bindings (
-        &point_cloud_path, &point_cloud_name, &coordinate) ) return;
+        &point_cloud_path, &point_cloud_name, &coordinate,
+        &template_profile) ) return;
   const std::size_t insertion_index =
     static_cast<std::size_t> (selection) + (before ? 0 : 1);
   const auto& point = m_teach_point_store.Insert_Point (
@@ -980,9 +1027,12 @@ void Robot_Model_Panel::On_Insert_Teach_Point (bool before)
     coordinate.name,
     coordinate.flange_from_tool_pose,
     point_cloud_name,
-    m_teach_point_command_panel
+      m_teach_point_command_panel
       ? m_teach_point_command_panel->Selected_Point_Type ( )
-      : robot_model::Robot_Teach_Point_Type::Motion);
+      : robot_model::Robot_Teach_Point_Type::Motion,
+    template_profile.id,
+    template_profile.name,
+    template_profile.reference_pose);
   const std::size_t point_id = point.id;
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
@@ -1238,6 +1288,7 @@ void Robot_Model_Panel::On_Load_Trajectory (wxCommandEvent&)
 
   m_teach_point_store.Replace_Points (
     m_current_model_id, progress.points);
+  Invalidate_Completed_Progress ( );
   m_last_progress_directory =
     wxFileName (dialog.GetPath ( )).GetPath ( );
   Sync_Trajectory_From_Teach_Points ( );
@@ -1254,6 +1305,115 @@ void Robot_Model_Panel::On_Load_Trajectory (wxCommandEvent&)
   {
     m_status_text->SetLabel (
       wxString::FromUTF8 (u8"Progress 已加载"));
+  }
+}
+
+void Robot_Model_Panel::On_Complete_Progress ( )
+{
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( points.empty ( ) || !m_flow_panel || !m_right_tool_panel )
+  {
+    return;
+  }
+
+  robot_model::Template_Configuration templates;
+  std::string configuration_error;
+  if( !robot_model::Load_Template_Configuration (
+        robot_model::Template_Configuration_Path ( ),
+        &templates,
+        &configuration_error) )
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (configuration_error.c_str ( )),
+      wxString::FromUTF8 (u8"Progress 检查失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  std::unordered_map<std::string, std::string> cloud_templates;
+  auto fail = [this] (const robot_model::Robot_Teach_Point& point,
+                      const wxString& reason)
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (
+        robot_model::Format_Teach_Point_Name (point.id).c_str ( )) +
+        wxString::FromUTF8 (u8"：") + reason,
+      wxString::FromUTF8 (u8"Progress 检查失败"),
+      wxOK | wxICON_WARNING,
+      this);
+  };
+
+  for( const auto& point : points )
+  {
+    if( point.point_cloud_path.empty ( ) )
+    {
+      fail (point, wxString::FromUTF8 (u8"没有绑定点云"));
+      return;
+    }
+    if( !point.has_template || point.template_id.empty ( ) )
+    {
+      fail (point, wxString::FromUTF8 (u8"点云没有绑定模板"));
+      return;
+    }
+    const auto* template_profile = robot_model::Find_Template_Profile (
+      templates, point.template_id);
+    if( !template_profile )
+    {
+      fail (point, wxString::FromUTF8 (
+        u8"绑定的模板已不存在，请重新绑定"));
+      return;
+    }
+    for( std::size_t index = 0; index < 6; ++index )
+    {
+      if( !std::isfinite (point.template_reference_pose[index]) ||
+          std::abs (
+            point.template_reference_pose[index] -
+            template_profile->reference_pose[index]) > 1.0e-9 )
+      {
+        fail (point, wxString::FromUTF8 (
+          u8"模板参考点已变化，请重新绑定该点云模板"));
+        return;
+      }
+    }
+    const auto cloud_binding = cloud_templates.emplace (
+      point.point_cloud_path, point.template_id);
+    if( !cloud_binding.second &&
+        cloud_binding.first->second != point.template_id )
+    {
+      fail (point, wxString::FromUTF8 (
+        u8"同一点云存在不同模板，请重新绑定"));
+      return;
+    }
+    if( !point.has_coordinate_frame ||
+        point.coordinate_frame_id.empty ( ) ||
+        !robot_model::Find_Tool_Coordinate (
+          m_tool_configuration, point.coordinate_frame_id) )
+    {
+      fail (point, wxString::FromUTF8 (
+        u8"坐标系无效或已被删除"));
+      return;
+    }
+    if( !point.has_world_pose ||
+        !std::all_of (
+          point.world_pose.begin ( ),
+          point.world_pose.end ( ),
+          [] (double value) { return std::isfinite (value); }) )
+    {
+      fail (point, wxString::FromUTF8 (u8"示教位姿无效"));
+      return;
+    }
+  }
+
+  m_flow_panel->Set_Progress_Points (points);
+  m_right_tool_panel->Set_Flow_Tool_Enabled (true);
+  m_progress_completed = true;
+  if( m_status_text )
+  {
+    m_status_text->SetLabel (wxString::Format (
+      wxString::FromUTF8 (
+        u8"Progress 检查完成：%zu 个点，流程选项卡已使能"),
+      points.size ( )));
   }
 }
 
@@ -1623,6 +1783,8 @@ wxPanel* Robot_Model_Panel::Build_Teach_Tool_Page (wxWindow* parent)
     [this] { wxCommandEvent event; On_Save_Trajectory (event); };
   edit_callbacks.load =
     [this] { wxCommandEvent event; On_Load_Trajectory (event); };
+  edit_callbacks.complete =
+    [this] { On_Complete_Progress ( ); };
   m_teach_point_command_panel->Set_Callbacks (
     std::move (edit_callbacks));
 
@@ -2014,6 +2176,11 @@ void Robot_Model_Panel::Update_Trajectory_Point_List ( )
     {
       cloud_names.push_back (wxString::FromUTF8 (u8"未绑定点云"));
     }
+    cloud_names.back ( ) += wxString::FromUTF8 (u8" · ");
+    cloud_names.back ( ) += point.has_template &&
+      !point.template_name.empty ( )
+        ? wxString::FromUTF8 (point.template_name.c_str ( ))
+        : wxString::FromUTF8 (u8"未绑定模板");
     cloud_keys.push_back (
       point.point_cloud_path.empty ( )
         ? std::string ("__unbound__")
@@ -2036,6 +2203,7 @@ void Robot_Model_Panel::Update_Teach_Point_Details ( )
       wxString::FromUTF8 (u8"未选择"),
       wxString::FromUTF8 (u8"未选择"),
       wxString::FromUTF8 (u8"未选择"),
+      wxString::FromUTF8 (u8"未选择"),
       robot_model::Robot_Teach_Point_Type::Motion,
       false);
     m_teach_point_list_panel->Set_Point_Pose ({ }, false);
@@ -2044,6 +2212,7 @@ void Robot_Model_Panel::Update_Teach_Point_Details ( )
   if( selections.size ( ) > 1 )
   {
     m_teach_point_list_panel->Set_Point_Details (
+      wxString::FromUTF8 (u8"多个"),
       wxString::FromUTF8 (u8"多个"),
       wxString::FromUTF8 (u8"多个"),
       wxString::FromUTF8 (u8"多个"),
@@ -2059,6 +2228,7 @@ void Robot_Model_Panel::Update_Teach_Point_Details ( )
       static_cast<std::size_t> (selection) >= points.size ( ) )
   {
     m_teach_point_list_panel->Set_Point_Details (
+      wxString::FromUTF8 (u8"未选择"),
       wxString::FromUTF8 (u8"未选择"),
       wxString::FromUTF8 (u8"未选择"),
       wxString::FromUTF8 (u8"未选择"),
@@ -2095,10 +2265,25 @@ void Robot_Model_Panel::Update_Teach_Point_Details ( )
     teach_point_type_label (point.type),
     coordinate,
     cloud,
+    point.has_template && !point.template_name.empty ( )
+      ? wxString::FromUTF8 (point.template_name.c_str ( ))
+      : wxString::FromUTF8 (u8"未绑定"),
     point.type,
     true);
+  robot_model::XyzabcPose display_pose = point.world_pose;
+  bool has_display_pose = point.has_world_pose;
+  const auto* display_coordinate = robot_model::Find_Tool_Coordinate (
+    m_tool_configuration,
+    m_teach_pose_coordinate_id);
+  if( has_display_pose && display_coordinate )
+  {
+    display_pose = robot_model::Build_Xyzabc_From_Zyx_Matrix (
+      robot_model::Build_World_From_Tool (
+        robot_model::Build_Zyx_Pose_Matrix (point.world_pose),
+        *display_coordinate));
+  }
   m_teach_point_list_panel->Set_Point_Pose (
-    point.world_pose, point.has_world_pose);
+    display_pose, has_display_pose);
 }
 
 void Robot_Model_Panel::On_Teach_Point_Selection_Changed ( )
@@ -2111,6 +2296,169 @@ void Robot_Model_Panel::On_Teach_Point_Selection_Changed ( )
   {
     Apply_Teach_Point_Bindings (
       static_cast<std::size_t> (selection));
+  }
+}
+
+void Robot_Model_Panel::On_Teach_Pose_Coordinate_Changed (
+  int selection)
+{
+  if( selection < 0 ||
+      static_cast<std::size_t> (selection) >=
+        m_tool_configuration.tools.size ( ) )
+  {
+    return;
+  }
+  m_teach_pose_coordinate_id =
+    m_tool_configuration.tools[static_cast<std::size_t> (selection)].id;
+  Update_Teach_Point_Details ( );
+}
+
+void Robot_Model_Panel::Bind_Template_To_Teach_Point_Cloud (
+  std::size_t point_index)
+{
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( point_index >= points.size ( ) ||
+      points[point_index].point_cloud_path.empty ( ) ||
+      !m_point_cloud_overlay_toolbar )
+  {
+    return;
+  }
+
+  robot_model::Template_Configuration configuration;
+  std::string error_message;
+  if( !robot_model::Load_Template_Configuration (
+        robot_model::Template_Configuration_Path ( ),
+        &configuration,
+        &error_message) )
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (error_message.c_str ( )),
+      wxString::FromUTF8 (u8"模板配置加载失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+  if( configuration.templates.empty ( ) )
+  {
+    wxMessageBox (
+      wxString::FromUTF8 (u8"还没有可用模板，请先在设置中创建模板。"),
+      wxString::FromUTF8 (u8"绑定模板"),
+      wxOK | wxICON_INFORMATION,
+      this);
+    return;
+  }
+
+  wxArrayString choices;
+  int current_selection = 0;
+  for( std::size_t index = 0;
+       index < configuration.templates.size ( );
+       ++index )
+  {
+    choices.Add (wxString::FromUTF8 (
+      configuration.templates[index].name.c_str ( )));
+    if( points[point_index].has_template &&
+        points[point_index].template_id ==
+          configuration.templates[index].id )
+    {
+      current_selection = static_cast<int> (index);
+    }
+  }
+  wxSingleChoiceDialog dialog (
+    this,
+    wxString::FromUTF8 (u8"请选择当前点云要绑定的模板"),
+    wxString::FromUTF8 (u8"绑定模板"),
+    choices);
+  dialog.SetSelection (current_selection);
+  if( dialog.ShowModal ( ) != wxID_OK ||
+      dialog.GetSelection ( ) == wxNOT_FOUND )
+  {
+    return;
+  }
+
+  const auto& selected = configuration.templates[
+    static_cast<std::size_t> (dialog.GetSelection ( ))];
+  const std::string cloud_path = points[point_index].point_cloud_path;
+  const std::string cloud_name = points[point_index].point_cloud_name;
+  if( !m_point_cloud_overlay_toolbar->Bind_Point_Cloud_Template (
+        std::filesystem::u8path (cloud_path),
+        cloud_name,
+        selected,
+        &error_message) )
+  {
+    m_point_cloud_overlay_toolbar->Refresh_Template_Configuration ( );
+    wxMessageBox (
+      wxString::FromUTF8 (error_message.c_str ( )),
+      wxString::FromUTF8 (u8"模板绑定失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  const std::size_t updated =
+    m_teach_point_store.Apply_Template_To_Point_Cloud (
+      m_current_model_id,
+      cloud_path,
+      selected.id,
+      selected.name,
+      selected.reference_pose);
+  if( updated > 0 )
+  {
+    Set_Progress_Dirty (true);
+  }
+  Update_Trajectory_Point_List ( );
+  if( m_status_text )
+  {
+    m_status_text->SetLabel (
+      wxString::FromUTF8 (u8"点云已绑定模板：") +
+      wxString::FromUTF8 (selected.name.c_str ( )) +
+      wxString::Format (
+        wxString::FromUTF8 (u8"（已更新 %zu 个示教点）"),
+        updated));
+  }
+}
+
+void Robot_Model_Panel::Unbind_Template_From_Teach_Point_Cloud (
+  std::size_t point_index)
+{
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( point_index >= points.size ( ) ||
+      points[point_index].point_cloud_path.empty ( ) ||
+      !m_point_cloud_overlay_toolbar )
+  {
+    return;
+  }
+  const std::string cloud_path = points[point_index].point_cloud_path;
+  std::string error_message;
+  if( !m_point_cloud_overlay_toolbar->Unbind_Point_Cloud_Template (
+        std::filesystem::u8path (cloud_path), &error_message) )
+  {
+    m_point_cloud_overlay_toolbar->Refresh_Template_Configuration ( );
+    wxMessageBox (
+      wxString::FromUTF8 (error_message.c_str ( )),
+      wxString::FromUTF8 (u8"模板解绑失败"),
+      wxOK | wxICON_ERROR,
+      this);
+    return;
+  }
+
+  const std::size_t updated =
+    m_teach_point_store.Apply_Template_To_Point_Cloud (
+      m_current_model_id,
+      cloud_path,
+      { },
+      { },
+      { });
+  if( updated > 0 )
+  {
+    Set_Progress_Dirty (true);
+  }
+  Update_Trajectory_Point_List ( );
+  if( m_status_text )
+  {
+    m_status_text->SetLabel (wxString::Format (
+      wxString::FromUTF8 (
+        u8"点云已解绑模板，已清除 %zu 个示教点的模板关系"),
+      updated));
   }
 }
 
@@ -2233,9 +2581,11 @@ bool Robot_Model_Panel::Read_Current_Teach_Point (
 bool Robot_Model_Panel::Capture_Current_Teach_Bindings (
   std::string* point_cloud_path,
   std::string* point_cloud_name,
-  robot_model::Tool_Coordinate_Profile* coordinate)
+  robot_model::Tool_Coordinate_Profile* coordinate,
+  robot_model::Template_Profile* template_profile)
 {
   if( !point_cloud_path || !point_cloud_name || !coordinate ||
+      !template_profile ||
       !m_point_cloud_overlay_toolbar ||
       !m_point_cloud_overlay_toolbar->Has_Point_Cloud ( ) )
   {
@@ -2263,6 +2613,19 @@ bool Robot_Model_Panel::Capture_Current_Teach_Bindings (
 
   *point_cloud_path = bound_path.u8string ( );
   *coordinate = Interaction_Tool ( );
+  *template_profile = { };
+  bool has_template_binding = false;
+  if( !m_point_cloud_overlay_toolbar->Current_Template_Profile (
+        template_profile, &has_template_binding) &&
+      has_template_binding )
+  {
+    if( m_status_text )
+    {
+      m_status_text->SetLabel (wxString::FromUTF8 (
+        u8"当前点云绑定的模板已被删除，请重新绑定模板"));
+    }
+    return false;
+  }
   return true;
 }
 
@@ -2271,6 +2634,7 @@ void Robot_Model_Panel::Set_Progress_Dirty (bool dirty)
   if( m_current_model_id.empty ( ) ) return;
   if( dirty )
   {
+    Invalidate_Completed_Progress ( );
     m_dirty_progress_models.insert (m_current_model_id);
   }
   else
@@ -2280,6 +2644,20 @@ void Robot_Model_Panel::Set_Progress_Dirty (bool dirty)
   if( m_teach_point_list_panel )
   {
     m_teach_point_list_panel->Set_Dirty (dirty);
+  }
+}
+
+void Robot_Model_Panel::Invalidate_Completed_Progress ( )
+{
+  if( !m_progress_completed ) return;
+  m_progress_completed = false;
+  if( m_flow_panel )
+  {
+    m_flow_panel->Clear_Progress_Points ( );
+  }
+  if( m_right_tool_panel )
+  {
+    m_right_tool_panel->Set_Flow_Tool_Enabled (false);
   }
 }
 
@@ -2458,11 +2836,41 @@ void Robot_Model_Panel::Refresh_Interaction_Coordinate_Choices ( )
   }
 }
 
+void Robot_Model_Panel::Refresh_Teach_Pose_Coordinate_Choices ( )
+{
+  if( !robot_model::Find_Tool_Coordinate (
+        m_tool_configuration,
+        m_teach_pose_coordinate_id) )
+  {
+    m_teach_pose_coordinate_id = m_tool_configuration.active_tool_id;
+  }
+  if( !m_teach_point_list_panel ) return;
+
+  std::vector<wxString> names;
+  names.reserve (m_tool_configuration.tools.size ( ));
+  int selection = wxNOT_FOUND;
+  for( std::size_t index = 0;
+       index < m_tool_configuration.tools.size ( );
+       ++index )
+  {
+    const auto& tool = m_tool_configuration.tools[index];
+    names.push_back (wxString::FromUTF8 (tool.name.c_str ( )));
+    if( tool.id == m_teach_pose_coordinate_id )
+    {
+      selection = static_cast<int> (index);
+    }
+  }
+  m_teach_point_list_panel->Set_Pose_Coordinate_Choices (
+    names, selection);
+  Update_Teach_Point_Details ( );
+}
+
 void Robot_Model_Panel::Apply_Active_Tool ( )
 {
   robot_model::Normalize_Tool_Coordinate_Configuration (
     &m_tool_configuration);
   Refresh_Interaction_Coordinate_Choices ( );
+  Refresh_Teach_Pose_Coordinate_Choices ( );
   const auto& tool = Active_Tool ( );
   if( m_view )
   {
@@ -2476,6 +2884,10 @@ void Robot_Model_Panel::Apply_Active_Tool ( )
   if( m_tool_panel )
   {
     m_tool_panel->Set_Tool_Coordinates (m_tool_configuration);
+  }
+  if( m_flow_panel )
+  {
+    m_flow_panel->Set_Tool_Coordinates (m_tool_configuration);
   }
   Apply_Tool_Visualization ( );
 }
@@ -2572,6 +2984,8 @@ bool Robot_Model_Panel::Load_Model (
   {
     return false;
   }
+
+  Invalidate_Completed_Progress ( );
 
   if( Is_Trajectory_Active ( ) )
   {

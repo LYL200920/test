@@ -27,6 +27,7 @@ public:
   wxWindow* Page_Parent (Right_Tool_Page page) const;
   void Add_Page (Right_Tool_Page page, wxWindow* window);
   void Set_Camera_Tool_Enabled (bool enabled);
+  void Set_Flow_Tool_Enabled (bool enabled);
   void Set_Robot_Tool_Enabled (bool enabled);
   void Set_On_Width_Changed (
     std::function<void (int)> callback);
@@ -60,6 +61,7 @@ private:
   bool m_robot_expanded = false;
   bool m_right_expanded = false;
   bool m_camera_tool_enabled = false;
+  bool m_flow_tool_enabled = false;
   bool m_robot_tool_enabled = false;
   std::function<void (int)> m_on_width_changed;
 };

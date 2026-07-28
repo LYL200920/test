@@ -3,13 +3,19 @@
 #include "camera_config_dialog.h"
 #include "camera_service.h"
 #include "robot_model_panel.h"
+#include "template_configuration_repository.h"
+#include "template_settings_dialog.h"
+
+#include <filesystem>
+#include <string>
 
 namespace
 {
   enum
   {
     ID_3D_CAMERA_CONFIG = wxID_HIGHEST + 1,
-    ID_ROBOT_MODEL_CONFIG
+    ID_ROBOT_MODEL_CONFIG,
+    ID_TEMPLATE_CONFIG
   };
 }
 
@@ -52,11 +58,15 @@ private:
                           wxString::FromUTF8(u8"3D相机配置...\tCtrl+Shift+C"));
     settings_menu->Append(ID_ROBOT_MODEL_CONFIG,
                           wxString::FromUTF8(u8"机械臂配置...\tCtrl+Shift+R"));
+    settings_menu->Append(
+      ID_TEMPLATE_CONFIG,
+      wxString::FromUTF8(u8"模板配置...\tCtrl+Shift+T"));
     menu_bar->Append(settings_menu, wxString::FromUTF8(u8"设置"));
     SetMenuBar(menu_bar);
 
     Bind(wxEVT_MENU, &Test_Frame::On_3D_Camera_Config, this, ID_3D_CAMERA_CONFIG);
     Bind(wxEVT_MENU, &Test_Frame::On_Robot_Model_Config, this, ID_ROBOT_MODEL_CONFIG);
+    Bind(wxEVT_MENU, &Test_Frame::On_Template_Config, this, ID_TEMPLATE_CONFIG);
   }
 
   void On_3D_Camera_Config(wxCommandEvent &)
@@ -70,6 +80,44 @@ private:
     if (m_model_panel)
     {
       m_model_panel->Show_Model_Configuration(this);
+    }
+  }
+
+  void On_Template_Config(wxCommandEvent &)
+  {
+    robot_model::Template_Configuration configuration;
+    std::string error_message;
+    const std::filesystem::path path =
+      robot_model::Template_Configuration_Path();
+    if (!robot_model::Load_Template_Configuration(
+          path, &configuration, &error_message))
+    {
+      wxMessageBox(
+        wxString::FromUTF8(error_message.c_str()),
+        wxString::FromUTF8(u8"模板配置加载失败"),
+        wxOK | wxICON_ERROR,
+        this);
+      return;
+    }
+
+    Template_Settings_Dialog dialog(this, configuration);
+    if (dialog.ShowModal() != wxID_OK)
+    {
+      return;
+    }
+    if (!robot_model::Save_Template_Configuration(
+          path, dialog.Configuration(), &error_message))
+    {
+      wxMessageBox(
+        wxString::FromUTF8(error_message.c_str()),
+        wxString::FromUTF8(u8"模板配置保存失败"),
+        wxOK | wxICON_ERROR,
+        this);
+      return;
+    }
+    if (m_model_panel)
+    {
+      m_model_panel->Refresh_Template_Configuration();
     }
   }
 

@@ -1,6 +1,7 @@
 #include "flow_panel.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/datetime.h>
 #include <wx/file.h>
@@ -10,8 +11,7 @@
 #include <wx/stattext.h>
 #include <wx/stdpaths.h>
 
-#include "pose_point_io.h"
-#include "robot_model_repository.h"
+#include "progress_flow_transform.h"
 
 #include <array>
 #include <cmath>
@@ -37,36 +37,12 @@ const char HIK_PACKET_TERM = ';';
 
 const wxString FLOW_CONFIG_SECTION = "/Flow";
 const wxString FLOW_CONFIG_KEY = "last_message";
-const std::array<const char*, 6> REFERENCE_POSE_KEYS = {
-  "reference_x", "reference_y", "reference_z",
-  "reference_a", "reference_b", "reference_c"
-};
-const std::array<const char*, 6> REFERENCE_POSE_LABELS = {
-  "X:", "Y:", "Z:", "A:", "B:", "C:"
-};
-
+const wxString FLOW_CONFIG_COORDINATE_KEY = "coordinate_id";
 wxString Trim_Value (wxString value)
 {
   value.Trim (true);
   value.Trim (false);
   return value;
-}
-
-bool Try_Parse_Double (const wxString& value, double* parsed)
-{
-  if( parsed == nullptr )
-    return false;
-
-  wxString trimmed = Trim_Value(value);
-  if( trimmed.IsEmpty ( ) )
-    return false;
-
-  double value_double = 0.0;
-  if( !trimmed.ToDouble (&value_double) || !std::isfinite (value_double) )
-    return false;
-
-  *parsed = value_double;
-  return true;
 }
 
 wxString Format_Transform_Log (const robot_model::XyzabcPose& reference_pose,
@@ -83,23 +59,25 @@ wxString Format_Transform_Log (const robot_model::XyzabcPose& reference_pose,
 }
 
 wxString Format_Transformed_Points_Log (
-  const std::vector<robot_model::XyzabcPose>& points,
-  const robot_model::Matrix4& transform)
+  const std::vector<robot_model::Robot_Teach_Point>& points,
+  const std::vector<robot_model::XyzabcPose>& source,
+  const std::vector<robot_model::XyzabcPose>& transformed)
 {
-  if( points.empty ( ) )
+  if( points.empty ( ) ||
+      points.size ( ) != source.size ( ) ||
+      points.size ( ) != transformed.size ( ) )
   {
-    return wxString::FromUTF8(u8"point.txt 中没有待转换点");
+    return wxString::FromUTF8(u8"没有可输出的转换示教点");
   }
 
   std::ostringstream out;
-  out << "transformed points from point.txt (line 2+), rot=ZYX\n";
+  out << "transformed Progress points, rot=ZYX\n";
   for( size_t i = 0; i < points.size ( ); ++i )
   {
-    const robot_model::XyzabcPose transformed =
-      robot_model::Transform_Xyzabc_Pose (transform, points[i]);
-    out << "line " << ( i + 2 ) << " "
-        << robot_model::Format_Xyzabc_Pose (points[i])
-        << " -> " << robot_model::Format_Xyzabc_Pose (transformed);
+    out << robot_model::Format_Teach_Point_Name (points[i].id)
+        << " [" << points[i].template_name << "] "
+        << robot_model::Format_Xyzabc_Pose (source[i])
+        << " -> " << robot_model::Format_Xyzabc_Pose (transformed[i]);
     if( i + 1 < points.size ( ) )
     {
       out << "\n";
@@ -109,17 +87,14 @@ wxString Format_Transformed_Points_Log (
 }
 
 wxString Format_Transformed_Points_For_KUKA (
-  const std::vector<robot_model::XyzabcPose>& points,
-  const robot_model::Matrix4& transform)
+  const std::vector<robot_model::XyzabcPose>& points)
 {
   wxString body;
   for( const auto& point : points )
   {
-    const robot_model::XyzabcPose transformed =
-      robot_model::Transform_Xyzabc_Pose (transform, point);
     body += ",";
     body += wxString::FromUTF8(
-      robot_model::Format_Xyzabc_Pose_Csv (transformed));
+      robot_model::Format_Xyzabc_Pose_Csv (point));
   }
   return body;
 }
@@ -151,9 +126,11 @@ wxBEGIN_EVENT_TABLE(Flow_Panel, wxPanel)
                         EVT_TIMER(ID_WAIT_TIMER, Flow_Panel::On_Timeout)
                             wxEND_EVENT_TABLE()
 
-                                Flow_Panel::Flow_Panel(wxWindow *parent, wxWindowID id)
+Flow_Panel::Flow_Panel(wxWindow *parent, wxWindowID id)
     : wxPanel(parent, id)
 {
+  m_tool_coordinates =
+    robot_model::Default_Tool_Coordinate_Configuration();
   // 端点初始化
   m_hik.name = HIK_NAME;
   m_hik.default_ip = HIK_DEFAULT_IP;
@@ -214,18 +191,63 @@ Flow_Panel::~Flow_Panel()
   DeletePendingEvents();
 }
 
+void Flow_Panel::Set_Progress_Points(
+  const std::vector<robot_model::Robot_Teach_Point>& points)
+{
+  m_progress_points = points;
+  std::vector<robot_model::Progress_Template_Reference> references;
+  std::string error_message;
+  if( robot_model::Collect_Progress_Template_References(
+        m_progress_points, &references, &error_message) )
+  {
+    wxString order;
+    for( std::size_t index = 0; index < references.size(); ++index )
+    {
+      if( index > 0 ) order += " -> ";
+      order += wxString::FromUTF8(references[index].name.c_str());
+    }
+    Append_Log(
+      "[i PROGRESS]",
+      wxString::Format(
+        wxString::FromUTF8(u8"已接收 %zu 个示教点；HIK 模板顺序：%s"),
+        m_progress_points.size(),
+        order.c_str()));
+  }
+  Update_Run_Button_State();
+}
+
+void Flow_Panel::Clear_Progress_Points()
+{
+  m_progress_points.clear();
+  Stop_Wait_Timer();
+  if( m_step != Flow_Step::Idle )
+  {
+    Set_Step(Flow_Step::Idle);
+  }
+  Update_Run_Button_State();
+}
+
+void Flow_Panel::Set_Tool_Coordinates(
+  const robot_model::Tool_Coordinate_Configuration& configuration)
+{
+  m_tool_coordinates = configuration;
+  robot_model::Normalize_Tool_Coordinate_Configuration(
+    &m_tool_coordinates);
+  if( !robot_model::Find_Tool_Coordinate(
+        m_tool_coordinates, m_flow_coordinate_id) )
+  {
+    m_flow_coordinate_id = m_tool_coordinates.active_tool_id;
+  }
+  Refresh_Coordinate_Choice();
+  Update_Run_Button_State();
+}
+
 void Flow_Panel::Build_Ui()
 {
   const wxString exe_dir =
     wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
   m_config_path = exe_dir + "/vtk_flow_config.ini";
-  const auto robot_root = robot_model::Find_Robot_Root ( );
-  m_point_file_path = robot_root.empty ( )
-    ? wxString ( )
-    : wxString (robot_root.wstring ( )) + "/point.txt";
-
   const wxString last_msg = Load_Config();
-  Load_Point_File();
 
   auto* sizer = new wxBoxSizer(wxVERTICAL);
 
@@ -270,35 +292,45 @@ void Flow_Panel::Build_Ui()
     sizer->Add(ep.status_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
   };
 
-  auto build_reference_pose = [this, sizer]() {
-    auto* title = new wxStaticText(
-      this, wxID_ANY,
-      wxString::FromUTF8(u8"参考点设置（XYZABC 输入，姿态按 ZYX 旋转）"));
-    wxFont tf = title->GetFont();
-    tf.MakeBold();
-    title->SetFont(tf);
-
-    auto* grid = new wxFlexGridSizer(3, 4, 4, 6);
-    for (std::size_t i = 0; i < m_reference_pose_inputs.size(); ++i)
-    {
-      auto* label = new wxStaticText(this, wxID_ANY, REFERENCE_POSE_LABELS[i]);
-      m_reference_pose_inputs[i] = new wxTextCtrl(
-        this, wxID_ANY,
-        wxString::Format("%.6f", m_reference_pose_values[i]));
-      m_reference_pose_inputs[i]->SetMinSize(wxSize(70, -1));
-      grid->Add(label, 0, wxALIGN_CENTER_VERTICAL);
-      grid->Add(m_reference_pose_inputs[i], 1, wxEXPAND);
-    }
-    grid->AddGrowableCol(1, 1);
-    grid->AddGrowableCol(3, 1);
-
-    sizer->Add(title, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
-    sizer->Add(grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-  };
-
   build_endpoint(m_hik);
   build_endpoint(m_kuka);
-  build_reference_pose();
+
+  auto* coordinate_row = new wxBoxSizer(wxHORIZONTAL);
+  coordinate_row->Add(
+    new wxStaticText(
+      this, wxID_ANY, wxString::FromUTF8(u8"运算/下发坐标系")),
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+  m_coordinate_choice = new wxChoice(this, wxID_ANY);
+  coordinate_row->Add(m_coordinate_choice, 1, wxEXPAND);
+  m_coordinate_choice->Bind(
+    wxEVT_CHOICE,
+    [this](wxCommandEvent &)
+    {
+      const int selection = m_coordinate_choice->GetSelection();
+      if( selection < 0 ||
+          static_cast<std::size_t>(selection) >=
+            m_tool_coordinates.tools.size() )
+      {
+        return;
+      }
+      m_flow_coordinate_id =
+        m_tool_coordinates.tools[
+          static_cast<std::size_t>(selection)].id;
+      Save_Config();
+      Append_Log(
+        "[i COORD]",
+        wxString::FromUTF8(u8"流程坐标系：") +
+          wxString::FromUTF8(
+            m_tool_coordinates.tools[
+              static_cast<std::size_t>(selection)].name.c_str()));
+      Update_Run_Button_State();
+    });
+  sizer->Add(
+    coordinate_row,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxTOP | wxBOTTOM,
+    8);
+  Refresh_Coordinate_Choice();
 
   // ---- 发送内容 + 运行控制 ----
   auto* input_label = new wxStaticText(this, wxID_ANY,
@@ -319,6 +351,13 @@ void Flow_Panel::Build_Ui()
 
   sizer->Add(input_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
   sizer->Add(m_input, 0, wxEXPAND | wxLEFT | wxRIGHT, 8);
+  sizer->Add(
+    new wxStaticText(
+      this,
+      wxID_ANY,
+      wxString::FromUTF8(
+        u8"HIK 回复：按 Progress 模板首次出现顺序提供各模板 XYZABC")),
+    0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
   sizer->Add(btn_sizer, 0, wxEXPAND | wxALL, 8);
   sizer->Add(m_flow_status_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
@@ -345,55 +384,7 @@ void Flow_Panel::Build_Ui()
   sizer->Add(clear_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
   SetSizer(sizer);
-
-  if( m_point_file_loaded )
-  {
-    Append_Log("[i POINT]", m_point_file_status);
-  }
-  else if( !m_point_file_status.IsEmpty ( ) )
-  {
-    Append_Log("[E POINT]", m_point_file_status);
-  }
-}
-
-void Flow_Panel::Load_Point_File()
-{
-  m_point_file_loaded = false;
-  m_point_file_status.Clear ( );
-  m_points_to_transform.clear ( );
-
-  robot_model::Pose_Point_File point_file;
-  std::string error_message;
-  const std::filesystem::path path (m_point_file_path.ToStdWstring ( ));
-  if( !robot_model::Load_Pose_Point_File (path, &point_file, &error_message) )
-  {
-    m_point_file_status =
-      wxString::FromUTF8(error_message) + " " + m_point_file_path;
-    return;
-  }
-
-  Apply_Reference_Pose_To_Ui (point_file.default_pose);
-  m_points_to_transform = point_file.transform_points;
-  m_point_file_loaded = true;
-  const wxString default_pose_text = wxString::FromUTF8(
-    robot_model::Format_Xyzabc_Pose(point_file.default_pose));
-  m_point_file_status = wxString::Format(
-    wxString::FromUTF8(u8"point.txt 已加载：默认参考点 %s，待转换点 %llu 个"),
-    default_pose_text.c_str ( ),
-    static_cast<unsigned long long>(m_points_to_transform.size ( )));
-}
-
-void Flow_Panel::Apply_Reference_Pose_To_Ui(
-  const robot_model::XyzabcPose& pose)
-{
-  m_reference_pose_values = pose;
-  for( size_t i = 0; i < m_reference_pose_inputs.size ( ); ++i )
-  {
-    if( m_reference_pose_inputs[i] != nullptr )
-    {
-      m_reference_pose_inputs[i]->SetValue (wxString::Format("%.6f", pose[i]));
-    }
-  }
+  Update_Run_Button_State();
 }
 
 Flow_Panel::Flow_Endpoint* Flow_Panel::Find_Endpoint_By_Window(wxWindow* win)
@@ -481,12 +472,28 @@ void Flow_Panel::Update_Status(Flow_Endpoint& ep, bool connected, const std::str
     ep.status_label->SetLabel(wxString::FromUTF8(u8"状态：未连接"));
     Append_Log("[i " + ep.name + "]", wxString::FromUTF8(info));
   }
+  Update_Run_Button_State();
 }
 
 void Flow_Panel::On_Run_Click(wxCommandEvent&)
 {
   if (m_step == Flow_Step::Step1_Wait_Recv1 || m_step == Flow_Step::Step3_Wait_Recv2)
     return;
+
+  if( m_progress_points.empty() )
+  {
+    Append_Log("[E PROGRESS]", wxString::FromUTF8(
+      u8"Progress 尚未完成检查"));
+    Set_Step(Flow_Step::Error);
+    return;
+  }
+  if( !Selected_Flow_Coordinate() )
+  {
+    Append_Log("[E COORD]", wxString::FromUTF8(
+      u8"请选择有效的流程运算/下发坐标系"));
+    Set_Step(Flow_Step::Error);
+    return;
+  }
 
   if (!m_hik.client || !m_hik.client->is_connected())
   {
@@ -555,33 +562,8 @@ void Flow_Panel::Handle_HIK_Recv(const wxString& msg)
   // 始终打印收到的完整回复
   Append_Log("[HIK <]", msg);
 
-  robot_model::XyzabcPose reference_pose = { };
-  robot_model::XyzabcPose hik_pose = { };
-  robot_model::Matrix4 transform = { };
-  wxString transform_error_tag;
-  wxString transform_error_message;
-  const bool has_transform = Calculate_HIK_Reference_Transform(
-    msg,
-    &reference_pose,
-    &hik_pose,
-    &transform,
-    &transform_error_tag,
-    &transform_error_message);
-  if( has_transform )
-  {
-    Append_Log("[T REF]",
-               Format_Transform_Log(reference_pose, hik_pose, transform));
-    Append_Log("[P OUT]",
-               Format_Transformed_Points_Log(m_points_to_transform, transform));
-  }
-  else
-  {
-    Append_Log(transform_error_tag, transform_error_message);
-  }
-
   if (m_step == Flow_Step::Step1_Wait_Recv1)
   {
-    // ② 把完整 HIK 回复原样转发给 KUKA（KUKA 协议以 ';' 结尾）
     if (!m_kuka.client || !m_kuka.client->is_connected())
     {
       Append_Log("[E KUKA]", wxString::FromUTF8(u8"KUKA 未连接，无法转发"));
@@ -589,8 +571,16 @@ void Flow_Panel::Handle_HIK_Recv(const wxString& msg)
       return;
     }
 
-    const wxString kuka_body =
-      Build_KUKA_Forward_Body(msg, has_transform ? &transform : nullptr);
+    wxString kuka_body;
+    wxString transform_error;
+    if( !Build_Transformed_KUKA_Body(
+          msg, &kuka_body, &transform_error) )
+    {
+      Stop_Wait_Timer();
+      Append_Log("[E TRANSFORM]", transform_error);
+      Set_Step(Flow_Step::Error);
+      return;
+    }
     std::string fwd(kuka_body.mb_str(wxConvUTF8));
     fwd += ";";
     m_kuka.client->send(fwd);
@@ -666,8 +656,56 @@ void Flow_Panel::Set_Step(Flow_Step step)
 
   const bool running = (step == Flow_Step::Step1_Wait_Recv1 ||
                         step == Flow_Step::Step3_Wait_Recv2);
-  m_run_btn->Enable(!running);
   m_stop_btn->Enable(running);
+  if( m_coordinate_choice )
+  {
+    m_coordinate_choice->Enable(!running);
+  }
+  Update_Run_Button_State();
+}
+
+void Flow_Panel::Refresh_Coordinate_Choice()
+{
+  if( !m_coordinate_choice ) return;
+  m_coordinate_choice->Clear();
+  int selection = wxNOT_FOUND;
+  for( std::size_t index = 0;
+       index < m_tool_coordinates.tools.size();
+       ++index )
+  {
+    const auto& tool = m_tool_coordinates.tools[index];
+    m_coordinate_choice->Append(
+      wxString::FromUTF8(tool.name.c_str()));
+    if( tool.id == m_flow_coordinate_id )
+    {
+      selection = static_cast<int>(index);
+    }
+  }
+  if( selection != wxNOT_FOUND )
+  {
+    m_coordinate_choice->SetSelection(selection);
+  }
+}
+
+const robot_model::Tool_Coordinate_Profile *
+Flow_Panel::Selected_Flow_Coordinate() const
+{
+  return robot_model::Find_Tool_Coordinate(
+    m_tool_coordinates, m_flow_coordinate_id);
+}
+
+void Flow_Panel::Update_Run_Button_State()
+{
+  if( !m_run_btn ) return;
+  const bool running =
+    m_step == Flow_Step::Step1_Wait_Recv1 ||
+    m_step == Flow_Step::Step3_Wait_Recv2;
+  const bool connected =
+    m_hik.client && m_hik.client->is_connected() &&
+    m_kuka.client && m_kuka.client->is_connected();
+  m_run_btn->Enable(
+    !running && connected && !m_progress_points.empty() &&
+    Selected_Flow_Coordinate() != nullptr);
 }
 
 void Flow_Panel::Start_Wait_Timer()
@@ -717,95 +755,79 @@ void Flow_Panel::Append_Log(const wxString& tag, const wxString& msg)
   m_log->AppendText(line);
 }
 
-bool Flow_Panel::Read_Reference_Pose(robot_model::XyzabcPose* pose,
-                                     wxString* error_message) const
-{
-  if (pose == nullptr)
-    return false;
-
-  for (std::size_t i = 0; i < pose->size(); ++i)
-  {
-    if (m_reference_pose_inputs[i] == nullptr)
-    {
-      if (error_message != nullptr)
-        *error_message = wxString::FromUTF8(u8"参考点输入框未初始化");
-      return false;
-    }
-
-    const wxString value = Trim_Value(m_reference_pose_inputs[i]->GetValue());
-    double parsed = 0.0;
-    if (!Try_Parse_Double(value, &parsed))
-    {
-      if (error_message != nullptr)
-      {
-        *error_message = wxString::FromUTF8(u8"参考点 ") +
-                         wxString::FromUTF8(REFERENCE_POSE_LABELS[i]) +
-                         wxString::FromUTF8(u8" 输入无效：") + value;
-      }
-      return false;
-    }
-    (*pose)[i] = parsed;
-  }
-  return true;
-}
-
-bool Flow_Panel::Calculate_HIK_Reference_Transform(
-  const wxString& msg,
-  robot_model::XyzabcPose* reference_pose,
-  robot_model::XyzabcPose* hik_pose,
-  robot_model::Matrix4* transform,
-  wxString* error_tag,
-  wxString* error_message) const
-{
-  if( reference_pose == nullptr || hik_pose == nullptr || transform == nullptr )
-  {
-    if( error_tag != nullptr )
-      *error_tag = "[E REF]";
-    if( error_message != nullptr )
-      *error_message = wxString::FromUTF8(u8"转换矩阵输出参数无效");
-    return false;
-  }
-
-  wxString reference_error;
-  if (!Read_Reference_Pose(reference_pose, &reference_error))
-  {
-    if( error_tag != nullptr )
-      *error_tag = "[E REF]";
-    if( error_message != nullptr )
-      *error_message = reference_error;
-    return false;
-  }
-
-  std::string parse_error;
-  if (!robot_model::Parse_Xyzabc_Pose_Text(
-        std::string(msg.mb_str(wxConvUTF8)), hik_pose, &parse_error))
-  {
-    if( error_tag != nullptr )
-      *error_tag = "[E HIK]";
-    if( error_message != nullptr )
-    {
-      *error_message = wxString::FromUTF8(u8"HIK 位姿解析失败：") +
-                       wxString::FromUTF8(parse_error);
-    }
-    return false;
-  }
-
-  *transform =
-    robot_model::Build_Relative_Pose_Transform(*reference_pose, *hik_pose);
-  return true;
-}
-
-wxString Flow_Panel::Build_KUKA_Forward_Body(
+bool Flow_Panel::Build_Transformed_KUKA_Body(
   const wxString& hik_msg,
-  const robot_model::Matrix4* transform) const
+  wxString* body,
+  wxString* error_message)
 {
-  wxString body = hik_msg;
-  if( transform != nullptr )
+  if( !body )
   {
-    body += Format_Transformed_Points_For_KUKA(
-      m_points_to_transform, *transform);
+    if( error_message )
+      *error_message = wxString::FromUTF8(u8"KUKA 输出为空");
+    return false;
   }
-  return body;
+  std::vector<robot_model::Progress_Template_Reference> references;
+  std::string error;
+  if( !robot_model::Collect_Progress_Template_References(
+        m_progress_points, &references, &error) )
+  {
+    if( error_message ) *error_message = wxString::FromUTF8(error);
+    return false;
+  }
+  std::vector<robot_model::XyzabcPose> recognized_poses;
+  if( !robot_model::Parse_Xyzabc_Poses_Text(
+        std::string(hik_msg.mb_str(wxConvUTF8)),
+        references.size(),
+        &recognized_poses,
+        &error) )
+  {
+    if( error_message )
+      *error_message =
+        wxString::FromUTF8(u8"HIK 识别点解析失败：") +
+        wxString::FromUTF8(error);
+    return false;
+  }
+  std::vector<robot_model::XyzabcPose> transformed;
+  std::vector<robot_model::XyzabcPose> source_coordinate_poses;
+  std::vector<robot_model::Matrix4> transforms;
+  const auto* coordinate = Selected_Flow_Coordinate();
+  if( !coordinate )
+  {
+    if( error_message )
+      *error_message = wxString::FromUTF8(u8"流程坐标系无效");
+    return false;
+  }
+  if( !robot_model::Transform_Progress_Teach_Points_In_Coordinate(
+        m_progress_points,
+        recognized_poses,
+        coordinate->flange_from_tool_pose,
+        &transformed,
+        &source_coordinate_poses,
+        &transforms,
+        &error) )
+  {
+    if( error_message ) *error_message = wxString::FromUTF8(error);
+    return false;
+  }
+  for( std::size_t index = 0; index < references.size(); ++index )
+  {
+    Append_Log(
+      "[T " + wxString::FromUTF8(references[index].name.c_str()) + "]",
+      Format_Transform_Log(
+        references[index].reference_pose,
+        recognized_poses[index],
+        transforms[index]));
+  }
+  Append_Log(
+    "[P OUT]",
+    wxString::FromUTF8(u8"运算/下发坐标系：") +
+      wxString::FromUTF8(coordinate->name.c_str()) + "\n" +
+      Format_Transformed_Points_Log(
+        m_progress_points,
+        source_coordinate_poses,
+        transformed));
+  *body = hik_msg + Format_Transformed_Points_For_KUKA(transformed);
+  return true;
 }
 
 wxString Flow_Panel::Load_Config()
@@ -817,16 +839,11 @@ wxString Flow_Panel::Load_Config()
                         wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_RELATIVE_PATH);
     config.SetPath(FLOW_CONFIG_SECTION);
     config.Read(FLOW_CONFIG_KEY, &last_msg, wxEmptyString);
-    for (std::size_t i = 0; i < m_reference_pose_values.size(); ++i)
-    {
-      wxString value_text;
-      double parsed = 0.0;
-      if (config.Read(REFERENCE_POSE_KEYS[i], &value_text) &&
-          Try_Parse_Double(value_text, &parsed))
-      {
-        m_reference_pose_values[i] = parsed;
-      }
-    }
+    wxString coordinate_id;
+    config.Read(
+      FLOW_CONFIG_COORDINATE_KEY, &coordinate_id, wxEmptyString);
+    m_flow_coordinate_id =
+      std::string(coordinate_id.mb_str(wxConvUTF8));
   }
   return last_msg;
 }
@@ -843,17 +860,8 @@ void Flow_Panel::Save_Config()
                       wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_RELATIVE_PATH);
   config.SetPath(FLOW_CONFIG_SECTION);
   config.Write(FLOW_CONFIG_KEY, msg);
-  for (std::size_t i = 0; i < m_reference_pose_inputs.size(); ++i)
-  {
-    if (m_reference_pose_inputs[i] == nullptr)
-      continue;
-
-    double parsed = 0.0;
-    if (Try_Parse_Double(m_reference_pose_inputs[i]->GetValue(), &parsed))
-    {
-      m_reference_pose_values[i] = parsed;
-      config.Write(REFERENCE_POSE_KEYS[i], wxString::Format("%.12g", parsed));
-    }
-  }
+  config.Write(
+    FLOW_CONFIG_COORDINATE_KEY,
+    wxString::FromUTF8(m_flow_coordinate_id.c_str()));
   config.Flush();
 }

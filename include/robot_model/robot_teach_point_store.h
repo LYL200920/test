@@ -21,7 +21,10 @@ namespace robot_model
         const std::string &coordinate_frame_name = {},
         const XyzabcPose &flange_from_coordinate_pose = {},
         const std::string &point_cloud_name = {},
-        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion,
+        const std::string &template_id = {},
+        const std::string &template_name = {},
+        const XyzabcPose &template_reference_pose = {});
     const Robot_Teach_Point &Insert_Point(
         const std::string &robot_model_id,
         std::size_t index,
@@ -32,7 +35,10 @@ namespace robot_model
         const std::string &coordinate_frame_name = {},
         const XyzabcPose &flange_from_coordinate_pose = {},
         const std::string &point_cloud_name = {},
-        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion,
+        const std::string &template_id = {},
+        const std::string &template_name = {},
+        const XyzabcPose &template_reference_pose = {});
     bool Update_Point(
         const std::string &robot_model_id,
         std::size_t index,
@@ -43,7 +49,10 @@ namespace robot_model
         const std::string &coordinate_frame_name = {},
         const XyzabcPose &flange_from_coordinate_pose = {},
         const std::string &point_cloud_name = {},
-        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion);
+        Robot_Teach_Point_Type type = Robot_Teach_Point_Type::Motion,
+        const std::string &template_id = {},
+        const std::string &template_name = {},
+        const XyzabcPose &template_reference_pose = {});
 
     void Replace_Joint_Points(const std::string &robot_model_id, const std::vector<std::array<double, 6>> &joint_points);
     void Replace_Points(
@@ -54,6 +63,12 @@ namespace robot_model
         const std::string &robot_model_id,
         const std::vector<std::size_t> &indices);
     void Clear_Points(const std::string &robot_model_id);
+    std::size_t Apply_Template_To_Point_Cloud(
+        const std::string &robot_model_id,
+        const std::string &point_cloud_path,
+        const std::string &template_id,
+        const std::string &template_name,
+        const XyzabcPose &template_reference_pose);
 
     const std::vector<Robot_Teach_Point> &Points(const std::string &robot_model_id) const;
     std::size_t Point_Count(const std::string &robot_model_id) const;

@@ -2,26 +2,28 @@
 #define includeguard_flow_panel_h_includeguard
 
 #include "pose_transform.h"
+#include "robot_teach_point.h"
 #include "tcp_client.h"
+#include "tool_coordinate.h"
 
 #include <wx/panel.h>
 #include <wx/string.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
-#include <array>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 class wxButton;
+class wxChoice;
 class wxComboBox;
 class wxStaticText;
 
 // 流程编排面板：
 //   ① 向 HIK(Server1)发送用户编辑内容
-//   ② 收到 HIK 回复后，原样转发给 KUKA(Server2)
+//   ② 收到 HIK 回复后，按所选工具坐标系转换 Progress 并发送 KUKA(Server2)
 //   ③ 收到 KUKA 回复后，显示出来
 //
 // 本面板独立持有两条 TCP 连接，与 Net_Panel(TCP 工具栏)完全隔离、互不影响。
@@ -32,6 +34,11 @@ class Flow_Panel : public wxPanel
 public:
   explicit Flow_Panel(wxWindow *parent, wxWindowID id = wxID_ANY);
   ~Flow_Panel() override;
+  void Set_Progress_Points(
+    const std::vector<robot_model::Robot_Teach_Point> &points);
+  void Clear_Progress_Points();
+  void Set_Tool_Coordinates(
+    const robot_model::Tool_Coordinate_Configuration &configuration);
 
 private:
   // 流程编排中的两条连接端点
@@ -92,16 +99,14 @@ private:
   void Start_Wait_Timer();
   void Stop_Wait_Timer();
   void Append_Log(const wxString &tag, const wxString &msg);
-  bool Calculate_HIK_Reference_Transform(const wxString &msg,
-                                         robot_model::XyzabcPose *reference_pose,
-                                         robot_model::XyzabcPose *hik_pose,
-                                         robot_model::Matrix4 *transform,
-                                         wxString *error_tag,
-                                         wxString *error_message) const;
-  bool Read_Reference_Pose(robot_model::XyzabcPose *pose, wxString *error_message) const;
-  wxString Build_KUKA_Forward_Body(const wxString &hik_msg, const robot_model::Matrix4 *transform) const;
-  void Load_Point_File();
-  void Apply_Reference_Pose_To_Ui(const robot_model::XyzabcPose &pose);
+  bool Build_Transformed_KUKA_Body(
+    const wxString &hik_msg,
+    wxString *body,
+    wxString *error_message);
+  void Update_Run_Button_State();
+  void Refresh_Coordinate_Choice();
+  const robot_model::Tool_Coordinate_Profile *
+  Selected_Flow_Coordinate() const;
 
   wxString Load_Config();
   void Save_Config();
@@ -111,22 +116,20 @@ private:
   Flow_Endpoint m_kuka; // Server2
 
   wxTextCtrl *m_input = nullptr; // 用户编辑的初始消息
+  wxChoice *m_coordinate_choice = nullptr;
   wxButton *m_run_btn = nullptr;
   wxButton *m_stop_btn = nullptr;
   wxStaticText *m_flow_status_label = nullptr;
   wxTextCtrl *m_log = nullptr;
   wxButton *m_clear_btn = nullptr;
-  std::array<wxTextCtrl *, 6> m_reference_pose_inputs = {};
-  std::array<double, 6> m_reference_pose_values = {};
-  std::vector<robot_model::XyzabcPose> m_points_to_transform;
-  bool m_point_file_loaded = false;
-  wxString m_point_file_status;
+  std::vector<robot_model::Robot_Teach_Point> m_progress_points;
+  robot_model::Tool_Coordinate_Configuration m_tool_coordinates;
+  std::string m_flow_coordinate_id;
 
   wxTimer m_wait_timer;
   Flow_Step m_step = Flow_Step::Idle;
 
   wxString m_config_path;
-  wxString m_point_file_path;
 
   wxDECLARE_EVENT_TABLE();
 };
