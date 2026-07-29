@@ -5,7 +5,9 @@
 #include "camera_2d_service.h"
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/grid.h>
 #include <wx/listctrl.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
@@ -113,34 +115,48 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
 
   auto *information_box = new wxStaticBoxSizer(
     wxVERTICAL, this, wxString::FromUTF8(u8"当前模板匹配信息"));
-  auto *information_grid = new wxFlexGridSizer(2, 5, 10);
-  information_grid->AddGrowableCol(1, 1);
-  const auto add_information_row =
-    [this, information_grid](
-      const wxString &label,
-      wxStaticText **value)
-    {
-      information_grid->Add(
-        new wxStaticText(this, wxID_ANY, label),
-        0,
-        wxALIGN_CENTER_VERTICAL);
-      *value = new wxStaticText(
-        this, wxID_ANY, wxString::FromUTF8(u8"—"));
-      information_grid->Add(*value, 1, wxEXPAND);
-    };
-  add_information_row(
-    wxString::FromUTF8(u8"模板名称"), &m_info_name);
-  add_information_row(
-    wxString::FromUTF8(u8"模板类型"), &m_info_type);
-  add_information_row(
-    wxString::FromUTF8(u8"匹配状态"), &m_info_status);
-  add_information_row(
-    wxString::FromUTF8(u8"匹配度"), &m_info_confidence);
-  add_information_row(
-    wxString::FromUTF8(u8"方向角"), &m_info_angle);
-  add_information_row(
-    wxString::FromUTF8(u8"匹配区域"), &m_info_roi);
-  information_box->Add(information_grid, 0, wxEXPAND | wxALL, 6);
+  m_match_display_checkbox = new wxCheckBox(
+    this, wxID_ANY, wxString::FromUTF8(u8"显示匹配结果"));
+  m_match_display_checkbox->SetValue(true);
+  m_match_information_grid = new wxGrid(this, wxID_ANY);
+  m_match_information_grid->CreateGrid(4, 2);
+  m_match_information_grid->EnableEditing(false);
+  m_match_information_grid->EnableGridLines(true);
+  m_match_information_grid->SetRowLabelSize(0);
+  m_match_information_grid->SetColLabelSize(0);
+  m_match_information_grid->DisableDragRowSize();
+  m_match_information_grid->DisableDragColSize();
+  m_match_information_grid->DisableDragGridSize();
+  m_match_information_grid->SetDefaultRowSize(28, true);
+  m_match_information_grid->SetColSize(0, 105);
+  m_match_information_grid->SetColSize(1, 245);
+  const std::array<wxString, 4> information_labels{{
+    wxString::FromUTF8(u8"匹配状态"),
+    wxString::FromUTF8(u8"匹配度"),
+    wxString::FromUTF8(u8"方向角"),
+    wxString::FromUTF8(u8"中心(px)")}};
+  for (int row = 0; row < 4; ++row)
+  {
+    m_match_information_grid->SetCellValue(
+      row, 0, information_labels[static_cast<std::size_t>(row)]);
+    m_match_information_grid->SetCellValue(
+      row, 1, wxString::FromUTF8(u8"—"));
+    m_match_information_grid->SetCellBackgroundColour(
+      row, 0, wxColour(240, 240, 240));
+    auto label_font = m_match_information_grid->GetCellFont(row, 0);
+    label_font.SetWeight(wxFONTWEIGHT_BOLD);
+    m_match_information_grid->SetCellFont(row, 0, label_font);
+    m_match_information_grid->SetReadOnly(row, 0, true);
+    m_match_information_grid->SetReadOnly(row, 1, true);
+  }
+  m_match_information_grid->SetMinSize(wxSize(-1, 114));
+  information_box->Add(
+    m_match_display_checkbox, 0, wxEXPAND | wxALL, 6);
+  information_box->Add(
+    m_match_information_grid,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+    6);
 
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 8);
@@ -168,6 +184,10 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
   m_cancel_roi_button->Bind(
     wxEVT_BUTTON,
     &Camera_2D_Template_Panel::On_Cancel_Roi,
+    this);
+  m_match_display_checkbox->Bind(
+    wxEVT_CHECKBOX,
+    &Camera_2D_Template_Panel::On_Match_Display_Changed,
     this);
   m_timer.SetOwner(this);
   Bind(
@@ -233,56 +253,68 @@ void Camera_2D_Template_Panel::Refresh_View()
   m_edit_roi_button->Enable(
     connected && has_frame && selection != -1 && !m_roi_editing);
   const auto active = m_template_service.Active_Template();
-  m_info_name->SetLabel(
-    active ? From_Utf8(active->name) : wxString::FromUTF8(u8"—"));
-  m_info_type->SetLabel(
-    active
-      ? wxString::FromUTF8(u8"十字模板")
-      : wxString::FromUTF8(u8"—"));
+  const auto set_information =
+    [this](
+      const wxString &status,
+      const wxString &confidence,
+      const wxString &angle,
+      const wxString &center)
+    {
+      m_match_information_grid->SetCellValue(0, 1, status);
+      m_match_information_grid->SetCellValue(1, 1, confidence);
+      m_match_information_grid->SetCellValue(2, 1, angle);
+      m_match_information_grid->SetCellValue(3, 1, center);
+    };
+  const wxString empty = wxString::FromUTF8(u8"—");
   if (!connected)
   {
-    m_info_status->SetLabel(
-      wxString::FromUTF8(u8"请先连接2D相机"));
-    m_info_confidence->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_angle->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_roi->SetLabel(wxString::FromUTF8(u8"—"));
+    set_information(
+      wxString::FromUTF8(u8"请先连接2D相机"),
+      empty,
+      empty,
+      empty);
     return;
   }
   const auto detection = m_template_service.Latest_Detection();
   if (!active)
   {
-    m_info_status->SetLabel(
-      wxString::FromUTF8(u8"请选择一个模板"));
-    m_info_confidence->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_angle->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_roi->SetLabel(wxString::FromUTF8(u8"—"));
+    set_information(
+      wxString::FromUTF8(u8"请选择模板"),
+      empty,
+      empty,
+      empty);
     return;
   }
   if (detection && detection->template_id == active->id)
   {
-    m_info_status->SetLabel(
-      detection->found
-        ? wxString::FromUTF8(u8"匹配成功")
-        : wxString::FromUTF8(u8"未匹配"));
-    m_info_confidence->SetLabel(wxString::Format(
-      "%.1f%%", detection->confidence * 100.0));
-    m_info_angle->SetLabel(
-      wxString::Format("%.2f ", detection->angle_deg) +
-      wxString::FromUTF8(u8"°"));
-    m_info_roi->SetLabel(wxString::Format(
-      "X=%d  Y=%d  W=%d  H=%d px",
-      detection->search_roi.x,
-      detection->search_roi.y,
-      detection->search_roi.width,
-      detection->search_roi.height));
+    if (detection->found)
+    {
+      set_information(
+        wxString::FromUTF8(u8"匹配成功"),
+        wxString::Format("%.0f%%", detection->confidence * 100.0),
+        wxString::Format("%.0f", detection->angle_deg) +
+          wxString::FromUTF8(u8"°"),
+        wxString::Format(
+          "(%.0f,%.0f)",
+          detection->center_x,
+          detection->center_y));
+    }
+    else
+    {
+      set_information(
+        wxString::FromUTF8(u8"匹配失败"),
+        wxString::Format("%.0f%%", detection->confidence * 100.0),
+        empty,
+        empty);
+    }
   }
   else
   {
-    m_info_status->SetLabel(
-      wxString::FromUTF8(u8"等待当前图像匹配"));
-    m_info_confidence->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_angle->SetLabel(wxString::FromUTF8(u8"—"));
-    m_info_roi->SetLabel(wxString::FromUTF8(u8"—"));
+    set_information(
+      wxString::FromUTF8(u8"等待匹配"),
+      empty,
+      empty,
+      empty);
   }
 }
 
@@ -398,6 +430,13 @@ void Camera_2D_Template_Panel::On_Cancel_Roi(wxCommandEvent &)
   m_instruction_text->SetLabel(
     wxString::FromUTF8(u8"已取消ROI编辑，可重新点击“新增”。"));
   Refresh_View();
+}
+
+void Camera_2D_Template_Panel::On_Match_Display_Changed(
+  wxCommandEvent &)
+{
+  m_image_view.Set_Template_Detection_Visible(
+    m_match_display_checkbox->IsChecked());
 }
 
 void Camera_2D_Template_Panel::On_Create(wxCommandEvent &)

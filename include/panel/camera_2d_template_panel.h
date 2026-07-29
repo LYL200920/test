@@ -14,7 +14,9 @@
 class Camera_2D_Image_View;
 class Camera_2D_Service;
 class wxButton;
+class wxCheckBox;
 class wxChoice;
+class wxGrid;
 class wxListCtrl;
 class wxListEvent;
 class wxStaticText;
@@ -45,6 +47,7 @@ private:
   void On_Delete(wxCommandEvent &event);
   void On_Confirm_Roi(wxCommandEvent &event);
   void On_Cancel_Roi(wxCommandEvent &event);
+  void On_Match_Display_Changed(wxCommandEvent &event);
   void On_Roi_Selected(
     const std::string &name,
     const Camera_2D_Roi &roi);
@@ -62,12 +65,8 @@ private:
   wxButton *m_cancel_roi_button = nullptr;
   wxButton *m_delete_button = nullptr;
   wxListCtrl *m_template_list = nullptr;
-  wxStaticText *m_info_name = nullptr;
-  wxStaticText *m_info_type = nullptr;
-  wxStaticText *m_info_status = nullptr;
-  wxStaticText *m_info_confidence = nullptr;
-  wxStaticText *m_info_angle = nullptr;
-  wxStaticText *m_info_roi = nullptr;
+  wxCheckBox *m_match_display_checkbox = nullptr;
+  wxGrid *m_match_information_grid = nullptr;
   wxStaticText *m_instruction_text = nullptr;
   std::vector<std::string> m_template_ids;
   std::shared_ptr<const jutze_camera::camera_frame> m_creation_frame;

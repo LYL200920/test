@@ -68,6 +68,12 @@ void Camera_2D_Bitmap_Canvas::Set_Detection(
   Refresh(false);
 }
 
+void Camera_2D_Bitmap_Canvas::Set_Detection_Visible(bool visible)
+{
+  m_detection_visible = visible;
+  Refresh(false);
+}
+
 void Camera_2D_Bitmap_Canvas::Begin_Roi_Selection(
   std::function<void(Camera_2D_Roi)> callback)
 {
@@ -230,7 +236,7 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
   {
     return offset_y + static_cast<int>(std::lround(y * scale));
   };
-  if (m_detection)
+  if (m_detection_visible && m_detection)
   {
     const auto &detection = *m_detection;
     dc.SetBrush(*wxTRANSPARENT_BRUSH);
@@ -581,6 +587,11 @@ void Camera_2D_Image_View::Show_Template_Detection(
   std::optional<Camera_2D_Cross_Detection> detection)
 {
   m_canvas->Set_Detection(std::move(detection));
+}
+
+void Camera_2D_Image_View::Set_Template_Detection_Visible(bool visible)
+{
+  m_canvas->Set_Detection_Visible(visible);
 }
 
 void Camera_2D_Image_View::On_Fit(wxCommandEvent &)

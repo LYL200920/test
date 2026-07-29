@@ -32,6 +32,7 @@ public:
   void Clear_Bitmap();
   void Set_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
+  void Set_Detection_Visible(bool visible);
   void Begin_Roi_Selection(
     std::function<void(Camera_2D_Roi)> callback);
   void Begin_Roi_Editing(
@@ -68,6 +69,7 @@ private:
   };
   wxBitmap m_bitmap;
   std::optional<Camera_2D_Cross_Detection> m_detection;
+  bool m_detection_visible = true;
   std::function<void(Camera_2D_Roi)> m_roi_callback;
   bool m_selecting_roi = false;
   bool m_has_editable_roi = false;
@@ -104,6 +106,7 @@ public:
   void Cancel_Template_Roi_Selection();
   void Show_Template_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
+  void Set_Template_Detection_Visible(bool visible);
 
 private:
   struct Conversion_Result
