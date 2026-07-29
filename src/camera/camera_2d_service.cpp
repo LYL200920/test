@@ -2,6 +2,7 @@
 
 #include "camera_dahua.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -305,6 +306,183 @@ bool Camera_2D_Service::Apply_Configuration(
   {
     error_message->clear();
   }
+  return true;
+}
+
+bool Camera_2D_Service::Read_Parameters(
+  Camera_2D_Parameters *parameters,
+  std::string *error_message) const
+{
+  if (!parameters)
+  {
+    if (error_message) *error_message = "2D相机参数输出无效";
+    return false;
+  }
+  std::shared_ptr<jutze_camera::camera_dahua> camera;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    camera = m_camera;
+  }
+  if (!camera)
+  {
+    if (error_message) *error_message = "请先打开2D相机";
+    return false;
+  }
+  auto *handle = camera->get_handle();
+  Camera_2D_Parameters result;
+
+  int64_t integer_value = 0;
+  if (IMV_GetIntFeatureMin(handle, "Width", &integer_value) == IMV_OK)
+    result.width_minimum = static_cast<unsigned int>(integer_value);
+  if (IMV_GetIntFeatureMax(handle, "Width", &integer_value) == IMV_OK)
+    result.width_maximum = static_cast<unsigned int>(integer_value);
+  if (IMV_GetIntFeatureInc(handle, "Width", &integer_value) == IMV_OK)
+    result.width_increment =
+      std::max(1U, static_cast<unsigned int>(integer_value));
+  if (IMV_GetIntFeatureMin(handle, "Height", &integer_value) == IMV_OK)
+    result.height_minimum = static_cast<unsigned int>(integer_value);
+  if (IMV_GetIntFeatureMax(handle, "Height", &integer_value) == IMV_OK)
+    result.height_maximum = static_cast<unsigned int>(integer_value);
+  if (IMV_GetIntFeatureInc(handle, "Height", &integer_value) == IMV_OK)
+    result.height_increment =
+      std::max(1U, static_cast<unsigned int>(integer_value));
+
+  const auto read_double =
+    [handle](
+      const char *feature,
+      Camera_2D_Number_Parameter *parameter)
+    {
+      parameter->available =
+        IMV_GetDoubleFeatureValue(
+          handle, feature, &parameter->value) == IMV_OK &&
+        IMV_GetDoubleFeatureMin(
+          handle, feature, &parameter->minimum) == IMV_OK &&
+        IMV_GetDoubleFeatureMax(
+          handle, feature, &parameter->maximum) == IMV_OK;
+    };
+  read_double("ExposureTime", &result.exposure_us);
+  read_double("GainRaw", &result.gain_db);
+  if (!result.gain_db.available)
+  {
+    read_double("Gain", &result.gain_db);
+  }
+  read_double("AcquisitionFrameRate", &result.frame_rate_hz);
+
+  uint64_t pixel_format = 0;
+  if (IMV_GetEnumFeatureValue(
+        handle, "PixelFormat", &pixel_format) == IMV_OK)
+  {
+    result.pixel_format_value = pixel_format;
+  }
+  unsigned int entry_count = 0;
+  if (IMV_GetEnumFeatureEntryNum(
+        handle, "PixelFormat", &entry_count) == IMV_OK &&
+      entry_count > 0)
+  {
+    std::vector<IMV_EnumEntryInfo> entries(entry_count);
+    IMV_EnumEntryList entry_list{};
+    entry_list.nEnumEntryBufferSize =
+      static_cast<unsigned int>(
+        entries.size() * sizeof(IMV_EnumEntryInfo));
+    entry_list.pEnumEntryInfo = entries.data();
+    if (IMV_GetEnumFeatureEntrys(
+          handle, "PixelFormat", &entry_list) == IMV_OK)
+    {
+      result.pixel_formats.reserve(entries.size());
+      for (const auto &entry : entries)
+      {
+        result.pixel_formats.push_back(
+          {entry.value, std::string(entry.name)});
+      }
+    }
+  }
+  *parameters = std::move(result);
+  if (error_message) error_message->clear();
+  return true;
+}
+
+bool Camera_2D_Service::Apply_Image_Parameters(
+  double exposure_us,
+  double gain_db,
+  double frame_rate_hz,
+  unsigned long long pixel_format,
+  std::string *error_message)
+{
+  std::shared_ptr<jutze_camera::camera_dahua> camera;
+  bool restart = false;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    camera = m_camera;
+    restart = camera && camera->is_grabbing();
+  }
+  if (!camera)
+  {
+    return Fail("请先打开2D相机", error_message);
+  }
+  Camera_2D_Parameters supported;
+  if (!Read_Parameters(&supported, error_message))
+  {
+    return false;
+  }
+  if (restart && !Stop(error_message))
+  {
+    return false;
+  }
+  auto *handle = camera->get_handle();
+  bool success = true;
+  if (supported.exposure_us.available)
+  {
+    IMV_SetEnumFeatureSymbol(handle, "ExposureAuto", "Off");
+    success = success &&
+      IMV_SetDoubleFeatureValue(
+        handle, "ExposureTime", exposure_us) == IMV_OK;
+  }
+  if (supported.gain_db.available)
+  {
+    IMV_SetEnumFeatureSymbol(handle, "GainAuto", "Off");
+    const char *gain_feature = "GainRaw";
+    double ignored = 0.0;
+    if (IMV_GetDoubleFeatureValue(
+          handle, gain_feature, &ignored) != IMV_OK)
+    {
+      gain_feature = "Gain";
+    }
+    success = success &&
+      IMV_SetDoubleFeatureValue(
+        handle, gain_feature, gain_db) == IMV_OK;
+  }
+  if (supported.frame_rate_hz.available)
+  {
+    IMV_SetBoolFeatureValue(
+      handle, "AcquisitionFrameRateEnable", true);
+    success = success &&
+      IMV_SetDoubleFeatureValue(
+        handle, "AcquisitionFrameRate", frame_rate_hz) == IMV_OK;
+  }
+  if (!supported.pixel_formats.empty())
+  {
+    success = success &&
+      IMV_SetEnumFeatureValue(
+        handle, "PixelFormat", pixel_format) == IMV_OK;
+  }
+  if (!success)
+  {
+    if (restart) Start(nullptr);
+    return Fail(
+      "应用曝光、增益、帧率或像素格式失败，请检查相机参数范围",
+      error_message);
+  }
+  if (!Update_Status_From_Camera(error_message))
+  {
+    if (restart) Start(nullptr);
+    return false;
+  }
+  Clear_Frame();
+  if (restart && !Start(error_message))
+  {
+    return false;
+  }
+  if (error_message) error_message->clear();
   return true;
 }
 

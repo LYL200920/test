@@ -45,6 +45,35 @@ struct Camera_2D_Status
   std::string last_error;
 };
 
+struct Camera_2D_Number_Parameter
+{
+  bool available = false;
+  double value = 0.0;
+  double minimum = 0.0;
+  double maximum = 0.0;
+};
+
+struct Camera_2D_Pixel_Format_Option
+{
+  unsigned long long value = 0;
+  std::string name;
+};
+
+struct Camera_2D_Parameters
+{
+  unsigned int width_minimum = 1;
+  unsigned int width_maximum = 65535;
+  unsigned int width_increment = 1;
+  unsigned int height_minimum = 1;
+  unsigned int height_maximum = 65535;
+  unsigned int height_increment = 1;
+  Camera_2D_Number_Parameter exposure_us;
+  Camera_2D_Number_Parameter gain_db;
+  Camera_2D_Number_Parameter frame_rate_hz;
+  unsigned long long pixel_format_value = 0;
+  std::vector<Camera_2D_Pixel_Format_Option> pixel_formats;
+};
+
 class Camera_2D_Service
 {
 public:
@@ -67,6 +96,15 @@ public:
     unsigned int width,
     unsigned int height,
     jutze_camera::camera_trigger_mode trigger_mode,
+    std::string *error_message = nullptr);
+  bool Read_Parameters(
+    Camera_2D_Parameters *parameters,
+    std::string *error_message = nullptr) const;
+  bool Apply_Image_Parameters(
+    double exposure_us,
+    double gain_db,
+    double frame_rate_hz,
+    unsigned long long pixel_format,
     std::string *error_message = nullptr);
 
   Camera_2D_Status Status() const;

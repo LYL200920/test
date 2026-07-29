@@ -1,7 +1,9 @@
 #include "camera_2d_image_converter.h"
+#include "camera_2d_cross_template.h"
 #include "camera_params.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <vector>
@@ -101,6 +103,47 @@ void Test_Truncated_Buffer()
   assert(!Convert_Camera_2D_Frame(frame, &image, &error));
   assert(!error.empty());
 }
+
+void Test_Cross_Detection()
+{
+  Camera_2D_Display_Image image;
+  image.width = 100;
+  image.height = 100;
+  image.rgb.assign(100 * 100 * 3, 255);
+  for (int y = 25; y <= 75; ++y)
+  {
+    for (int x = 47; x <= 53; ++x)
+    {
+      const auto index = (static_cast<std::size_t>(y) * 100 + x) * 3;
+      image.rgb[index] = image.rgb[index + 1] = image.rgb[index + 2] = 0;
+    }
+  }
+  for (int y = 47; y <= 53; ++y)
+  {
+    for (int x = 25; x <= 75; ++x)
+    {
+      const auto index = (static_cast<std::size_t>(y) * 100 + x) * 3;
+      image.rgb[index] = image.rgb[index + 1] = image.rgb[index + 2] = 0;
+    }
+  }
+  Camera_2D_Cross_Template cross_template;
+  cross_template.id = "test";
+  cross_template.name = "test";
+  cross_template.roi = {20, 20, 61, 61};
+  cross_template.reference_width = 100;
+  cross_template.reference_height = 100;
+  cross_template.dark_on_light = true;
+  cross_template.foreground_ratio = 0.18;
+  Camera_2D_Cross_Detection detection;
+  std::string error;
+  assert(Detect_Camera_2D_Cross(
+    image, cross_template, &detection, &error));
+  assert(error.empty());
+  assert(detection.found);
+  assert(std::abs(detection.center_x - 50.0) < 1.0);
+  assert(std::abs(detection.center_y - 50.0) < 1.0);
+  assert(detection.confidence > 0.5);
+}
 }
 
 int main()
@@ -112,6 +155,7 @@ int main()
   Test_Mono10();
   Test_Bayer_Rg8();
   Test_Truncated_Buffer();
+  Test_Cross_Detection();
   std::cout << "camera_2d_image_converter_tests passed\n";
   return 0;
 }

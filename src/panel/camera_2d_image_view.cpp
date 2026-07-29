@@ -8,6 +8,7 @@
 #include <wx/stattext.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -17,6 +18,9 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
   SetBackgroundStyle(wxBG_STYLE_PAINT);
   Bind(wxEVT_PAINT, &Camera_2D_Bitmap_Canvas::On_Paint, this);
   Bind(wxEVT_SIZE, &Camera_2D_Bitmap_Canvas::On_Size, this);
+  Bind(wxEVT_LEFT_DOWN, &Camera_2D_Bitmap_Canvas::On_Left_Down, this);
+  Bind(wxEVT_LEFT_UP, &Camera_2D_Bitmap_Canvas::On_Left_Up, this);
+  Bind(wxEVT_MOTION, &Camera_2D_Bitmap_Canvas::On_Mouse_Move, this);
 }
 
 void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
@@ -28,7 +32,23 @@ void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
 void Camera_2D_Bitmap_Canvas::Clear_Bitmap()
 {
   m_bitmap = wxBitmap();
+  m_detection.reset();
   Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::Set_Detection(
+  std::optional<Camera_2D_Cross_Detection> detection)
+{
+  m_detection = std::move(detection);
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::Begin_Roi_Selection(
+  std::function<void(Camera_2D_Roi)> callback)
+{
+  m_roi_callback = std::move(callback);
+  m_selecting_roi = false;
+  SetCursor(wxCursor(wxCURSOR_CROSS));
 }
 
 void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
@@ -67,6 +87,55 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
     (area.x - width) / 2,
     (area.y - height) / 2,
     false);
+  const int offset_x = (area.x - width) / 2;
+  const int offset_y = (area.y - height) / 2;
+  const auto canvas_x = [offset_x, scale](double x)
+  {
+    return offset_x + static_cast<int>(std::lround(x * scale));
+  };
+  const auto canvas_y = [offset_y, scale](double y)
+  {
+    return offset_y + static_cast<int>(std::lround(y * scale));
+  };
+  if (m_detection)
+  {
+    const auto &detection = *m_detection;
+    dc.SetBrush(*wxTRANSPARENT_BRUSH);
+    dc.SetPen(wxPen(
+      detection.found ? wxColour(40, 220, 80) : wxColour(255, 80, 80),
+      2));
+    dc.DrawRectangle(
+      canvas_x(detection.search_roi.x),
+      canvas_y(detection.search_roi.y),
+      std::max(1, static_cast<int>(
+        detection.search_roi.width * scale)),
+      std::max(1, static_cast<int>(
+        detection.search_roi.height * scale)));
+    if (detection.found)
+    {
+      const int cx = canvas_x(detection.center_x);
+      const int cy = canvas_y(detection.center_y);
+      const double angle = detection.angle_deg * 3.14159265358979323846 / 180.0;
+      const int axis = std::max(18, static_cast<int>(
+        std::min(detection.search_roi.width,
+                 detection.search_roi.height) * scale * 0.25));
+      const int dx = static_cast<int>(std::lround(std::cos(angle) * axis));
+      const int dy = static_cast<int>(std::lround(std::sin(angle) * axis));
+      dc.DrawLine(cx - dx, cy - dy, cx + dx, cy + dy);
+      dc.DrawLine(cx + dy, cy - dx, cx - dy, cy + dx);
+      dc.DrawCircle(cx, cy, 4);
+    }
+  }
+  if (m_selecting_roi)
+  {
+    dc.SetBrush(*wxTRANSPARENT_BRUSH);
+    dc.SetPen(wxPen(wxColour(255, 210, 40), 2, wxPENSTYLE_SHORT_DASH));
+    const int x0 = canvas_x(std::min(m_roi_start.x, m_roi_end.x));
+    const int y0 = canvas_y(std::min(m_roi_start.y, m_roi_end.y));
+    const int x1 = canvas_x(std::max(m_roi_start.x, m_roi_end.x));
+    const int y1 = canvas_y(std::max(m_roi_start.y, m_roi_end.y));
+    dc.DrawRectangle(x0, y0, x1 - x0, y1 - y0);
+  }
 }
 
 void Camera_2D_Bitmap_Canvas::On_Size(wxSizeEvent &event)
@@ -75,11 +144,70 @@ void Camera_2D_Bitmap_Canvas::On_Size(wxSizeEvent &event)
   event.Skip();
 }
 
+wxPoint Camera_2D_Bitmap_Canvas::Image_Point(
+  const wxPoint &canvas_point) const
+{
+  if (!m_bitmap.IsOk()) return wxPoint(-1, -1);
+  const wxSize area = GetClientSize();
+  const double scale = std::min(
+    static_cast<double>(area.x) / m_bitmap.GetWidth(),
+    static_cast<double>(area.y) / m_bitmap.GetHeight());
+  if (scale <= 0.0) return wxPoint(-1, -1);
+  const double offset_x = (area.x - m_bitmap.GetWidth() * scale) * 0.5;
+  const double offset_y = (area.y - m_bitmap.GetHeight() * scale) * 0.5;
+  return wxPoint(
+    std::clamp(
+      static_cast<int>((canvas_point.x - offset_x) / scale),
+      0, m_bitmap.GetWidth() - 1),
+    std::clamp(
+      static_cast<int>((canvas_point.y - offset_y) / scale),
+      0, m_bitmap.GetHeight() - 1));
+}
+
+void Camera_2D_Bitmap_Canvas::On_Left_Down(wxMouseEvent &event)
+{
+  if (!m_roi_callback || !m_bitmap.IsOk()) return;
+  m_roi_start = Image_Point(event.GetPosition());
+  m_roi_end = m_roi_start;
+  m_selecting_roi = m_roi_start.x >= 0;
+  if (m_selecting_roi) CaptureMouse();
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
+{
+  if (!m_selecting_roi || !event.Dragging()) return;
+  m_roi_end = Image_Point(event.GetPosition());
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::On_Left_Up(wxMouseEvent &event)
+{
+  if (!m_selecting_roi) return;
+  m_roi_end = Image_Point(event.GetPosition());
+  m_selecting_roi = false;
+  if (HasCapture()) ReleaseMouse();
+  SetCursor(wxNullCursor);
+  const int x0 = std::min(m_roi_start.x, m_roi_end.x);
+  const int y0 = std::min(m_roi_start.y, m_roi_end.y);
+  Camera_2D_Roi roi{
+    x0,
+    y0,
+    std::abs(m_roi_end.x - m_roi_start.x) + 1,
+    std::abs(m_roi_end.y - m_roi_start.y) + 1};
+  auto callback = std::move(m_roi_callback);
+  m_roi_callback = nullptr;
+  Refresh(false);
+  if (callback) callback(roi);
+}
+
 Camera_2D_Image_View::Camera_2D_Image_View(
   wxWindow *parent,
-  Camera_2D_Service &camera_service)
+  Camera_2D_Service &camera_service,
+  Camera_2D_Cross_Template_Service &template_service)
   : wxPanel(parent, wxID_ANY),
-    m_camera_service(camera_service)
+    m_camera_service(camera_service),
+    m_template_service(template_service)
 {
   m_canvas = new Camera_2D_Bitmap_Canvas(this);
   m_status_text = new wxStaticText(
@@ -95,6 +223,14 @@ Camera_2D_Image_View::Camera_2D_Image_View(
     this, m_timer.GetId());
   m_timer.Start(33);
   m_worker = std::thread(&Camera_2D_Image_View::Worker_Loop, this);
+}
+
+void Camera_2D_Image_View::Begin_Template_Roi_Selection(
+  std::function<void(Camera_2D_Roi)> callback)
+{
+  m_canvas->Begin_Roi_Selection(std::move(callback));
+  m_status_text->SetLabel(
+    wxString::FromUTF8(u8"请在图像中拖动框选完整的平面十字"));
 }
 
 Camera_2D_Image_View::~Camera_2D_Image_View()
@@ -154,6 +290,10 @@ void Camera_2D_Image_View::Worker_Loop()
     result.job_id = job_id;
     result.success = Convert_Camera_2D_Frame(
       *frame, &result.image, &result.error);
+    if (result.success)
+    {
+      result.detection = m_template_service.Detect(result.image);
+    }
     {
       std::lock_guard<std::mutex> lock(m_worker_mutex);
       m_pending_result = std::move(result);
@@ -199,6 +339,7 @@ void Camera_2D_Image_View::Consume_Result()
     result->image.rgb.data(),
     result->image.rgb.size());
   m_canvas->Set_Bitmap(wxBitmap(image));
+  m_canvas->Set_Detection(result->detection);
   const auto status = m_camera_service.Status();
   m_status_text->SetLabel(wxString::Format(
     wxString::FromUTF8(
@@ -209,6 +350,21 @@ void Camera_2D_Image_View::Consume_Result()
     status.frames_per_second,
     wxString::FromUTF8(
       jutze_camera::pixel_format_name(status.pixel_format))));
+  if (result->detection && result->detection->found)
+  {
+    m_status_text->SetLabel(wxString::Format(
+      wxString::FromUTF8(
+        u8"%u × %u  Frame=%llu  %.1f FPS  十字中心=(%.2f, %.2f)  "
+        u8"角度=%.2f°  置信度=%.1f%%"),
+      result->image.width,
+      result->image.height,
+      result->image.frame_number,
+      status.frames_per_second,
+      result->detection->center_x,
+      result->detection->center_y,
+      result->detection->angle_deg,
+      result->detection->confidence * 100.0));
+  }
 }
 
 void Camera_2D_Image_View::On_Timer(wxTimerEvent &)

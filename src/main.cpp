@@ -28,7 +28,10 @@ public:
     Build_Menu_Bar();
 
     m_model_panel = new Robot_Model_Panel(
-      this, m_camera_service, m_camera_2d_service);
+      this,
+      m_camera_service,
+      m_camera_2d_service,
+      m_camera_2d_template_service);
 
     auto *sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(m_model_panel, 1, wxEXPAND | wxALL, 4);
@@ -125,6 +128,7 @@ private:
 private:
   Camera_Service m_camera_service;
   Camera_2D_Service m_camera_2d_service;
+  Camera_2D_Cross_Template_Service m_camera_2d_template_service;
   Robot_Model_Panel *m_model_panel = nullptr;
 };
 

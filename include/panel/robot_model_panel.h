@@ -13,6 +13,7 @@
 #include "tool_visualization.h"
 #include "template_configuration.h"
 #include "camera_2d_service.h"
+#include "camera_2d_cross_template.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -57,6 +58,7 @@ public:
       wxWindow *parent,
       Camera_Service &camera_service,
       Camera_2D_Service &camera_2d_service,
+      Camera_2D_Cross_Template_Service &camera_2d_template_service,
       wxWindowID id = wxID_ANY);
 
   void Show_Model_Configuration(wxWindow *parent = nullptr);

@@ -1,6 +1,7 @@
 #include "camera_2d_control_panel.h"
 
 #include "camera_2d_image_converter.h"
+#include "camera_2d_image_view.h"
 #include "camera_2d_service.h"
 
 #include <wx/button.h>
@@ -12,6 +13,7 @@
 #include <wx/spinctrl.h>
 #include <wx/statbox.h>
 #include <wx/stattext.h>
+#include <wx/textdlg.h>
 
 #include <cstring>
 
@@ -66,9 +68,13 @@ jutze_camera::camera_trigger_mode Trigger_Mode(int selection)
 
 Camera_2D_Control_Panel::Camera_2D_Control_Panel(
   wxWindow *parent,
-  Camera_2D_Service &camera_service)
+  Camera_2D_Service &camera_service,
+  Camera_2D_Cross_Template_Service &template_service,
+  Camera_2D_Image_View &image_view)
   : wxScrolledWindow(parent, wxID_ANY),
-    m_camera_service(camera_service)
+    m_camera_service(camera_service),
+    m_template_service(template_service),
+    m_image_view(image_view)
 {
   SetScrollRate(0, 12);
 
@@ -126,6 +132,39 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
   m_trigger_choice->Append(wxString::FromUTF8(u8"硬触发（Line1上升沿）"));
   m_trigger_choice->SetSelection(0);
   configuration_grid->Add(m_trigger_choice, 1, wxEXPAND);
+  configuration_grid->Add(
+    new wxStaticText(
+      this, wxID_ANY, wxString::FromUTF8(u8"曝光时间 (μs)")),
+    0, wxALIGN_CENTER_VERTICAL);
+  m_exposure_spin = new wxSpinCtrlDouble(
+    this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+    wxSP_ARROW_KEYS, 0.0, 10000000.0, 1000.0, 10.0);
+  m_exposure_spin->SetDigits(2);
+  configuration_grid->Add(m_exposure_spin, 1, wxEXPAND);
+  configuration_grid->Add(
+    new wxStaticText(
+      this, wxID_ANY, wxString::FromUTF8(u8"增益 (dB)")),
+    0, wxALIGN_CENTER_VERTICAL);
+  m_gain_spin = new wxSpinCtrlDouble(
+    this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+    wxSP_ARROW_KEYS, -100.0, 100.0, 0.0, 0.1);
+  m_gain_spin->SetDigits(2);
+  configuration_grid->Add(m_gain_spin, 1, wxEXPAND);
+  configuration_grid->Add(
+    new wxStaticText(
+      this, wxID_ANY, wxString::FromUTF8(u8"帧率 (FPS)")),
+    0, wxALIGN_CENTER_VERTICAL);
+  m_frame_rate_spin = new wxSpinCtrlDouble(
+    this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+    wxSP_ARROW_KEYS, 0.01, 10000.0, 30.0, 1.0);
+  m_frame_rate_spin->SetDigits(2);
+  configuration_grid->Add(m_frame_rate_spin, 1, wxEXPAND);
+  configuration_grid->Add(
+    new wxStaticText(
+      this, wxID_ANY, wxString::FromUTF8(u8"像素格式")),
+    0, wxALIGN_CENTER_VERTICAL);
+  m_pixel_format_choice = new wxChoice(this, wxID_ANY);
+  configuration_grid->Add(m_pixel_format_choice, 1, wxEXPAND);
   auto *configuration_buttons = new wxBoxSizer(wxHORIZONTAL);
   m_apply_button = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"应用配置"));
@@ -163,6 +202,25 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
   acquisition_box->Add(
     m_frame_info_text, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
+  auto *template_box = new wxStaticBoxSizer(
+    wxVERTICAL, this, wxString::FromUTF8(u8"平面十字模板"));
+  m_template_choice = new wxChoice(this, wxID_ANY);
+  auto *template_buttons = new wxBoxSizer(wxHORIZONTAL);
+  m_create_template_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"框选创建"));
+  m_delete_template_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"删除模板"));
+  template_buttons->Add(m_create_template_button, 1, wxRIGHT, 4);
+  template_buttons->Add(m_delete_template_button, 1);
+  m_detection_text = new wxStaticText(
+    this, wxID_ANY, wxString::FromUTF8(u8"未启用模板识别"));
+  m_detection_text->Wrap(350);
+  template_box->Add(m_template_choice, 0, wxEXPAND | wxALL, 6);
+  template_box->Add(
+    template_buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+  template_box->Add(
+    m_detection_text, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 8);
   sizer->Add(device_box, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
@@ -170,6 +228,8 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
     configuration_box, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->Add(
     acquisition_box, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add(
+    template_box, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->AddStretchSpacer(1);
   SetSizer(sizer);
 
@@ -193,6 +253,12 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
     wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Save, this);
   m_show_button->Bind(
     wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Show_Image, this);
+  m_template_choice->Bind(
+    wxEVT_CHOICE, &Camera_2D_Control_Panel::On_Template_Selected, this);
+  m_create_template_button->Bind(
+    wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Create_Template, this);
+  m_delete_template_button->Bind(
+    wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Delete_Template, this);
 
   m_timer.SetOwner(this);
   Bind(
@@ -200,6 +266,7 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
     this, m_timer.GetId());
   m_timer.Start(250);
   Refresh_Device_List();
+  Refresh_Template_List();
   Refresh_View();
 }
 
@@ -258,6 +325,12 @@ void Camera_2D_Control_Panel::Refresh_View()
   m_width_spin->Enable(opened);
   m_height_spin->Enable(opened);
   m_trigger_choice->Enable(opened);
+  m_exposure_spin->Enable(opened && m_parameters.exposure_us.available);
+  m_gain_spin->Enable(opened && m_parameters.gain_db.available);
+  m_frame_rate_spin->Enable(
+    opened && m_parameters.frame_rate_hz.available);
+  m_pixel_format_choice->Enable(
+    opened && !m_parameters.pixel_formats.empty());
   m_apply_button->Enable(opened);
   m_reload_button->Enable(opened);
   m_start_button->Enable(opened && !grabbing);
@@ -268,6 +341,10 @@ void Camera_2D_Control_Panel::Refresh_View()
   m_save_button->Enable(
     static_cast<bool>(m_camera_service.Latest_Frame()));
   m_show_button->Enable(opened);
+  m_create_template_button->Enable(
+    opened && static_cast<bool>(m_camera_service.Latest_Frame()));
+  m_delete_template_button->Enable(
+    m_template_choice->GetSelection() != wxNOT_FOUND);
 
   m_state_text->SetLabel(
     wxString::FromUTF8(u8"状态：") + State_Label(status.state));
@@ -285,6 +362,29 @@ void Camera_2D_Control_Panel::Refresh_View()
   {
     m_device_info_text->SetLabel(
       wxString::FromUTF8(u8"尚未打开2D相机"));
+  }
+  const auto detection = m_template_service.Latest_Detection();
+  if (detection && detection->found)
+  {
+    m_detection_text->SetLabel(wxString::Format(
+      wxString::FromUTF8(
+        u8"模板：%s\n中心：X=%.2f px，Y=%.2f px\n"
+        u8"方向：%.2f°\n置信度：%.1f%%"),
+      From_Utf8(detection->template_name),
+      detection->center_x,
+      detection->center_y,
+      detection->angle_deg,
+      detection->confidence * 100.0));
+  }
+  else if (m_template_choice->GetSelection() != wxNOT_FOUND)
+  {
+    m_detection_text->SetLabel(
+      wxString::FromUTF8(u8"当前帧未识别到十字"));
+  }
+  else
+  {
+    m_detection_text->SetLabel(
+      wxString::FromUTF8(u8"请创建或选择十字模板"));
   }
   const auto frame = m_camera_service.Latest_Frame();
   if (frame)
@@ -316,6 +416,55 @@ void Camera_2D_Control_Panel::Sync_Configuration_Editors()
   m_width_spin->SetValue(static_cast<int>(status.width));
   m_height_spin->SetValue(static_cast<int>(status.height));
   m_trigger_choice->SetSelection(Trigger_Selection(status.trigger_mode));
+  std::string error;
+  if (!m_camera_service.Read_Parameters(&m_parameters, &error))
+  {
+    return;
+  }
+  m_width_spin->SetRange(
+    static_cast<int>(m_parameters.width_minimum),
+    static_cast<int>(m_parameters.width_maximum));
+  m_height_spin->SetRange(
+    static_cast<int>(m_parameters.height_minimum),
+    static_cast<int>(m_parameters.height_maximum));
+  if (m_parameters.exposure_us.available)
+  {
+    m_exposure_spin->SetRange(
+      m_parameters.exposure_us.minimum,
+      m_parameters.exposure_us.maximum);
+    m_exposure_spin->SetValue(m_parameters.exposure_us.value);
+  }
+  if (m_parameters.gain_db.available)
+  {
+    m_gain_spin->SetRange(
+      m_parameters.gain_db.minimum,
+      m_parameters.gain_db.maximum);
+    m_gain_spin->SetValue(m_parameters.gain_db.value);
+  }
+  if (m_parameters.frame_rate_hz.available)
+  {
+    m_frame_rate_spin->SetRange(
+      m_parameters.frame_rate_hz.minimum,
+      m_parameters.frame_rate_hz.maximum);
+    m_frame_rate_spin->SetValue(m_parameters.frame_rate_hz.value);
+  }
+  m_pixel_format_choice->Clear();
+  int pixel_selection = wxNOT_FOUND;
+  for (std::size_t index = 0;
+       index < m_parameters.pixel_formats.size();
+       ++index)
+  {
+    const auto &option = m_parameters.pixel_formats[index];
+    m_pixel_format_choice->Append(From_Utf8(option.name));
+    if (option.value == m_parameters.pixel_format_value)
+    {
+      pixel_selection = static_cast<int>(index);
+    }
+  }
+  if (pixel_selection != wxNOT_FOUND)
+  {
+    m_pixel_format_choice->SetSelection(pixel_selection);
+  }
 }
 
 void Camera_2D_Control_Panel::Show_Error(const std::string &message)
@@ -412,6 +561,28 @@ void Camera_2D_Control_Panel::On_Apply(wxCommandEvent &)
   {
     Show_Error(error);
   }
+  else
+  {
+    unsigned long long pixel_format = m_parameters.pixel_format_value;
+    const int pixel_selection = m_pixel_format_choice->GetSelection();
+    if (pixel_selection != wxNOT_FOUND &&
+        static_cast<std::size_t>(pixel_selection) <
+          m_parameters.pixel_formats.size())
+    {
+      pixel_format =
+        m_parameters.pixel_formats[
+          static_cast<std::size_t>(pixel_selection)].value;
+    }
+    if (!m_camera_service.Apply_Image_Parameters(
+          m_exposure_spin->GetValue(),
+          m_gain_spin->GetValue(),
+          m_frame_rate_spin->GetValue(),
+          pixel_format,
+          &error))
+    {
+      Show_Error(error);
+    }
+  }
   Sync_Configuration_Editors();
   Refresh_View();
 }
@@ -471,6 +642,117 @@ void Camera_2D_Control_Panel::On_Show_Image(wxCommandEvent &)
   {
     m_on_show_image();
   }
+}
+
+void Camera_2D_Control_Panel::Refresh_Template_List()
+{
+  const auto active = m_template_service.Active_Template();
+  const auto templates = m_template_service.Templates();
+  m_template_choice->Clear();
+  m_template_ids.clear();
+  int selection = wxNOT_FOUND;
+  for (std::size_t index = 0; index < templates.size(); ++index)
+  {
+    m_template_choice->Append(From_Utf8(templates[index].name));
+    m_template_ids.push_back(templates[index].id);
+    if (active && active->id == templates[index].id)
+      selection = static_cast<int>(index);
+  }
+  if (selection == wxNOT_FOUND && !templates.empty()) selection = 0;
+  if (selection != wxNOT_FOUND)
+  {
+    m_template_choice->SetSelection(selection);
+    m_template_service.Set_Active(
+      m_template_ids[static_cast<std::size_t>(selection)], nullptr);
+  }
+}
+
+void Camera_2D_Control_Panel::On_Template_Selected(wxCommandEvent &)
+{
+  const int selection = m_template_choice->GetSelection();
+  if (selection == wxNOT_FOUND ||
+      static_cast<std::size_t>(selection) >= m_template_ids.size())
+    return;
+  std::string error;
+  if (!m_template_service.Set_Active(
+        m_template_ids[static_cast<std::size_t>(selection)], &error))
+  {
+    Show_Error(error);
+  }
+}
+
+void Camera_2D_Control_Panel::On_Create_Template(wxCommandEvent &)
+{
+  if (!m_camera_service.Latest_Frame())
+  {
+    Show_Error("请先采集一幅包含完整平面十字的图像");
+    return;
+  }
+  wxTextEntryDialog dialog(
+    this,
+    wxString::FromUTF8(u8"请输入模板名称，然后在图像中框选完整十字"),
+    wxString::FromUTF8(u8"创建平面十字模板"));
+  if (dialog.ShowModal() != wxID_OK ||
+      dialog.GetValue().Trim().empty())
+    return;
+  const std::string name = dialog.GetValue().ToUTF8().data();
+  if (m_on_show_image) m_on_show_image();
+  m_image_view.Begin_Template_Roi_Selection(
+    [this, name](Camera_2D_Roi roi)
+    {
+      Create_Template_From_Roi(name, roi);
+    });
+}
+
+void Camera_2D_Control_Panel::Create_Template_From_Roi(
+  const std::string &name,
+  const Camera_2D_Roi &roi)
+{
+  const auto frame = m_camera_service.Latest_Frame();
+  if (!frame)
+  {
+    Show_Error("框选完成时2D图像已经失效");
+    return;
+  }
+  Camera_2D_Display_Image image;
+  std::string error;
+  if (!Convert_Camera_2D_Frame(*frame, &image, &error))
+  {
+    Show_Error(error);
+    return;
+  }
+  std::string created_id;
+  if (!m_template_service.Create(
+        name, image, roi, &created_id, &error))
+  {
+    Show_Error(error);
+    return;
+  }
+  Refresh_Template_List();
+  Refresh_View();
+}
+
+void Camera_2D_Control_Panel::On_Delete_Template(wxCommandEvent &)
+{
+  const int selection = m_template_choice->GetSelection();
+  if (selection == wxNOT_FOUND ||
+      static_cast<std::size_t>(selection) >= m_template_ids.size())
+    return;
+  if (wxMessageBox(
+        wxString::FromUTF8(u8"确定删除当前十字模板吗？"),
+        wxString::FromUTF8(u8"删除模板"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
+        this) != wxYES)
+    return;
+  std::string error;
+  if (!m_template_service.Remove(
+        m_template_ids[static_cast<std::size_t>(selection)], &error))
+  {
+    Show_Error(error);
+    return;
+  }
+  Refresh_Template_List();
+  Refresh_View();
 }
 
 void Camera_2D_Control_Panel::On_Timer(wxTimerEvent &)

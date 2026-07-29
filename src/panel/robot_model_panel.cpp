@@ -203,6 +203,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   wxWindow* parent,
   Camera_Service& camera_service,
   Camera_2D_Service& camera_2d_service,
+  Camera_2D_Cross_Template_Service& camera_2d_template_service,
   wxWindowID id)
   : wxPanel (parent, id)
 {
@@ -338,7 +339,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_camera_image_view = new Camera_Image_View (
     m_display_book, camera_service);
   m_camera_2d_image_view = new Camera_2D_Image_View (
-    m_display_book, camera_2d_service);
+    m_display_book, camera_2d_service, camera_2d_template_service);
   m_point_cloud_view = new Point_Cloud_View (
     m_display_book, camera_service);
   Point_Cloud_Overlay_Toolbar::Callbacks overlay_callbacks;
@@ -463,7 +464,9 @@ Robot_Model_Panel::Robot_Model_Panel (
     camera_service);
   m_camera_2d_control_panel = new Camera_2D_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera2D),
-    camera_2d_service);
+    camera_2d_service,
+    camera_2d_template_service,
+    *m_camera_2d_image_view);
   m_camera_2d_control_panel->Set_On_Show_Image (
     [this] { Select_Display_Page (Main_Display_Page::Camera_2D_Image); });
   m_point_cloud_overlay_toolbar = new Point_Cloud_Overlay_Toolbar (

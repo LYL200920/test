@@ -156,8 +156,11 @@ file(GLOB camera_sources CONFIGURE_DEPENDS "src/camera/*.cpp")
 file(GLOB camera_headers CONFIGURE_DEPENDS "include/camera/*.h" "include/camera/*.hpp")
 add_library(camera STATIC ${camera_sources} ${camera_headers})
 target_include_directories(camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/camera")
+target_compile_definitions(camera PRIVATE
+  CAMERA_2D_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/Resource/Camera2D")
 target_link_libraries(camera PUBLIC
-  point_cloud_core MV3DRGBD::SDK jutze_camera_huaray wx::base wx::core)
+  point_cloud_core MV3DRGBD::SDK jutze_camera_huaray
+  pugixml wx::base wx::core)
 
 file(GLOB net_sources CONFIGURE_DEPENDS "src/net/*.cpp")
 file(GLOB net_headers CONFIGURE_DEPENDS "include/net/*.h" "include/net/*.hpp")
