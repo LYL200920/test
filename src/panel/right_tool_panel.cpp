@@ -41,7 +41,7 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"2D相机"),
     wxDefaultPosition, wxSize (68, 40));
   m_template_2d_button = new wxButton (
-    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"模板"),
+    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"2D模板"),
     wxDefaultPosition, wxSize (68, 40));
   m_point_cloud_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"点云"),
@@ -402,7 +402,7 @@ void Right_Tool_Panel::Update_Button_Labels ( )
   {
     m_template_2d_button->SetLabel (
       m_right_expanded && m_active_page == Right_Tool_Page::Template2D
-        ? wxString::FromUTF8 (u8"模板 >")
-        : wxString::FromUTF8 (u8"模板"));
+        ? wxString::FromUTF8 (u8"2D模板 >")
+        : wxString::FromUTF8 (u8"2D模板"));
   }
 }

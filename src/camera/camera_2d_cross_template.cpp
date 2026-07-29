@@ -1120,6 +1120,7 @@ bool Camera_2D_Cross_Template_Service::Remove(
     if (m_active_template_id == template_id)
       m_active_template_id =
         m_templates.empty() ? std::string() : m_templates.front().id;
+    m_latest_detection.reset();
   }
   if (!Save(error_message)) return false;
   if (!reference_image.empty())
