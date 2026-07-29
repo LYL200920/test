@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<CrossTemplates>
+  <Template id="cross_20260729_173322_377" name="1" x="1903" y="1199" width="131" height="127" imageWidth="4096" imageHeight="3000" darkOnLight="true" threshold="83" foregroundRatio="0.21830858928893429" referenceAngle="89.083604920072773" featureCenterX="64.970814977973532" featureCenterY="61.505781938325981" referenceImage="cross_20260729_173322_377.pgm" />
+</CrossTemplates>
