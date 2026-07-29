@@ -254,56 +254,43 @@ double Cross_Angle(
   int height,
   double *line_confidence)
 {
-  std::vector<std::uint8_t> mask(
-    static_cast<std::size_t>(width) * height);
-  for (const int index : component.pixels) mask[index] = 1;
-  const int radius = std::max(3, std::min(width, height) * 2 / 5);
-  double best_score = -1.0;
-  double best_angle = 0.0;
-  for (int angle = 0; angle < 90; ++angle)
+  (void)height;
+  double harmonic_x = 0.0;
+  double harmonic_y = 0.0;
+  double weight_sum = 0.0;
+  for (const int index : component.pixels)
   {
-    const double radians = angle * kPi / 180.0;
-    const double cosine = std::cos(radians);
-    const double sine = std::sin(radians);
-    int hits = 0;
-    int samples = 0;
-    for (int arm = 0; arm < 2; ++arm)
-    {
-      const double ax = arm == 0 ? cosine : -sine;
-      const double ay = arm == 0 ? sine : cosine;
-      for (int offset = -radius; offset <= radius; ++offset)
-      {
-        const int x = static_cast<int>(
-          std::lround(component.center_x + ax * offset));
-        const int y = static_cast<int>(
-          std::lround(component.center_y + ay * offset));
-        if (x < 0 || y < 0 || x >= width || y >= height) continue;
-        ++samples;
-        bool hit = false;
-        for (int thickness = -1; thickness <= 1 && !hit; ++thickness)
-        {
-          const int tx = x + static_cast<int>(std::lround(-ay * thickness));
-          const int ty = y + static_cast<int>(std::lround(ax * thickness));
-          if (tx >= 0 && ty >= 0 && tx < width && ty < height &&
-              mask[static_cast<std::size_t>(ty) * width + tx])
-          {
-            hit = true;
-          }
-        }
-        if (hit) ++hits;
-      }
-    }
-    const double score = samples == 0
-      ? 0.0
-      : static_cast<double>(hits) / samples;
-    if (score > best_score)
-    {
-      best_score = score;
-      best_angle = angle;
-    }
+    const double dx =
+      static_cast<double>(index % width) - component.center_x;
+    const double dy =
+      static_cast<double>(index / width) - component.center_y;
+    const double radius_squared = dx * dx + dy * dy;
+    if (radius_squared < 1.0) continue;
+    const double angle = std::atan2(dy, dx);
+    // A cross is invariant after a 90-degree rotation. The fourth angular
+    // harmonic therefore estimates both perpendicular arms as one direction
+    // and avoids the edge-biased plateau produced by line-scanning thick arms.
+    harmonic_x += radius_squared * std::cos(4.0 * angle);
+    harmonic_y += radius_squared * std::sin(4.0 * angle);
+    weight_sum += radius_squared;
   }
-  if (line_confidence) *line_confidence = std::max(0.0, best_score);
-  return best_angle;
+  if (weight_sum <= 0.0)
+  {
+    if (line_confidence) *line_confidence = 0.0;
+    return 0.0;
+  }
+  double angle_deg =
+    std::atan2(harmonic_y, harmonic_x) * 180.0 / (4.0 * kPi);
+  while (angle_deg < 0.0) angle_deg += 90.0;
+  while (angle_deg >= 90.0) angle_deg -= 90.0;
+  if (line_confidence)
+  {
+    *line_confidence = std::clamp(
+      std::hypot(harmonic_x, harmonic_y) / weight_sum,
+      0.0,
+      1.0);
+  }
+  return angle_deg;
 }
 
 bool Write_Pgm(

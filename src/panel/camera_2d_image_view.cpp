@@ -23,6 +23,10 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
   Bind(wxEVT_LEFT_DOWN, &Camera_2D_Bitmap_Canvas::On_Left_Down, this);
   Bind(wxEVT_LEFT_UP, &Camera_2D_Bitmap_Canvas::On_Left_Up, this);
   Bind(wxEVT_MOTION, &Camera_2D_Bitmap_Canvas::On_Mouse_Move, this);
+  Bind(
+    wxEVT_MOUSEWHEEL,
+    &Camera_2D_Bitmap_Canvas::On_Mouse_Wheel,
+    this);
 }
 
 void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
@@ -91,19 +95,6 @@ void Camera_2D_Bitmap_Canvas::Fit_To_Window()
 {
   m_fit_to_window = true;
   Refresh(false);
-}
-
-void Camera_2D_Bitmap_Canvas::Actual_Size()
-{
-  m_fit_to_window = false;
-  m_zoom = 1.0;
-  Refresh(false);
-}
-
-wxString Camera_2D_Bitmap_Canvas::Zoom_Label() const
-{
-  if (m_fit_to_window) return wxString::FromUTF8(u8"适应窗口");
-  return wxString::Format("%.0f%%", m_zoom * 100.0);
 }
 
 void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
@@ -240,6 +231,14 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
   Refresh(false);
 }
 
+void Camera_2D_Bitmap_Canvas::On_Mouse_Wheel(wxMouseEvent &event)
+{
+  if (event.GetWheelRotation() > 0)
+    Zoom_In();
+  else if (event.GetWheelRotation() < 0)
+    Zoom_Out();
+}
+
 void Camera_2D_Bitmap_Canvas::On_Left_Up(wxMouseEvent &event)
 {
   if (!m_selecting_roi) return;
@@ -269,29 +268,11 @@ Camera_2D_Image_View::Camera_2D_Image_View(
     m_template_service(template_service)
 {
   m_canvas = new Camera_2D_Bitmap_Canvas(this);
-  auto *zoom_out = new wxButton(this, wxID_ANY, "-", wxDefaultPosition,
-                                wxSize(36, -1));
-  auto *zoom_in = new wxButton(this, wxID_ANY, "+", wxDefaultPosition,
-                               wxSize(36, -1));
   auto *fit = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"适应窗口"));
-  auto *actual = new wxButton(this, wxID_ANY, "1:1");
-  m_zoom_text = new wxStaticText(
-    this, wxID_ANY, wxString::FromUTF8(u8"适应窗口"));
-  zoom_out->Bind(
-    wxEVT_BUTTON, &Camera_2D_Image_View::On_Zoom_Out, this);
-  zoom_in->Bind(
-    wxEVT_BUTTON, &Camera_2D_Image_View::On_Zoom_In, this);
   fit->Bind(wxEVT_BUTTON, &Camera_2D_Image_View::On_Fit, this);
-  actual->Bind(
-    wxEVT_BUTTON, &Camera_2D_Image_View::On_Actual_Size, this);
   auto *zoom_sizer = new wxBoxSizer(wxHORIZONTAL);
-  zoom_sizer->Add(zoom_out, 0, wxRIGHT, 4);
-  zoom_sizer->Add(zoom_in, 0, wxRIGHT, 8);
-  zoom_sizer->Add(fit, 0, wxRIGHT, 4);
-  zoom_sizer->Add(actual, 0, wxRIGHT, 8);
-  zoom_sizer->Add(
-    m_zoom_text, 0, wxALIGN_CENTER_VERTICAL);
+  zoom_sizer->Add(fit, 0);
   m_status_text = new wxStaticText(
     this, wxID_ANY, wxString::FromUTF8(u8"请先打开2D相机"));
   auto *sizer = new wxBoxSizer(wxVERTICAL);
@@ -322,33 +303,9 @@ void Camera_2D_Image_View::Show_Template_Detection(
   m_canvas->Set_Detection(std::move(detection));
 }
 
-void Camera_2D_Image_View::On_Zoom_In(wxCommandEvent &)
-{
-  m_canvas->Zoom_In();
-  Update_Zoom_Label();
-}
-
-void Camera_2D_Image_View::On_Zoom_Out(wxCommandEvent &)
-{
-  m_canvas->Zoom_Out();
-  Update_Zoom_Label();
-}
-
 void Camera_2D_Image_View::On_Fit(wxCommandEvent &)
 {
   m_canvas->Fit_To_Window();
-  Update_Zoom_Label();
-}
-
-void Camera_2D_Image_View::On_Actual_Size(wxCommandEvent &)
-{
-  m_canvas->Actual_Size();
-  Update_Zoom_Label();
-}
-
-void Camera_2D_Image_View::Update_Zoom_Label()
-{
-  if (m_zoom_text) m_zoom_text->SetLabel(m_canvas->Zoom_Label());
 }
 
 Camera_2D_Image_View::~Camera_2D_Image_View()

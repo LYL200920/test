@@ -37,8 +37,6 @@ public:
   void Zoom_In();
   void Zoom_Out();
   void Fit_To_Window();
-  void Actual_Size();
-  wxString Zoom_Label() const;
 
 private:
   void On_Paint(wxPaintEvent &event);
@@ -46,6 +44,7 @@ private:
   void On_Left_Down(wxMouseEvent &event);
   void On_Left_Up(wxMouseEvent &event);
   void On_Mouse_Move(wxMouseEvent &event);
+  void On_Mouse_Wheel(wxMouseEvent &event);
   wxPoint Image_Point(const wxPoint &canvas_point) const;
   double Display_Scale() const;
   wxBitmap m_bitmap;
@@ -86,17 +85,12 @@ private:
   void Worker_Loop();
   void Consume_Result();
   void On_Timer(wxTimerEvent &event);
-  void On_Zoom_In(wxCommandEvent &event);
-  void On_Zoom_Out(wxCommandEvent &event);
   void On_Fit(wxCommandEvent &event);
-  void On_Actual_Size(wxCommandEvent &event);
-  void Update_Zoom_Label();
 
   Camera_2D_Service &m_camera_service;
   Camera_2D_Cross_Template_Service &m_template_service;
   Camera_2D_Bitmap_Canvas *m_canvas = nullptr;
   wxStaticText *m_status_text = nullptr;
-  wxStaticText *m_zoom_text = nullptr;
   wxTimer m_timer;
   std::thread m_worker;
   std::mutex m_worker_mutex;
