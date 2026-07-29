@@ -32,7 +32,8 @@ public:
   void Clear_Bitmap();
   void Set_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
-  void Set_Detection_Visible(bool visible);
+  void Set_Detections(
+    std::vector<Camera_2D_Cross_Detection> detections);
   void Begin_Roi_Selection(
     std::function<void(Camera_2D_Roi)> callback);
   void Begin_Roi_Editing(
@@ -68,8 +69,7 @@ private:
     Resize
   };
   wxBitmap m_bitmap;
-  std::optional<Camera_2D_Cross_Detection> m_detection;
-  bool m_detection_visible = true;
+  std::vector<Camera_2D_Cross_Detection> m_detections;
   std::function<void(Camera_2D_Roi)> m_roi_callback;
   bool m_selecting_roi = false;
   bool m_has_editable_roi = false;
@@ -106,7 +106,13 @@ public:
   void Cancel_Template_Roi_Selection();
   void Show_Template_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
-  void Set_Template_Detection_Visible(bool visible);
+  void Set_Matched_Template_Ids(
+    std::vector<std::string> template_ids);
+  void Show_Static_Image(
+    const Camera_2D_Display_Image &image,
+    const std::vector<std::string> &template_ids,
+    const std::string &source_name);
+  void Resume_Live_Image();
 
 private:
   struct Conversion_Result
@@ -114,7 +120,7 @@ private:
     unsigned long long job_id = 0;
     bool success = false;
     Camera_2D_Display_Image image;
-    std::optional<Camera_2D_Cross_Detection> detection;
+    std::vector<Camera_2D_Cross_Detection> detections;
     std::string error;
   };
 
@@ -132,6 +138,7 @@ private:
   wxTimer m_timer;
   std::thread m_worker;
   std::mutex m_worker_mutex;
+  std::mutex m_detection_mutex;
   std::condition_variable m_worker_ready;
   bool m_exit_requested = false;
   unsigned long long m_next_job_id = 1;
@@ -139,6 +146,8 @@ private:
   std::shared_ptr<const jutze_camera::camera_frame> m_pending_frame;
   std::shared_ptr<const jutze_camera::camera_frame> m_last_submitted_frame;
   std::optional<Conversion_Result> m_pending_result;
+  std::vector<std::string> m_matching_template_ids;
+  bool m_static_image_active = false;
 };
 
 #endif

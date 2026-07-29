@@ -924,6 +924,7 @@ bool Camera_2D_Cross_Template_Service::Reload(std::string *error_message)
   }
   std::lock_guard<std::mutex> lock(m_mutex);
   m_templates = std::move(loaded);
+  m_latest_detections.clear();
   if (!m_active_template_id.empty() &&
       std::none_of(
         m_templates.begin(), m_templates.end(),
@@ -978,7 +979,6 @@ bool Camera_2D_Cross_Template_Service::Set_Active(
     return false;
   }
   m_active_template_id = template_id;
-  m_latest_detection.reset();
   if (error_message) error_message->clear();
   return true;
 }
@@ -1202,7 +1202,7 @@ bool Camera_2D_Cross_Template_Service::Update(
     }
     *found = updated;
     m_active_template_id = template_id;
-    m_latest_detection.reset();
+    m_latest_detections.clear();
   }
   if (!Save(error_message))
   {
@@ -1250,7 +1250,7 @@ bool Camera_2D_Cross_Template_Service::Remove(
     if (m_active_template_id == template_id)
       m_active_template_id =
         m_templates.empty() ? std::string() : m_templates.front().id;
-    m_latest_detection.reset();
+    m_latest_detections.clear();
   }
   if (!Save(error_message)) return false;
   if (!reference_image.empty())
@@ -1267,31 +1267,81 @@ Camera_2D_Cross_Template_Service::Detect(
   const Camera_2D_Display_Image &image) const
 {
   const auto active = Active_Template();
-  if (!active)
+  if (!active) return std::nullopt;
+  const auto results = Detect(image, {active->id});
+  return results.empty()
+    ? std::optional<Camera_2D_Cross_Detection>()
+    : std::optional<Camera_2D_Cross_Detection>(results.front());
+}
+
+std::vector<Camera_2D_Cross_Detection>
+Camera_2D_Cross_Template_Service::Detect(
+  const Camera_2D_Display_Image &image,
+  const std::vector<std::string> &template_ids) const
+{
+  std::vector<Camera_2D_Cross_Template> templates;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_latest_detection.reset();
-    return std::nullopt;
+    for (const auto &template_id : template_ids)
+    {
+      const auto found = std::find_if(
+        m_templates.begin(), m_templates.end(),
+        [&template_id](const auto &item)
+        {
+          return item.id == template_id;
+        });
+      if (found != m_templates.end()) templates.push_back(*found);
+    }
   }
-  Camera_2D_Cross_Detection result;
-  if (!Detect_Camera_2D_Cross(image, *active, &result, nullptr))
+  std::vector<Camera_2D_Cross_Detection> results;
+  for (const auto &item : templates)
+  {
+    Camera_2D_Cross_Detection result;
+    if (Detect_Camera_2D_Cross(image, item, &result, nullptr))
+      results.push_back(std::move(result));
+  }
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_latest_detection.reset();
-    return std::nullopt;
+    for (const auto &template_id : template_ids)
+    {
+      m_latest_detections.erase(
+        std::remove_if(
+          m_latest_detections.begin(),
+          m_latest_detections.end(),
+          [&template_id](const auto &item)
+          {
+            return item.template_id == template_id;
+          }),
+        m_latest_detections.end());
+    }
+    m_latest_detections.insert(
+      m_latest_detections.end(), results.begin(), results.end());
   }
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_latest_detection = result;
-  }
-  return result;
+  return results;
 }
 
 std::optional<Camera_2D_Cross_Detection>
 Camera_2D_Cross_Template_Service::Latest_Detection() const
 {
+  const auto active = Active_Template();
+  return active ? Latest_Detection(active->id) : std::nullopt;
+}
+
+std::optional<Camera_2D_Cross_Detection>
+Camera_2D_Cross_Template_Service::Latest_Detection(
+  const std::string &template_id) const
+{
   std::lock_guard<std::mutex> lock(m_mutex);
-  return m_latest_detection;
+  const auto found = std::find_if(
+    m_latest_detections.begin(),
+    m_latest_detections.end(),
+    [&template_id](const auto &item)
+    {
+      return item.template_id == template_id;
+    });
+  return found == m_latest_detections.end()
+    ? std::optional<Camera_2D_Cross_Detection>()
+    : std::optional<Camera_2D_Cross_Detection>(*found);
 }
 
 bool Camera_2D_Cross_Template_Service::Save(

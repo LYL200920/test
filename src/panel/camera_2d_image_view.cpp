@@ -57,20 +57,22 @@ void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
 void Camera_2D_Bitmap_Canvas::Clear_Bitmap()
 {
   m_bitmap = wxBitmap();
-  m_detection.reset();
+  m_detections.clear();
   Refresh(false);
 }
 
 void Camera_2D_Bitmap_Canvas::Set_Detection(
   std::optional<Camera_2D_Cross_Detection> detection)
 {
-  m_detection = std::move(detection);
+  m_detections.clear();
+  if (detection) m_detections.push_back(std::move(*detection));
   Refresh(false);
 }
 
-void Camera_2D_Bitmap_Canvas::Set_Detection_Visible(bool visible)
+void Camera_2D_Bitmap_Canvas::Set_Detections(
+  std::vector<Camera_2D_Cross_Detection> detections)
 {
-  m_detection_visible = visible;
+  m_detections = std::move(detections);
   Refresh(false);
 }
 
@@ -236,38 +238,48 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
   {
     return offset_y + static_cast<int>(std::lround(y * scale));
   };
-  if (m_detection_visible && m_detection)
   {
-    const auto &detection = *m_detection;
-    dc.SetBrush(*wxTRANSPARENT_BRUSH);
-    dc.SetPen(wxPen(
-      detection.found ? wxColour(40, 220, 80) : wxColour(255, 80, 80),
-      2));
-    dc.DrawRectangle(
-      canvas_x(detection.search_roi.x),
-      canvas_y(detection.search_roi.y),
-      std::max(1, static_cast<int>(
-        detection.search_roi.width * scale)),
-      std::max(1, static_cast<int>(
-        detection.search_roi.height * scale)));
-    if (detection.found)
+    for (const auto &detection : m_detections)
     {
-      dc.SetPen(wxPen(wxColour(40, 255, 100), 2));
-      for (const auto &point : detection.outline)
+      dc.SetBrush(*wxTRANSPARENT_BRUSH);
+      dc.SetPen(wxPen(
+        detection.found ? wxColour(40, 220, 80) : wxColour(255, 80, 80),
+        2));
+      const int box_x = canvas_x(detection.search_roi.x);
+      const int box_y = canvas_y(detection.search_roi.y);
+      dc.DrawRectangle(
+        box_x,
+        box_y,
+        std::max(1, static_cast<int>(
+          detection.search_roi.width * scale)),
+        std::max(1, static_cast<int>(
+          detection.search_roi.height * scale)));
+      dc.DrawText(
+        wxString::FromUTF8(detection.template_name.c_str()),
+        box_x + 3,
+        box_y + 3);
+      if (detection.found)
       {
-        dc.DrawPoint(canvas_x(point[0]), canvas_y(point[1]));
+        dc.SetPen(wxPen(wxColour(40, 255, 100), 2));
+        for (const auto &point : detection.outline)
+        {
+          dc.DrawPoint(canvas_x(point[0]), canvas_y(point[1]));
+        }
+        const int cx = canvas_x(detection.center_x);
+        const int cy = canvas_y(detection.center_y);
+        const double angle =
+          detection.angle_deg * 3.14159265358979323846 / 180.0;
+        const int axis = std::max(18, static_cast<int>(
+          std::min(detection.search_roi.width,
+                   detection.search_roi.height) * scale * 0.25));
+        const int dx =
+          static_cast<int>(std::lround(std::cos(angle) * axis));
+        const int dy =
+          static_cast<int>(std::lround(std::sin(angle) * axis));
+        dc.DrawLine(cx - dx, cy - dy, cx + dx, cy + dy);
+        dc.DrawLine(cx + dy, cy - dx, cx - dy, cy + dx);
+        dc.DrawCircle(cx, cy, 4);
       }
-      const int cx = canvas_x(detection.center_x);
-      const int cy = canvas_y(detection.center_y);
-      const double angle = detection.angle_deg * 3.14159265358979323846 / 180.0;
-      const int axis = std::max(18, static_cast<int>(
-        std::min(detection.search_roi.width,
-                 detection.search_roi.height) * scale * 0.25));
-      const int dx = static_cast<int>(std::lround(std::cos(angle) * axis));
-      const int dy = static_cast<int>(std::lround(std::sin(angle) * axis));
-      dc.DrawLine(cx - dx, cy - dy, cx + dx, cy + dy);
-      dc.DrawLine(cx + dy, cy - dx, cx - dy, cy + dx);
-      dc.DrawCircle(cx, cy, 4);
     }
   }
   if (m_roi_callback && m_has_editable_roi)
@@ -589,9 +601,54 @@ void Camera_2D_Image_View::Show_Template_Detection(
   m_canvas->Set_Detection(std::move(detection));
 }
 
-void Camera_2D_Image_View::Set_Template_Detection_Visible(bool visible)
+void Camera_2D_Image_View::Set_Matched_Template_Ids(
+  std::vector<std::string> template_ids)
 {
-  m_canvas->Set_Detection_Visible(visible);
+  const bool empty = template_ids.empty();
+  {
+    std::lock_guard<std::mutex> lock(m_worker_mutex);
+    m_matching_template_ids = std::move(template_ids);
+  }
+  if (empty)
+    m_canvas->Set_Detections({});
+}
+
+void Camera_2D_Image_View::Show_Static_Image(
+  const Camera_2D_Display_Image &image_data,
+  const std::vector<std::string> &template_ids,
+  const std::string &source_name)
+{
+  m_static_image_active = true;
+  {
+    std::lock_guard<std::mutex> lock(m_worker_mutex);
+    m_pending_frame.reset();
+    m_pending_result.reset();
+  }
+  std::vector<Camera_2D_Cross_Detection> detections;
+  {
+    std::lock_guard<std::mutex> lock(m_detection_mutex);
+    detections = m_template_service.Detect(image_data, template_ids);
+  }
+  wxImage image(
+    static_cast<int>(image_data.width),
+    static_cast<int>(image_data.height));
+  if (!image.IsOk() || !image.GetData()) return;
+  std::memcpy(
+    image.GetData(), image_data.rgb.data(), image_data.rgb.size());
+  m_canvas->Set_Bitmap(wxBitmap(image));
+  m_canvas->Set_Detections(std::move(detections));
+  m_status_text->SetLabel(wxString::Format(
+    wxString::FromUTF8(u8"读取图片：%s  %u × %u"),
+    wxString::FromUTF8(source_name.c_str()),
+    image_data.width,
+    image_data.height));
+}
+
+void Camera_2D_Image_View::Resume_Live_Image()
+{
+  m_static_image_active = false;
+  m_last_submitted_frame.reset();
+  m_status_text->SetLabel(wxString::FromUTF8(u8"已恢复实时2D图像"));
 }
 
 void Camera_2D_Image_View::On_Fit(wxCommandEvent &)
@@ -634,6 +691,7 @@ void Camera_2D_Image_View::Worker_Loop()
   while (true)
   {
     std::shared_ptr<const jutze_camera::camera_frame> frame;
+    std::vector<std::string> template_ids;
     unsigned long long job_id = 0;
     {
       std::unique_lock<std::mutex> lock(m_worker_mutex);
@@ -649,6 +707,7 @@ void Camera_2D_Image_View::Worker_Loop()
       }
       frame = std::move(m_pending_frame);
       m_pending_frame.reset();
+      template_ids = m_matching_template_ids;
       job_id = m_next_job_id++;
     }
 
@@ -658,7 +717,9 @@ void Camera_2D_Image_View::Worker_Loop()
       *frame, &result.image, &result.error);
     if (result.success)
     {
-      result.detection = m_template_service.Detect(result.image);
+      std::lock_guard<std::mutex> lock(m_detection_mutex);
+      result.detections =
+        m_template_service.Detect(result.image, template_ids);
     }
     {
       std::lock_guard<std::mutex> lock(m_worker_mutex);
@@ -705,7 +766,7 @@ void Camera_2D_Image_View::Consume_Result()
     result->image.rgb.data(),
     result->image.rgb.size());
   m_canvas->Set_Bitmap(wxBitmap(image));
-  m_canvas->Set_Detection(result->detection);
+  m_canvas->Set_Detections(result->detections);
   const auto status = m_camera_service.Status();
   m_status_text->SetLabel(wxString::Format(
     wxString::FromUTF8(
@@ -716,7 +777,11 @@ void Camera_2D_Image_View::Consume_Result()
     status.frames_per_second,
     wxString::FromUTF8(
       jutze_camera::pixel_format_name(status.pixel_format))));
-  if (result->detection && result->detection->found)
+  const auto found_detection = std::find_if(
+    result->detections.begin(),
+    result->detections.end(),
+    [](const auto &item) { return item.found; });
+  if (found_detection != result->detections.end())
   {
     m_status_text->SetLabel(wxString::Format(
       wxString::FromUTF8(
@@ -726,13 +791,14 @@ void Camera_2D_Image_View::Consume_Result()
       result->image.height,
       result->image.frame_number,
       status.frames_per_second,
-      result->detection->center_x,
-      result->detection->center_y));
+      found_detection->center_x,
+      found_detection->center_y));
   }
 }
 
 void Camera_2D_Image_View::On_Timer(wxTimerEvent &)
 {
+  if (m_static_image_active) return;
   Consume_Result();
   if (!IsShownOnScreen())
   {

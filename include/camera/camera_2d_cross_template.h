@@ -81,7 +81,12 @@ public:
     std::string *error_message = nullptr);
   std::optional<Camera_2D_Cross_Detection> Detect(
     const Camera_2D_Display_Image &image) const;
+  std::vector<Camera_2D_Cross_Detection> Detect(
+    const Camera_2D_Display_Image &image,
+    const std::vector<std::string> &template_ids) const;
   std::optional<Camera_2D_Cross_Detection> Latest_Detection() const;
+  std::optional<Camera_2D_Cross_Detection> Latest_Detection(
+    const std::string &template_id) const;
 
 private:
   bool Save(std::string *error_message) const;
@@ -89,7 +94,7 @@ private:
   mutable std::mutex m_mutex;
   std::vector<Camera_2D_Cross_Template> m_templates;
   std::string m_active_template_id;
-  mutable std::optional<Camera_2D_Cross_Detection> m_latest_detection;
+  mutable std::vector<Camera_2D_Cross_Detection> m_latest_detections;
 };
 
 #endif
