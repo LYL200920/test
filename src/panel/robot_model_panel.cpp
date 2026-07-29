@@ -3,6 +3,8 @@
 #include "camera_control_panel.h"
 #include "camera_image_view.h"
 #include "camera_service.h"
+#include "camera_2d_control_panel.h"
+#include "camera_2d_image_view.h"
 #include "robot_joint_state_builder.h"
 #include "robot_model_config_dialog.h"
 #include "robot_model_repository.h"
@@ -200,6 +202,7 @@ wxString collision_summary (
 Robot_Model_Panel::Robot_Model_Panel (
   wxWindow* parent,
   Camera_Service& camera_service,
+  Camera_2D_Service& camera_2d_service,
   wxWindowID id)
   : wxPanel (parent, id)
 {
@@ -211,12 +214,16 @@ Robot_Model_Panel::Robot_Model_Panel (
     this, wxID_ANY, wxString::FromUTF8 (u8"机械臂"));
   m_camera_display_button = new wxToggleButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"相机图像"));
+  m_camera_2d_display_button = new wxToggleButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"2D图像"));
   m_point_cloud_display_button = new wxToggleButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"点云"));
   m_robot_display_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Robot_Display, this);
   m_camera_display_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Camera_Image_Display, this);
+  m_camera_2d_display_button->Bind (
+    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Camera_2D_Image_Display, this);
   m_point_cloud_display_button->Bind (
     wxEVT_TOGGLEBUTTON, &Robot_Model_Panel::On_Point_Cloud_Display, this);
   m_workspace_splitter = new wxSplitterWindow (
@@ -330,6 +337,8 @@ Robot_Model_Panel::Robot_Model_Panel (
     });
   m_camera_image_view = new Camera_Image_View (
     m_display_book, camera_service);
+  m_camera_2d_image_view = new Camera_2D_Image_View (
+    m_display_book, camera_2d_service);
   m_point_cloud_view = new Point_Cloud_View (
     m_display_book, camera_service);
   Point_Cloud_Overlay_Toolbar::Callbacks overlay_callbacks;
@@ -440,6 +449,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_display_book->AddPage (m_view, wxEmptyString, true);
   m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
+  m_display_book->AddPage (m_camera_2d_image_view, wxEmptyString, false);
   m_right_tool_panel = new Right_Tool_Panel (m_content_splitter);
   m_right_tool_panel->Set_On_Width_Changed (
     [this] (int width) { Resize_Right_Tool (width); });
@@ -451,6 +461,11 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_camera_control_panel = new Camera_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
     camera_service);
+  m_camera_2d_control_panel = new Camera_2D_Control_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera2D),
+    camera_2d_service);
+  m_camera_2d_control_panel->Set_On_Show_Image (
+    [this] { Select_Display_Page (Main_Display_Page::Camera_2D_Image); });
   m_point_cloud_overlay_toolbar = new Point_Cloud_Overlay_Toolbar (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::PointCloud),
     camera_service,
@@ -566,6 +581,8 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera, m_camera_control_panel);
   m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Camera2D, m_camera_2d_control_panel);
+  m_right_tool_panel->Add_Page (
     Right_Tool_Page::PointCloud, m_point_cloud_overlay_toolbar);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Tool, m_tool_panel);
@@ -598,6 +615,8 @@ Robot_Model_Panel::Robot_Model_Panel (
     m_robot_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
   toolbar_sizer->Add (
     m_camera_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+  toolbar_sizer->Add (
+    m_camera_2d_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
   toolbar_sizer->Add (
     m_point_cloud_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->AddStretchSpacer (1);
@@ -652,6 +671,11 @@ void Robot_Model_Panel::On_Robot_Display (wxCommandEvent&)
 void Robot_Model_Panel::On_Camera_Image_Display (wxCommandEvent&)
 {
   Select_Display_Page (Main_Display_Page::Camera_Image);
+}
+
+void Robot_Model_Panel::On_Camera_2D_Image_Display (wxCommandEvent&)
+{
+  Select_Display_Page (Main_Display_Page::Camera_2D_Image);
 }
 
 void Robot_Model_Panel::On_Point_Cloud_Display (wxCommandEvent&)
@@ -839,6 +863,11 @@ void Robot_Model_Panel::Update_Display_Menu ( )
   {
     m_camera_display_button->SetValue (
       m_display_page == Main_Display_Page::Camera_Image);
+  }
+  if( m_camera_2d_display_button )
+  {
+    m_camera_2d_display_button->SetValue (
+      m_display_page == Main_Display_Page::Camera_2D_Image);
   }
   if( m_point_cloud_display_button )
   {

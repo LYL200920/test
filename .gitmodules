@@ -1,0 +1,3 @@
+[submodule "3rd/jutze_camera"]
+	path = 3rd/jutze_camera
+	url = git@git.pri.jutze.cn:research_and_development/jutze_camera.git

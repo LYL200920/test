@@ -15,8 +15,9 @@ enum class Right_Tool_Page
   Tcp = 2,
   Flow = 3,
   Camera = 4,
-  PointCloud = 5,
-  Tool = 6
+  Camera2D = 5,
+  PointCloud = 6,
+  Tool = 7
 };
 
 class Right_Tool_Panel : public wxPanel
@@ -37,6 +38,7 @@ private:
   void On_Teach_Click (wxCommandEvent& event);
   void On_Flow_Click (wxCommandEvent& event);
   void On_Camera_Click (wxCommandEvent& event);
+  void On_Camera_2D_Click (wxCommandEvent& event);
   void On_Point_Cloud_Click (wxCommandEvent& event);
   void On_Tool_Click (wxCommandEvent& event);
   void On_Robot_Click (wxCommandEvent& event);
@@ -52,6 +54,7 @@ private:
   wxButton* m_teach_button = nullptr;
   wxButton* m_flow_button = nullptr;
   wxButton* m_camera_button = nullptr;
+  wxButton* m_camera_2d_button = nullptr;
   wxButton* m_point_cloud_button = nullptr;
   wxButton* m_tool_button = nullptr;
   wxButton* m_robot_button = nullptr;

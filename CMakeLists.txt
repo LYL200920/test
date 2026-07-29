@@ -38,6 +38,38 @@ add_library(asio INTERFACE)
 target_include_directories(asio INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/3rd")
 target_compile_definitions(asio INTERFACE ASIO_STANDALONE _WIN32_WINNT=0x0601)
 
+# Jutze 2D camera SDK (HuarayTech backend only)
+set(HUARAY_SDK_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/jutze_camera/camera/HuarayTech")
+set(HUARAY_RUNTIME_DIR
+    "C:/Program Files/HuarayTech/MV Viewer/Runtime/x64"
+    CACHE PATH "HuarayTech MV Viewer x64 runtime directory")
+set(HUARAY_IMPORT_LIBRARY "${HUARAY_SDK_DIR}/lib/MVSDKmd.lib")
+set(HUARAY_RUNTIME_LIBRARY "${HUARAY_RUNTIME_DIR}/MVSDKmd.dll")
+
+foreach(required_file
+    "${HUARAY_SDK_DIR}/include/IMVApi.h"
+    "${HUARAY_IMPORT_LIBRARY}"
+    "${HUARAY_RUNTIME_LIBRARY}")
+  if(NOT EXISTS "${required_file}")
+    message(FATAL_ERROR "HuarayTech SDK file was not found: ${required_file}")
+  endif()
+endforeach()
+
+add_library(HuarayTech::MVSDK SHARED IMPORTED GLOBAL)
+set_target_properties(HuarayTech::MVSDK PROPERTIES
+  IMPORTED_IMPLIB "${HUARAY_IMPORT_LIBRARY}"
+  IMPORTED_LOCATION "${HUARAY_RUNTIME_LIBRARY}"
+  INTERFACE_INCLUDE_DIRECTORIES "${HUARAY_SDK_DIR}/include")
+
+add_library(jutze_camera_huaray STATIC
+  "${HUARAY_SDK_DIR}/camera_dahua.cpp")
+target_include_directories(jutze_camera_huaray PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/3rd/jutze_camera"
+  "${CMAKE_CURRENT_SOURCE_DIR}/3rd/jutze_camera/include"
+  "${HUARAY_SDK_DIR}/include")
+target_link_libraries(jutze_camera_huaray PUBLIC HuarayTech::MVSDK)
+
 # MV3D RGBD SDK
 set(MV3DRGBD_DEV_ROOT "F:/Software/HiViewer/Development"
     CACHE PATH "MV3D RGBD SDK development directory")
@@ -125,7 +157,7 @@ file(GLOB camera_headers CONFIGURE_DEPENDS "include/camera/*.h" "include/camera/
 add_library(camera STATIC ${camera_sources} ${camera_headers})
 target_include_directories(camera PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/camera")
 target_link_libraries(camera PUBLIC
-  point_cloud_core MV3DRGBD::SDK wx::base wx::core)
+  point_cloud_core MV3DRGBD::SDK jutze_camera_huaray wx::base wx::core)
 
 file(GLOB net_sources CONFIGURE_DEPENDS "src/net/*.cpp")
 file(GLOB net_headers CONFIGURE_DEPENDS "include/net/*.h" "include/net/*.hpp")
@@ -196,18 +228,25 @@ target_link_libraries(test_app PRIVATE panel)
 vtk_module_autoinit(TARGETS test_app MODULES ${VTK_LIBRARIES})
 
 if(MSVC)
-  foreach(target camera net robot_kinematics_core robot_model point_cloud panel test_app)
+  foreach(target jutze_camera_huaray camera net robot_kinematics_core robot_model point_cloud panel test_app)
     target_compile_options(${target} PRIVATE /FS /utf-8)
   endforeach()
 endif()
 
 if(WIN32)
+  file(GLOB HUARAY_RUNTIME_FILES CONFIGURE_DEPENDS
+       "${HUARAY_RUNTIME_DIR}/*.dll"
+       "${HUARAY_RUNTIME_DIR}/*.cti"
+       "${HUARAY_RUNTIME_DIR}/*.properties")
   add_custom_command(TARGET test_app POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_RUNTIME_DLLS:test_app>
             $<TARGET_FILE_DIR:test_app>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${MV3DRGBD_RUNTIME_FILES}
+            $<TARGET_FILE_DIR:test_app>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${HUARAY_RUNTIME_FILES}
             $<TARGET_FILE_DIR:test_app>
     COMMAND_EXPAND_LISTS)
 endif()
@@ -257,6 +296,10 @@ if(BUILD_TESTING)
 
   add_project_test(camera_image_converter_tests camera_image_converter_tests.cpp)
   target_link_libraries(camera_image_converter_tests PRIVATE camera)
+
+  add_project_test(camera_2d_image_converter_tests
+                   camera_2d_image_converter_tests.cpp)
+  target_link_libraries(camera_2d_image_converter_tests PRIVATE camera)
 
   add_project_test(camera_point_cloud_converter_tests camera_point_cloud_converter_tests.cpp)
   target_link_libraries(camera_point_cloud_converter_tests PRIVATE camera)

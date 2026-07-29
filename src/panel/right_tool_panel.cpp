@@ -37,6 +37,9 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_camera_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"相机"),
     wxDefaultPosition, wxSize (68, 40));
+  m_camera_2d_button = new wxButton (
+    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"2D相机"),
+    wxDefaultPosition, wxSize (68, 40));
   m_point_cloud_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"点云"),
     wxDefaultPosition, wxSize (68, 40));
@@ -63,6 +66,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     wxEVT_BUTTON, &Right_Tool_Panel::On_Flow_Click, this);
   m_camera_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_Click, this);
+  m_camera_2d_button->Bind (
+    wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_2D_Click, this);
   m_point_cloud_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Point_Cloud_Click, this);
   m_tool_button->Bind (
@@ -74,6 +79,7 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   rail_sizer->Add (m_tcp_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_flow_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_button, 0, wxEXPAND | wxBOTTOM, 4);
+  rail_sizer->Add (m_camera_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_point_cloud_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_tool_button, 0, wxEXPAND);
   rail_sizer->AddStretchSpacer (1);
@@ -202,6 +208,11 @@ void Right_Tool_Panel::On_Flow_Click (wxCommandEvent&)
 void Right_Tool_Panel::On_Camera_Click (wxCommandEvent&)
 {
   Toggle_Right_Page (Right_Tool_Page::Camera);
+}
+
+void Right_Tool_Panel::On_Camera_2D_Click (wxCommandEvent&)
+{
+  Toggle_Right_Page (Right_Tool_Page::Camera2D);
 }
 
 void Right_Tool_Panel::On_Teach_Click (wxCommandEvent&)
@@ -342,5 +353,12 @@ void Right_Tool_Panel::Update_Button_Labels ( )
       m_right_expanded && m_active_page == Right_Tool_Page::Camera
         ? wxString::FromUTF8 (u8"相机 >")
         : wxString::FromUTF8 (u8"相机"));
+  }
+  if( m_camera_2d_button )
+  {
+    m_camera_2d_button->SetLabel (
+      m_right_expanded && m_active_page == Right_Tool_Page::Camera2D
+        ? wxString::FromUTF8 (u8"2D相机 >")
+        : wxString::FromUTF8 (u8"2D相机"));
   }
 }
