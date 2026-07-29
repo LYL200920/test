@@ -60,6 +60,13 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
   grid->Add(m_name_text, 1, wxEXPAND);
   m_create_button = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"新增"));
+  m_confirm_roi_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"确认ROI"));
+  m_cancel_roi_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"取消ROI"));
+  auto *roi_button_sizer = new wxBoxSizer(wxHORIZONTAL);
+  roi_button_sizer->Add(m_confirm_roi_button, 1, wxRIGHT, 4);
+  roi_button_sizer->Add(m_cancel_roi_button, 1);
   m_instruction_text = new wxStaticText(
     this,
     wxID_ANY,
@@ -69,6 +76,11 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
   creation_box->Add(grid, 0, wxEXPAND | wxALL, 6);
   creation_box->Add(
     m_create_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+  creation_box->Add(
+    roi_button_sizer,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+    6);
   creation_box->Add(
     m_instruction_text, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
@@ -138,6 +150,14 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
     this);
   m_delete_button->Bind(
     wxEVT_BUTTON, &Camera_2D_Template_Panel::On_Delete, this);
+  m_confirm_roi_button->Bind(
+    wxEVT_BUTTON,
+    &Camera_2D_Template_Panel::On_Confirm_Roi,
+    this);
+  m_cancel_roi_button->Bind(
+    wxEVT_BUTTON,
+    &Camera_2D_Template_Panel::On_Cancel_Roi,
+    this);
   m_timer.SetOwner(this);
   Bind(
     wxEVT_TIMER, &Camera_2D_Template_Panel::On_Timer,
@@ -184,13 +204,21 @@ void Camera_2D_Template_Panel::Refresh_View()
   const bool connected = m_camera_service.Is_Open();
   const bool has_frame =
     static_cast<bool>(m_camera_service.Latest_Frame());
-  m_type_choice->Enable(connected);
-  m_name_text->Enable(connected);
-  m_create_button->Enable(connected && has_frame);
-  m_template_list->Enable(connected && !m_template_ids.empty());
+  m_type_choice->Enable(connected && !m_roi_editing);
+  m_name_text->Enable(connected && !m_roi_editing);
+  m_create_button->Enable(
+    connected && has_frame && !m_roi_editing);
+  m_confirm_roi_button->Enable(
+    connected &&
+    m_roi_editing &&
+    m_image_view.Has_Editable_Template_Roi());
+  m_cancel_roi_button->Enable(m_roi_editing);
+  m_template_list->Enable(
+    connected && !m_template_ids.empty() && !m_roi_editing);
   const long selection = m_template_list->GetNextItem(
     -1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
-  m_delete_button->Enable(connected && selection != -1);
+  m_delete_button->Enable(
+    connected && selection != -1 && !m_roi_editing);
   const auto active = m_template_service.Active_Template();
   m_info_name->SetLabel(
     active ? From_Utf8(active->name) : wxString::FromUTF8(u8"—"));
@@ -290,6 +318,27 @@ void Camera_2D_Template_Panel::On_Delete(wxCommandEvent &)
   Refresh_View();
 }
 
+void Camera_2D_Template_Panel::On_Confirm_Roi(wxCommandEvent &)
+{
+  if (!m_roi_editing ||
+      !m_image_view.Has_Editable_Template_Roi())
+    return;
+  m_roi_editing = false;
+  m_image_view.Confirm_Template_Roi_Selection();
+  Refresh_View();
+}
+
+void Camera_2D_Template_Panel::On_Cancel_Roi(wxCommandEvent &)
+{
+  if (!m_roi_editing) return;
+  m_image_view.Cancel_Template_Roi_Selection();
+  m_creation_frame.reset();
+  m_roi_editing = false;
+  m_instruction_text->SetLabel(
+    wxString::FromUTF8(u8"已取消ROI编辑，可重新点击“新增”。"));
+  Refresh_View();
+}
+
 void Camera_2D_Template_Panel::On_Create(wxCommandEvent &)
 {
   if (!m_camera_service.Is_Open())
@@ -315,11 +364,13 @@ void Camera_2D_Template_Panel::On_Create(wxCommandEvent &)
     return;
   }
   m_creation_frame = m_camera_service.Latest_Frame();
+  m_roi_editing = true;
   if (m_on_show_image) m_on_show_image();
   const std::string utf8_name = name.ToUTF8().data();
   m_instruction_text->SetLabel(
     wxString::FromUTF8(
-      u8"请在2D图片中绘制ROI；完成后将立即识别并创建模板。"));
+      u8"绘制ROI后，可拖动框内部移动，拖动边框或控制点调整大小；"
+      u8"完成后点击“确认ROI”。"));
   m_image_view.Begin_Template_Roi_Selection(
     [this, utf8_name](Camera_2D_Roi roi)
     {
@@ -331,6 +382,7 @@ void Camera_2D_Template_Panel::On_Roi_Selected(
   const std::string &name,
   const Camera_2D_Roi &roi)
 {
+  m_roi_editing = false;
   const auto frame = std::move(m_creation_frame);
   if (!frame)
   {

@@ -14,6 +14,17 @@
 #include <cstring>
 #include <utility>
 
+namespace
+{
+constexpr int kRoi_Left = 1;
+constexpr int kRoi_Right = 2;
+constexpr int kRoi_Top = 4;
+constexpr int kRoi_Bottom = 8;
+constexpr int kRoi_Inside = 16;
+constexpr int kRoi_Handle_Radius = 5;
+constexpr int kMinimum_Roi_Size = 20;
+}
+
 Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
   : wxPanel(parent, wxID_ANY)
 {
@@ -62,7 +73,42 @@ void Camera_2D_Bitmap_Canvas::Begin_Roi_Selection(
 {
   m_roi_callback = std::move(callback);
   m_selecting_roi = false;
+  m_has_editable_roi = false;
+  m_roi_drag_mode = Roi_Drag_Mode::None;
   SetCursor(wxCursor(wxCURSOR_CROSS));
+  Refresh(false);
+}
+
+bool Camera_2D_Bitmap_Canvas::Has_Editable_Roi() const
+{
+  return m_roi_callback && m_has_editable_roi &&
+    m_editable_roi.width >= kMinimum_Roi_Size &&
+    m_editable_roi.height >= kMinimum_Roi_Size;
+}
+
+void Camera_2D_Bitmap_Canvas::Confirm_Roi_Selection()
+{
+  if (!Has_Editable_Roi()) return;
+  const Camera_2D_Roi roi = m_editable_roi;
+  auto callback = std::move(m_roi_callback);
+  m_roi_callback = nullptr;
+  m_has_editable_roi = false;
+  m_selecting_roi = false;
+  m_roi_drag_mode = Roi_Drag_Mode::None;
+  SetCursor(wxNullCursor);
+  Refresh(false);
+  if (callback) callback(roi);
+}
+
+void Camera_2D_Bitmap_Canvas::Cancel_Roi_Selection()
+{
+  m_roi_callback = nullptr;
+  m_has_editable_roi = false;
+  m_selecting_roi = false;
+  m_roi_drag_mode = Roi_Drag_Mode::None;
+  if (HasCapture()) ReleaseMouse();
+  SetCursor(wxNullCursor);
+  Refresh(false);
 }
 
 double Camera_2D_Bitmap_Canvas::Display_Scale() const
@@ -200,15 +246,33 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
       dc.DrawCircle(cx, cy, 4);
     }
   }
-  if (m_selecting_roi)
+  if (m_roi_callback && m_has_editable_roi)
   {
     dc.SetBrush(*wxTRANSPARENT_BRUSH);
     dc.SetPen(wxPen(wxColour(255, 210, 40), 2, wxPENSTYLE_SHORT_DASH));
-    const int x0 = canvas_x(std::min(m_roi_start.x, m_roi_end.x));
-    const int y0 = canvas_y(std::min(m_roi_start.y, m_roi_end.y));
-    const int x1 = canvas_x(std::max(m_roi_start.x, m_roi_end.x));
-    const int y1 = canvas_y(std::max(m_roi_start.y, m_roi_end.y));
+    const int x0 = canvas_x(m_editable_roi.x);
+    const int y0 = canvas_y(m_editable_roi.y);
+    const int x1 = canvas_x(
+      m_editable_roi.x + m_editable_roi.width - 1);
+    const int y1 = canvas_y(
+      m_editable_roi.y + m_editable_roi.height - 1);
     dc.DrawRectangle(x0, y0, x1 - x0, y1 - y0);
+    dc.SetPen(wxPen(wxColour(255, 210, 40), 1));
+    dc.SetBrush(wxBrush(wxColour(255, 245, 200)));
+    const int center_x = (x0 + x1) / 2;
+    const int center_y = (y0 + y1) / 2;
+    const std::array<wxPoint, 8> handles{{
+      {x0, y0}, {center_x, y0}, {x1, y0},
+      {x0, center_y}, {x1, center_y},
+      {x0, y1}, {center_x, y1}, {x1, y1}}};
+    for (const auto &handle : handles)
+    {
+      dc.DrawRectangle(
+        handle.x - kRoi_Handle_Radius,
+        handle.y - kRoi_Handle_Radius,
+        kRoi_Handle_Radius * 2 + 1,
+        kRoi_Handle_Radius * 2 + 1);
+    }
   }
 }
 
@@ -234,12 +298,103 @@ wxPoint Camera_2D_Bitmap_Canvas::Image_Point(
       0, m_bitmap.GetHeight() - 1));
 }
 
+int Camera_2D_Bitmap_Canvas::Hit_Test_Roi(
+  const wxPoint &canvas_point) const
+{
+  if (!m_roi_callback || !m_has_editable_roi || !m_bitmap.IsOk())
+    return 0;
+  const double scale = Display_Scale();
+  const wxPoint offset = Display_Offset(scale);
+  const int x0 = offset.x + static_cast<int>(
+    std::lround(m_editable_roi.x * scale));
+  const int y0 = offset.y + static_cast<int>(
+    std::lround(m_editable_roi.y * scale));
+  const int x1 = offset.x + static_cast<int>(std::lround(
+    (m_editable_roi.x + m_editable_roi.width - 1) * scale));
+  const int y1 = offset.y + static_cast<int>(std::lround(
+    (m_editable_roi.y + m_editable_roi.height - 1) * scale));
+  constexpr int tolerance = kRoi_Handle_Radius + 3;
+  if (canvas_point.x < x0 - tolerance ||
+      canvas_point.x > x1 + tolerance ||
+      canvas_point.y < y0 - tolerance ||
+      canvas_point.y > y1 + tolerance)
+    return 0;
+  int result = 0;
+  if (std::abs(canvas_point.x - x0) <= tolerance) result |= kRoi_Left;
+  if (std::abs(canvas_point.x - x1) <= tolerance) result |= kRoi_Right;
+  if (std::abs(canvas_point.y - y0) <= tolerance) result |= kRoi_Top;
+  if (std::abs(canvas_point.y - y1) <= tolerance) result |= kRoi_Bottom;
+  if (result == 0 &&
+      canvas_point.x > x0 && canvas_point.x < x1 &&
+      canvas_point.y > y0 && canvas_point.y < y1)
+    result = kRoi_Inside;
+  return result;
+}
+
+void Camera_2D_Bitmap_Canvas::Update_Roi_Cursor(
+  const wxPoint &canvas_point)
+{
+  if (!m_roi_callback)
+  {
+    SetCursor(wxNullCursor);
+    return;
+  }
+  const int hit = Hit_Test_Roi(canvas_point);
+  if ((hit & (kRoi_Left | kRoi_Top)) ==
+        (kRoi_Left | kRoi_Top) ||
+      (hit & (kRoi_Right | kRoi_Bottom)) ==
+        (kRoi_Right | kRoi_Bottom))
+    SetCursor(wxCursor(wxCURSOR_SIZENWSE));
+  else if ((hit & (kRoi_Right | kRoi_Top)) ==
+             (kRoi_Right | kRoi_Top) ||
+           (hit & (kRoi_Left | kRoi_Bottom)) ==
+             (kRoi_Left | kRoi_Bottom))
+    SetCursor(wxCursor(wxCURSOR_SIZENESW));
+  else if (hit & (kRoi_Left | kRoi_Right))
+    SetCursor(wxCursor(wxCURSOR_SIZEWE));
+  else if (hit & (kRoi_Top | kRoi_Bottom))
+    SetCursor(wxCursor(wxCURSOR_SIZENS));
+  else if (hit == kRoi_Inside)
+    SetCursor(wxCursor(wxCURSOR_HAND));
+  else
+    SetCursor(wxCursor(wxCURSOR_CROSS));
+}
+
+void Camera_2D_Bitmap_Canvas::Update_Drawn_Roi(
+  const wxPoint &image_point)
+{
+  m_roi_end = image_point;
+  m_editable_roi = {
+    std::min(m_roi_start.x, m_roi_end.x),
+    std::min(m_roi_start.y, m_roi_end.y),
+    std::abs(m_roi_end.x - m_roi_start.x) + 1,
+    std::abs(m_roi_end.y - m_roi_start.y) + 1};
+  m_has_editable_roi = true;
+}
+
 void Camera_2D_Bitmap_Canvas::On_Left_Down(wxMouseEvent &event)
 {
   if (!m_roi_callback || !m_bitmap.IsOk()) return;
-  m_roi_start = Image_Point(event.GetPosition());
-  m_roi_end = m_roi_start;
-  m_selecting_roi = m_roi_start.x >= 0;
+  const int hit = Hit_Test_Roi(event.GetPosition());
+  m_roi_drag_start = Image_Point(event.GetPosition());
+  m_roi_before_drag = m_editable_roi;
+  if (hit & (kRoi_Left | kRoi_Right | kRoi_Top | kRoi_Bottom))
+  {
+    m_roi_drag_mode = Roi_Drag_Mode::Resize;
+    m_roi_resize_edges = hit;
+  }
+  else if (hit == kRoi_Inside)
+  {
+    m_roi_drag_mode = Roi_Drag_Mode::Move;
+  }
+  else
+  {
+    m_roi_drag_mode = Roi_Drag_Mode::Draw;
+    m_roi_start = m_roi_drag_start;
+    m_roi_end = m_roi_start;
+    Update_Drawn_Roi(m_roi_start);
+  }
+  m_selecting_roi = m_roi_drag_start.x >= 0;
   if (m_selecting_roi) CaptureMouse();
   Refresh(false);
 }
@@ -255,9 +410,49 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
   }
   if (m_selecting_roi && event.LeftIsDown())
   {
-    m_roi_end = Image_Point(event.GetPosition());
+    const wxPoint point = Image_Point(event.GetPosition());
+    if (m_roi_drag_mode == Roi_Drag_Mode::Draw)
+    {
+      Update_Drawn_Roi(point);
+    }
+    else if (m_roi_drag_mode == Roi_Drag_Mode::Move)
+    {
+      const wxPoint delta = point - m_roi_drag_start;
+      m_editable_roi.x = std::clamp(
+        m_roi_before_drag.x + delta.x,
+        0,
+        m_bitmap.GetWidth() - m_roi_before_drag.width);
+      m_editable_roi.y = std::clamp(
+        m_roi_before_drag.y + delta.y,
+        0,
+        m_bitmap.GetHeight() - m_roi_before_drag.height);
+    }
+    else if (m_roi_drag_mode == Roi_Drag_Mode::Resize)
+    {
+      int left = m_roi_before_drag.x;
+      int top = m_roi_before_drag.y;
+      int right = left + m_roi_before_drag.width - 1;
+      int bottom = top + m_roi_before_drag.height - 1;
+      if (m_roi_resize_edges & kRoi_Left)
+        left = std::min(point.x, right - kMinimum_Roi_Size + 1);
+      if (m_roi_resize_edges & kRoi_Right)
+        right = std::max(point.x, left + kMinimum_Roi_Size - 1);
+      if (m_roi_resize_edges & kRoi_Top)
+        top = std::min(point.y, bottom - kMinimum_Roi_Size + 1);
+      if (m_roi_resize_edges & kRoi_Bottom)
+        bottom = std::max(point.y, top + kMinimum_Roi_Size - 1);
+      left = std::clamp(left, 0, m_bitmap.GetWidth() - 1);
+      right = std::clamp(right, 0, m_bitmap.GetWidth() - 1);
+      top = std::clamp(top, 0, m_bitmap.GetHeight() - 1);
+      bottom = std::clamp(bottom, 0, m_bitmap.GetHeight() - 1);
+      m_editable_roi = {
+        left, top, right - left + 1, bottom - top + 1};
+    }
     Refresh(false);
+    return;
   }
+  if (!m_selecting_roi && !m_panning)
+    Update_Roi_Cursor(event.GetPosition());
 }
 
 void Camera_2D_Bitmap_Canvas::On_Mouse_Wheel(wxMouseEvent &event)
@@ -271,21 +466,14 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Wheel(wxMouseEvent &event)
 void Camera_2D_Bitmap_Canvas::On_Left_Up(wxMouseEvent &event)
 {
   if (!m_selecting_roi) return;
-  m_roi_end = Image_Point(event.GetPosition());
+  const wxPoint point = Image_Point(event.GetPosition());
+  if (m_roi_drag_mode == Roi_Drag_Mode::Draw)
+    Update_Drawn_Roi(point);
   m_selecting_roi = false;
+  m_roi_drag_mode = Roi_Drag_Mode::None;
   if (HasCapture()) ReleaseMouse();
-  SetCursor(wxNullCursor);
-  const int x0 = std::min(m_roi_start.x, m_roi_end.x);
-  const int y0 = std::min(m_roi_start.y, m_roi_end.y);
-  Camera_2D_Roi roi{
-    x0,
-    y0,
-    std::abs(m_roi_end.x - m_roi_start.x) + 1,
-    std::abs(m_roi_end.y - m_roi_start.y) + 1};
-  auto callback = std::move(m_roi_callback);
-  m_roi_callback = nullptr;
+  Update_Roi_Cursor(event.GetPosition());
   Refresh(false);
-  if (callback) callback(roi);
 }
 
 void Camera_2D_Bitmap_Canvas::On_Right_Down(wxMouseEvent &event)
@@ -298,14 +486,12 @@ void Camera_2D_Bitmap_Canvas::On_Right_Down(wxMouseEvent &event)
   SetCursor(wxCursor(wxCURSOR_HAND));
 }
 
-void Camera_2D_Bitmap_Canvas::On_Right_Up(wxMouseEvent &)
+void Camera_2D_Bitmap_Canvas::On_Right_Up(wxMouseEvent &event)
 {
   if (!m_panning) return;
   m_panning = false;
   if (HasCapture()) ReleaseMouse();
-  SetCursor(m_roi_callback
-    ? wxCursor(wxCURSOR_CROSS)
-    : wxNullCursor);
+  Update_Roi_Cursor(event.GetPosition());
 }
 
 Camera_2D_Image_View::Camera_2D_Image_View(
@@ -343,7 +529,24 @@ void Camera_2D_Image_View::Begin_Template_Roi_Selection(
 {
   m_canvas->Begin_Roi_Selection(std::move(callback));
   m_status_text->SetLabel(
-    wxString::FromUTF8(u8"请在图像中拖动框选完整的平面十字"));
+    wxString::FromUTF8(
+      u8"绘制ROI后可拖动内部移动，拖动边框或控制点调整大小"));
+}
+
+bool Camera_2D_Image_View::Has_Editable_Template_Roi() const
+{
+  return m_canvas->Has_Editable_Roi();
+}
+
+void Camera_2D_Image_View::Confirm_Template_Roi_Selection()
+{
+  m_canvas->Confirm_Roi_Selection();
+}
+
+void Camera_2D_Image_View::Cancel_Template_Roi_Selection()
+{
+  m_canvas->Cancel_Roi_Selection();
+  m_status_text->SetLabel(wxString::FromUTF8(u8"已取消ROI编辑"));
 }
 
 void Camera_2D_Image_View::Show_Template_Detection(

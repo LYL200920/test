@@ -34,6 +34,9 @@ public:
     std::optional<Camera_2D_Cross_Detection> detection);
   void Begin_Roi_Selection(
     std::function<void(Camera_2D_Roi)> callback);
+  bool Has_Editable_Roi() const;
+  void Confirm_Roi_Selection();
+  void Cancel_Roi_Selection();
   void Zoom_In();
   void Zoom_Out();
   void Fit_To_Window();
@@ -49,11 +52,27 @@ private:
   void On_Mouse_Wheel(wxMouseEvent &event);
   wxPoint Image_Point(const wxPoint &canvas_point) const;
   wxPoint Display_Offset(double scale) const;
+  int Hit_Test_Roi(const wxPoint &canvas_point) const;
+  void Update_Roi_Cursor(const wxPoint &canvas_point);
+  void Update_Drawn_Roi(const wxPoint &image_point);
   double Display_Scale() const;
+  enum class Roi_Drag_Mode
+  {
+    None,
+    Draw,
+    Move,
+    Resize
+  };
   wxBitmap m_bitmap;
   std::optional<Camera_2D_Cross_Detection> m_detection;
   std::function<void(Camera_2D_Roi)> m_roi_callback;
   bool m_selecting_roi = false;
+  bool m_has_editable_roi = false;
+  Camera_2D_Roi m_editable_roi;
+  Camera_2D_Roi m_roi_before_drag;
+  Roi_Drag_Mode m_roi_drag_mode = Roi_Drag_Mode::None;
+  int m_roi_resize_edges = 0;
+  wxPoint m_roi_drag_start;
   wxPoint m_roi_start;
   wxPoint m_roi_end;
   bool m_panning = false;
@@ -74,6 +93,9 @@ public:
   ~Camera_2D_Image_View() override;
   void Begin_Template_Roi_Selection(
     std::function<void(Camera_2D_Roi)> callback);
+  bool Has_Editable_Template_Roi() const;
+  void Confirm_Template_Roi_Selection();
+  void Cancel_Template_Roi_Selection();
   void Show_Template_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
 
