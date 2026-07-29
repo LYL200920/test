@@ -30,6 +30,7 @@ class Camera_Control_Panel;
 class Camera_Image_View;
 class Camera_2D_Control_Panel;
 class Camera_2D_Image_View;
+class Camera_2D_Template_Panel;
 class Camera_Service;
 class Flow_Panel;
 class Point_Cloud_View;
@@ -178,6 +179,7 @@ private:
   Right_Tool_Panel *m_right_tool_panel = nullptr;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
+  Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;
   Flow_Panel *m_flow_panel = nullptr;
   Joint_Control_Panel *m_joint_panel = nullptr;
   Cartesian_Pose_Panel *m_cartesian_pose_panel = nullptr;

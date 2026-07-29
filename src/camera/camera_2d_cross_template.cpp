@@ -364,6 +364,39 @@ bool Analyze(
   detection->angle_deg = angle;
   detection->confidence = std::clamp(
     line_confidence * 0.75 + area_confidence * 0.25, 0.0, 1.0);
+  std::vector<std::uint8_t> component_mask(
+    static_cast<std::size_t>(roi.width) * roi.height);
+  for (const int index : component->pixels) component_mask[index] = 1;
+  detection->outline.clear();
+  for (const int index : component->pixels)
+  {
+    const int x = index % roi.width;
+    const int y = index / roi.width;
+    bool boundary = x == 0 || y == 0 ||
+      x + 1 == roi.width || y + 1 == roi.height;
+    if (!boundary)
+    {
+      boundary =
+        !component_mask[index - 1] ||
+        !component_mask[index + 1] ||
+        !component_mask[index - roi.width] ||
+        !component_mask[index + roi.width];
+    }
+    if (boundary)
+      detection->outline.push_back({roi.x + x, roi.y + y});
+  }
+  if (detection->outline.size() > 4000)
+  {
+    const std::size_t step =
+      (detection->outline.size() + 3999) / 4000;
+    std::vector<std::array<int, 2>> reduced;
+    reduced.reserve(4000);
+    for (std::size_t index = 0;
+         index < detection->outline.size();
+         index += step)
+      reduced.push_back(detection->outline[index]);
+    detection->outline = std::move(reduced);
+  }
   if (gray_output) *gray_output = gray;
   if (error_message) error_message->clear();
   return true;

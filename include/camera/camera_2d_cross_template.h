@@ -4,6 +4,7 @@
 #include "camera_2d_image_converter.h"
 
 #include <mutex>
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -40,6 +41,7 @@ struct Camera_2D_Cross_Detection
   double confidence = 0.0;
   std::string template_id;
   std::string template_name;
+  std::vector<std::array<int, 2>> outline;
 };
 
 bool Detect_Camera_2D_Cross(

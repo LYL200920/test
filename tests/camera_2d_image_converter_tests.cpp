@@ -143,6 +143,7 @@ void Test_Cross_Detection()
   assert(std::abs(detection.center_x - 50.0) < 1.0);
   assert(std::abs(detection.center_y - 50.0) < 1.0);
   assert(detection.confidence > 0.5);
+  assert(!detection.outline.empty());
 }
 }
 

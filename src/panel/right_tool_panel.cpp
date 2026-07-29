@@ -40,6 +40,9 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_camera_2d_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"2D相机"),
     wxDefaultPosition, wxSize (68, 40));
+  m_template_2d_button = new wxButton (
+    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"模板"),
+    wxDefaultPosition, wxSize (68, 40));
   m_point_cloud_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"点云"),
     wxDefaultPosition, wxSize (68, 40));
@@ -49,6 +52,9 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_camera_button->Enable (false);
   m_camera_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在设置中选择并打开3D相机"));
+  m_template_2d_button->Enable (false);
+  m_template_2d_button->SetToolTip (
+    wxString::FromUTF8 (u8"请先在2D相机页连接相机"));
   m_robot_button->Enable (false);
   m_robot_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在设置中加载机械臂模型"));
@@ -68,6 +74,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_Click, this);
   m_camera_2d_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_2D_Click, this);
+  m_template_2d_button->Bind (
+    wxEVT_BUTTON, &Right_Tool_Panel::On_Template_2D_Click, this);
   m_point_cloud_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Point_Cloud_Click, this);
   m_tool_button->Bind (
@@ -80,6 +88,7 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   rail_sizer->Add (m_flow_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
+  rail_sizer->Add (m_template_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_point_cloud_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_tool_button, 0, wxEXPAND);
   rail_sizer->AddStretchSpacer (1);
@@ -171,6 +180,23 @@ void Right_Tool_Panel::Set_Camera_Tool_Enabled (bool enabled)
   }
 }
 
+void Right_Tool_Panel::Set_Template_2D_Tool_Enabled (bool enabled)
+{
+  m_template_2d_tool_enabled = enabled;
+  if( m_template_2d_button )
+  {
+    m_template_2d_button->Enable (enabled);
+    m_template_2d_button->SetToolTip (
+      enabled ? wxString ( ) :
+        wxString::FromUTF8 (u8"请先在2D相机页连接相机"));
+  }
+  if( !enabled && m_right_expanded &&
+      m_active_page == Right_Tool_Page::Template2D )
+  {
+    Set_Right_Expanded (false);
+  }
+}
+
 void Right_Tool_Panel::Set_Flow_Tool_Enabled (bool enabled)
 {
   m_flow_tool_enabled = enabled;
@@ -215,6 +241,12 @@ void Right_Tool_Panel::On_Camera_2D_Click (wxCommandEvent&)
   Toggle_Right_Page (Right_Tool_Page::Camera2D);
 }
 
+void Right_Tool_Panel::On_Template_2D_Click (wxCommandEvent&)
+{
+  if( !m_template_2d_tool_enabled ) return;
+  Toggle_Right_Page (Right_Tool_Page::Template2D);
+}
+
 void Right_Tool_Panel::On_Teach_Click (wxCommandEvent&)
 {
   Toggle_Right_Page (Right_Tool_Page::Teach);
@@ -249,6 +281,11 @@ void Right_Tool_Panel::Toggle_Right_Page (Right_Tool_Page page)
   if( m_right_expanded && m_active_page == page )
   {
     Set_Right_Expanded (false);
+    return;
+  }
+  if( page == Right_Tool_Page::Template2D &&
+      !m_template_2d_tool_enabled )
+  {
     return;
   }
 
@@ -360,5 +397,12 @@ void Right_Tool_Panel::Update_Button_Labels ( )
       m_right_expanded && m_active_page == Right_Tool_Page::Camera2D
         ? wxString::FromUTF8 (u8"2D相机 >")
         : wxString::FromUTF8 (u8"2D相机"));
+  }
+  if( m_template_2d_button )
+  {
+    m_template_2d_button->SetLabel (
+      m_right_expanded && m_active_page == Right_Tool_Page::Template2D
+        ? wxString::FromUTF8 (u8"模板 >")
+        : wxString::FromUTF8 (u8"模板"));
   }
 }

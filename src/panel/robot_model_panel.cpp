@@ -5,6 +5,7 @@
 #include "camera_service.h"
 #include "camera_2d_control_panel.h"
 #include "camera_2d_image_view.h"
+#include "camera_2d_template_panel.h"
 #include "robot_joint_state_builder.h"
 #include "robot_model_config_dialog.h"
 #include "robot_model_repository.h"
@@ -464,10 +465,15 @@ Robot_Model_Panel::Robot_Model_Panel (
     camera_service);
   m_camera_2d_control_panel = new Camera_2D_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera2D),
+    camera_2d_service);
+  m_camera_2d_control_panel->Set_On_Show_Image (
+    [this] { Select_Display_Page (Main_Display_Page::Camera_2D_Image); });
+  m_camera_2d_template_panel = new Camera_2D_Template_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Template2D),
     camera_2d_service,
     camera_2d_template_service,
     *m_camera_2d_image_view);
-  m_camera_2d_control_panel->Set_On_Show_Image (
+  m_camera_2d_template_panel->Set_On_Show_Image (
     [this] { Select_Display_Page (Main_Display_Page::Camera_2D_Image); });
   m_point_cloud_overlay_toolbar = new Point_Cloud_Overlay_Toolbar (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::PointCloud),
@@ -586,6 +592,8 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera2D, m_camera_2d_control_panel);
   m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Template2D, m_camera_2d_template_panel);
+  m_right_tool_panel->Add_Page (
     Right_Tool_Page::PointCloud, m_point_cloud_overlay_toolbar);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Tool, m_tool_panel);
@@ -597,6 +605,12 @@ Robot_Model_Panel::Robot_Model_Panel (
       {
         m_point_cloud_overlay_toolbar->Set_Camera_Connected (enabled);
       }
+    });
+  m_camera_2d_control_panel->Set_On_Availability_Changed (
+    [this] (bool enabled)
+    {
+      if( m_right_tool_panel )
+        m_right_tool_panel->Set_Template_2D_Tool_Enabled (enabled);
     });
   m_right_tool_panel->Set_Robot_Tool_Enabled (false);
   m_content_splitter->SplitVertically (

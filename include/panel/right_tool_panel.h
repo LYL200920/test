@@ -16,8 +16,9 @@ enum class Right_Tool_Page
   Flow = 3,
   Camera = 4,
   Camera2D = 5,
-  PointCloud = 6,
-  Tool = 7
+  Template2D = 6,
+  PointCloud = 7,
+  Tool = 8
 };
 
 class Right_Tool_Panel : public wxPanel
@@ -28,6 +29,7 @@ public:
   wxWindow* Page_Parent (Right_Tool_Page page) const;
   void Add_Page (Right_Tool_Page page, wxWindow* window);
   void Set_Camera_Tool_Enabled (bool enabled);
+  void Set_Template_2D_Tool_Enabled (bool enabled);
   void Set_Flow_Tool_Enabled (bool enabled);
   void Set_Robot_Tool_Enabled (bool enabled);
   void Set_On_Width_Changed (
@@ -39,6 +41,7 @@ private:
   void On_Flow_Click (wxCommandEvent& event);
   void On_Camera_Click (wxCommandEvent& event);
   void On_Camera_2D_Click (wxCommandEvent& event);
+  void On_Template_2D_Click (wxCommandEvent& event);
   void On_Point_Cloud_Click (wxCommandEvent& event);
   void On_Tool_Click (wxCommandEvent& event);
   void On_Robot_Click (wxCommandEvent& event);
@@ -55,6 +58,7 @@ private:
   wxButton* m_flow_button = nullptr;
   wxButton* m_camera_button = nullptr;
   wxButton* m_camera_2d_button = nullptr;
+  wxButton* m_template_2d_button = nullptr;
   wxButton* m_point_cloud_button = nullptr;
   wxButton* m_tool_button = nullptr;
   wxButton* m_robot_button = nullptr;
@@ -64,6 +68,7 @@ private:
   bool m_robot_expanded = false;
   bool m_right_expanded = false;
   bool m_camera_tool_enabled = false;
+  bool m_template_2d_tool_enabled = false;
   bool m_flow_tool_enabled = false;
   bool m_robot_tool_enabled = false;
   std::function<void (int)> m_on_width_changed;
