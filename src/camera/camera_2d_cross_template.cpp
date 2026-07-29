@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <numeric>
 #include <queue>
 #include <sstream>
 
@@ -308,6 +309,355 @@ bool Write_Pgm(
   return static_cast<bool>(stream);
 }
 
+bool Read_Pgm(
+  const std::filesystem::path &path,
+  std::vector<std::uint8_t> *gray,
+  int *width,
+  int *height)
+{
+  if (!gray || !width || !height) return false;
+  std::ifstream stream(path, std::ios::binary);
+  std::string magic;
+  int maximum = 0;
+  if (!(stream >> magic) || magic != "P5" ||
+      !(stream >> *width >> *height >> maximum) ||
+      *width <= 0 || *height <= 0 || maximum != 255)
+    return false;
+  stream.get();
+  gray->resize(static_cast<std::size_t>(*width) * *height);
+  stream.read(
+    reinterpret_cast<char *>(gray->data()),
+    static_cast<std::streamsize>(gray->size()));
+  return static_cast<bool>(stream);
+}
+
+struct Gray_Image
+{
+  int width = 0;
+  int height = 0;
+  std::vector<std::uint8_t> pixels;
+};
+
+Gray_Image Downsample(const Gray_Image &source)
+{
+  Gray_Image result;
+  result.width = std::max(1, source.width / 2);
+  result.height = std::max(1, source.height / 2);
+  result.pixels.resize(
+    static_cast<std::size_t>(result.width) * result.height);
+  for (int y = 0; y < result.height; ++y)
+  {
+    for (int x = 0; x < result.width; ++x)
+    {
+      unsigned int sum = 0;
+      int count = 0;
+      for (int dy = 0; dy < 2; ++dy)
+      {
+        for (int dx = 0; dx < 2; ++dx)
+        {
+          const int sx = x * 2 + dx;
+          const int sy = y * 2 + dy;
+          if (sx < source.width && sy < source.height)
+          {
+            sum += source.pixels[
+              static_cast<std::size_t>(sy) * source.width + sx];
+            ++count;
+          }
+        }
+      }
+      result.pixels[
+        static_cast<std::size_t>(y) * result.width + x] =
+        static_cast<std::uint8_t>(sum / std::max(1, count));
+    }
+  }
+  return result;
+}
+
+Gray_Image Resize_Gray(
+  const std::vector<std::uint8_t> &pixels,
+  int source_width,
+  int source_height,
+  int target_width,
+  int target_height)
+{
+  Gray_Image result;
+  result.width = target_width;
+  result.height = target_height;
+  result.pixels.resize(
+    static_cast<std::size_t>(target_width) * target_height);
+  for (int y = 0; y < target_height; ++y)
+  {
+    const int sy = std::min(
+      source_height - 1,
+      static_cast<int>(
+        static_cast<long long>(y) * source_height / target_height));
+    for (int x = 0; x < target_width; ++x)
+    {
+      const int sx = std::min(
+        source_width - 1,
+        static_cast<int>(
+          static_cast<long long>(x) * source_width / target_width));
+      result.pixels[
+        static_cast<std::size_t>(y) * target_width + x] =
+        pixels[static_cast<std::size_t>(sy) * source_width + sx];
+    }
+  }
+  return result;
+}
+
+std::vector<int> Matching_Samples(const Gray_Image &reference)
+{
+  const double mean = std::accumulate(
+    reference.pixels.begin(), reference.pixels.end(), 0.0) /
+    std::max<std::size_t>(1, reference.pixels.size());
+  std::vector<int> ranked(reference.pixels.size());
+  for (std::size_t index = 0; index < ranked.size(); ++index)
+    ranked[index] = static_cast<int>(index);
+  const std::size_t feature_count =
+    std::min<std::size_t>(80, ranked.size());
+  std::partial_sort(
+    ranked.begin(),
+    ranked.begin() + feature_count,
+    ranked.end(),
+    [&reference, mean](int left, int right)
+    {
+      return std::abs(reference.pixels[left] - mean) >
+             std::abs(reference.pixels[right] - mean);
+    });
+  ranked.resize(feature_count);
+  const int grid = 8;
+  for (int gy = 0; gy < grid; ++gy)
+  {
+    for (int gx = 0; gx < grid; ++gx)
+    {
+      const int x = std::min(
+        reference.width - 1,
+        (2 * gx + 1) * reference.width / (2 * grid));
+      const int y = std::min(
+        reference.height - 1,
+        (2 * gy + 1) * reference.height / (2 * grid));
+      ranked.push_back(y * reference.width + x);
+    }
+  }
+  std::sort(ranked.begin(), ranked.end());
+  ranked.erase(std::unique(ranked.begin(), ranked.end()), ranked.end());
+  return ranked;
+}
+
+double Sampled_Ncc(
+  const Gray_Image &image,
+  const Gray_Image &reference,
+  const std::vector<int> &samples,
+  int x,
+  int y)
+{
+  if (samples.empty()) return -1.0;
+  double reference_mean = 0.0;
+  double image_mean = 0.0;
+  for (const int index : samples)
+  {
+    const int tx = index % reference.width;
+    const int ty = index / reference.width;
+    reference_mean += reference.pixels[index];
+    image_mean += image.pixels[
+      static_cast<std::size_t>(y + ty) * image.width + x + tx];
+  }
+  reference_mean /= samples.size();
+  image_mean /= samples.size();
+  double numerator = 0.0;
+  double reference_energy = 0.0;
+  double image_energy = 0.0;
+  for (const int index : samples)
+  {
+    const int tx = index % reference.width;
+    const int ty = index / reference.width;
+    const double tv = reference.pixels[index] - reference_mean;
+    const double iv = image.pixels[
+      static_cast<std::size_t>(y + ty) * image.width + x + tx] -
+      image_mean;
+    numerator += tv * iv;
+    reference_energy += tv * tv;
+    image_energy += iv * iv;
+  }
+  const double denominator = std::sqrt(reference_energy * image_energy);
+  return denominator > 1e-9 ? numerator / denominator : -1.0;
+}
+
+struct Match_Candidate
+{
+  int x = 0;
+  int y = 0;
+  double score = -1.0;
+};
+
+void Keep_Candidate(
+  std::vector<Match_Candidate> *best,
+  Match_Candidate candidate,
+  std::size_t limit)
+{
+  if (best->size() < limit)
+  {
+    best->push_back(candidate);
+    return;
+  }
+  auto worst = std::min_element(
+    best->begin(), best->end(),
+    [](const auto &left, const auto &right)
+    {
+      return left.score < right.score;
+    });
+  if (candidate.score > worst->score) *worst = candidate;
+}
+
+double Dense_Ncc(
+  const Gray_Image &image,
+  const Gray_Image &reference,
+  int x,
+  int y)
+{
+  const std::size_t count = reference.pixels.size();
+  double reference_mean = std::accumulate(
+    reference.pixels.begin(), reference.pixels.end(), 0.0) / count;
+  double image_mean = 0.0;
+  for (int ty = 0; ty < reference.height; ++ty)
+    for (int tx = 0; tx < reference.width; ++tx)
+      image_mean += image.pixels[
+        static_cast<std::size_t>(y + ty) * image.width + x + tx];
+  image_mean /= count;
+  double numerator = 0.0;
+  double reference_energy = 0.0;
+  double image_energy = 0.0;
+  for (int ty = 0; ty < reference.height; ++ty)
+  {
+    for (int tx = 0; tx < reference.width; ++tx)
+    {
+      const double tv =
+        reference.pixels[
+          static_cast<std::size_t>(ty) * reference.width + tx] -
+        reference_mean;
+      const double iv =
+        image.pixels[
+          static_cast<std::size_t>(y + ty) * image.width + x + tx] -
+        image_mean;
+      numerator += tv * iv;
+      reference_energy += tv * tv;
+      image_energy += iv * iv;
+    }
+  }
+  const double denominator = std::sqrt(reference_energy * image_energy);
+  return denominator > 1e-9 ? numerator / denominator : -1.0;
+}
+
+std::optional<Match_Candidate> Match_Template(
+  const Gray_Image &image,
+  const Gray_Image &reference)
+{
+  if (reference.width < 4 || reference.height < 4 ||
+      reference.width > image.width || reference.height > image.height)
+    return std::nullopt;
+  std::vector<Gray_Image> image_pyramid{image};
+  std::vector<Gray_Image> reference_pyramid{reference};
+  while (std::min(
+           reference_pyramid.back().width,
+           reference_pyramid.back().height) > 16 &&
+         std::max(
+           image_pyramid.back().width,
+           image_pyramid.back().height) > 700)
+  {
+    image_pyramid.push_back(Downsample(image_pyramid.back()));
+    reference_pyramid.push_back(Downsample(reference_pyramid.back()));
+  }
+  const int coarsest =
+    static_cast<int>(image_pyramid.size()) - 1;
+  const auto &coarse_image = image_pyramid[coarsest];
+  const auto &coarse_reference = reference_pyramid[coarsest];
+  const auto coarse_samples = Matching_Samples(coarse_reference);
+  const int scan_step = std::max(
+    1, std::max(coarse_image.width, coarse_image.height) / 700);
+  std::vector<Match_Candidate> candidates;
+  for (int y = 0;
+       y + coarse_reference.height <= coarse_image.height;
+       y += scan_step)
+  {
+    for (int x = 0;
+         x + coarse_reference.width <= coarse_image.width;
+         x += scan_step)
+    {
+      Keep_Candidate(
+        &candidates,
+        {x, y, Sampled_Ncc(
+          coarse_image, coarse_reference, coarse_samples, x, y)},
+        24);
+    }
+  }
+  if (scan_step > 1)
+  {
+    const auto coarse_candidates = candidates;
+    std::vector<Match_Candidate> refined;
+    for (const auto &candidate : coarse_candidates)
+    {
+      for (int dy = -scan_step; dy <= scan_step; ++dy)
+      {
+        for (int dx = -scan_step; dx <= scan_step; ++dx)
+        {
+          const int x = candidate.x + dx;
+          const int y = candidate.y + dy;
+          if (x < 0 || y < 0 ||
+              x + coarse_reference.width > coarse_image.width ||
+              y + coarse_reference.height > coarse_image.height)
+            continue;
+          Keep_Candidate(
+            &refined,
+            {x, y, Sampled_Ncc(
+              coarse_image, coarse_reference, coarse_samples, x, y)},
+            24);
+        }
+      }
+    }
+    candidates = std::move(refined);
+  }
+  for (int level = coarsest - 1; level >= 0; --level)
+  {
+    const auto &level_image = image_pyramid[level];
+    const auto &level_reference = reference_pyramid[level];
+    const auto samples = Matching_Samples(level_reference);
+    std::vector<Match_Candidate> refined;
+    for (const auto &candidate : candidates)
+    {
+      const int expected_x = candidate.x * 2;
+      const int expected_y = candidate.y * 2;
+      for (int dy = -3; dy <= 3; ++dy)
+      {
+        for (int dx = -3; dx <= 3; ++dx)
+        {
+          const int x = expected_x + dx;
+          const int y = expected_y + dy;
+          if (x < 0 || y < 0 ||
+              x + level_reference.width > level_image.width ||
+              y + level_reference.height > level_image.height)
+            continue;
+          Keep_Candidate(
+            &refined,
+            {x, y, Sampled_Ncc(
+              level_image, level_reference, samples, x, y)},
+            24);
+        }
+      }
+    }
+    candidates = std::move(refined);
+  }
+  if (candidates.empty()) return std::nullopt;
+  Match_Candidate best;
+  for (const auto &candidate : candidates)
+  {
+    auto dense = candidate;
+    dense.score = Dense_Ncc(
+      image, reference, candidate.x, candidate.y);
+    if (dense.score > best.score) best = dense;
+  }
+  return best;
+}
+
 bool Analyze(
   const Camera_2D_Display_Image &image,
   const Camera_2D_Roi &input_roi,
@@ -401,42 +751,83 @@ bool Detect_Camera_2D_Cross(
     if (error_message) *error_message = "十字识别输出无效";
     return false;
   }
-  auto scaled_roi = cross_template.roi;
-  if (cross_template.reference_width > 0 &&
-      cross_template.reference_height > 0 &&
-      (image.width != cross_template.reference_width ||
-       image.height != cross_template.reference_height))
+  if (cross_template.reference_gray.size() !=
+      static_cast<std::size_t>(cross_template.roi.width) *
+        cross_template.roi.height)
   {
-    const double sx =
-      static_cast<double>(image.width) / cross_template.reference_width;
-    const double sy =
-      static_cast<double>(image.height) / cross_template.reference_height;
-    scaled_roi.x = static_cast<int>(std::lround(scaled_roi.x * sx));
-    scaled_roi.y = static_cast<int>(std::lround(scaled_roi.y * sy));
-    scaled_roi.width =
-      static_cast<int>(std::lround(scaled_roi.width * sx));
-    scaled_roi.height =
-      static_cast<int>(std::lround(scaled_roi.height * sy));
+    if (error_message) *error_message = "标准模板图像未加载";
+    return false;
+  }
+  const double sx = cross_template.reference_width > 0
+    ? static_cast<double>(image.width) / cross_template.reference_width
+    : 1.0;
+  const double sy = cross_template.reference_height > 0
+    ? static_cast<double>(image.height) / cross_template.reference_height
+    : 1.0;
+  const int template_width = std::max(
+    4, static_cast<int>(std::lround(cross_template.roi.width * sx)));
+  const int template_height = std::max(
+    4, static_cast<int>(std::lround(cross_template.roi.height * sy)));
+  const Gray_Image reference = Resize_Gray(
+    cross_template.reference_gray,
+    cross_template.roi.width,
+    cross_template.roi.height,
+    template_width,
+    template_height);
+  const Camera_2D_Roi whole_image{
+    0, 0, static_cast<int>(image.width), static_cast<int>(image.height)};
+  const Gray_Image gray_image{
+    static_cast<int>(image.width),
+    static_cast<int>(image.height),
+    Grayscale(image, whole_image)};
+  const auto match = Match_Template(gray_image, reference);
+  if (!match)
+  {
+    if (error_message) *error_message = "标准模板尺寸大于当前图像";
+    return false;
   }
   Camera_2D_Cross_Detection result;
   result.template_id = cross_template.id;
   result.template_name = cross_template.name;
-  if (!Analyze(
-        image,
-        scaled_roi,
-        cross_template.dark_on_light,
-        Otsu_Threshold(Grayscale(image, Clamp_Roi(
-          scaled_roi, image.width, image.height))),
-        cross_template.foreground_ratio,
-        &result,
-        nullptr,
-        error_message))
+  const Camera_2D_Roi matched_roi{
+    match->x, match->y, template_width, template_height};
+  const auto matched_gray = Grayscale(image, matched_roi);
+  Camera_2D_Cross_Detection feature_detection;
+  const bool feature_analyzed = Analyze(
+    image,
+    matched_roi,
+    cross_template.dark_on_light,
+    Otsu_Threshold(matched_gray),
+    cross_template.foreground_ratio,
+    &feature_detection,
+    nullptr,
+    nullptr);
+  const double template_confidence = std::clamp(
+    (match->score + 1.0) * 0.5, 0.0, 1.0);
+  if (feature_analyzed)
   {
-    return false;
+    result = std::move(feature_detection);
+    result.found = result.found && match->score >= 0.15;
+    result.confidence = std::clamp(
+      result.confidence * 0.55 + template_confidence * 0.45,
+      0.0,
+      1.0);
+  }
+  else
+  {
+    result.found = false;
+    result.search_roi = matched_roi;
+    result.center_x =
+      match->x + cross_template.feature_center_x * sx;
+    result.center_y =
+      match->y + cross_template.feature_center_y * sy;
+    result.angle_deg = cross_template.reference_angle_deg;
+    result.confidence = template_confidence;
   }
   result.template_id = cross_template.id;
   result.template_name = cross_template.name;
   *detection = std::move(result);
+  if (error_message) error_message->clear();
   return true;
 }
 
@@ -477,8 +868,58 @@ bool Camera_2D_Cross_Template_Service::Reload(std::string *error_message)
         node.attribute("foregroundRatio").as_double();
       item.reference_angle_deg =
         node.attribute("referenceAngle").as_double();
+      item.feature_center_x =
+        node.attribute("featureCenterX").as_double(
+          item.roi.width * 0.5);
+      item.feature_center_y =
+        node.attribute("featureCenterY").as_double(
+          item.roi.height * 0.5);
       item.reference_image = node.attribute("referenceImage").as_string();
-      if (!item.id.empty() && !item.name.empty()) loaded.push_back(item);
+      int pgm_width = 0;
+      int pgm_height = 0;
+      if (!item.reference_image.empty())
+      {
+        Read_Pgm(
+          Template_Root() / item.reference_image,
+          &item.reference_gray,
+          &pgm_width,
+          &pgm_height);
+      }
+      if (pgm_width == item.roi.width &&
+          pgm_height == item.roi.height &&
+          !item.reference_gray.empty())
+      {
+        Camera_2D_Display_Image reference_image;
+        reference_image.width = static_cast<unsigned int>(pgm_width);
+        reference_image.height = static_cast<unsigned int>(pgm_height);
+        reference_image.rgb.resize(item.reference_gray.size() * 3);
+        for (std::size_t index = 0;
+             index < item.reference_gray.size(); ++index)
+        {
+          reference_image.rgb[index * 3] =
+            reference_image.rgb[index * 3 + 1] =
+            reference_image.rgb[index * 3 + 2] =
+              item.reference_gray[index];
+        }
+        Camera_2D_Cross_Detection reference_detection;
+        if (Analyze(
+              reference_image,
+              {0, 0, pgm_width, pgm_height},
+              item.dark_on_light,
+              item.threshold,
+              item.foreground_ratio,
+              &reference_detection,
+              nullptr,
+              nullptr))
+        {
+          item.feature_center_x = reference_detection.center_x;
+          item.feature_center_y = reference_detection.center_y;
+          item.reference_outline = reference_detection.outline;
+        }
+      }
+      if (!item.id.empty() && !item.name.empty() &&
+          !item.reference_gray.empty())
+        loaded.push_back(std::move(item));
     }
   }
   std::lock_guard<std::mutex> lock(m_mutex);
@@ -615,7 +1056,14 @@ bool Camera_2D_Cross_Template_Service::Create(
         (roi.width * roi.height);
   }
   item.reference_angle_deg = detection.angle_deg;
+  item.feature_center_x = detection.center_x - roi.x;
+  item.feature_center_y = detection.center_y - roi.y;
   item.reference_image = image_name;
+  item.reference_gray = reference_gray;
+  item.reference_outline.reserve(detection.outline.size());
+  for (const auto &point : detection.outline)
+    item.reference_outline.push_back(
+      {point[0] - roi.x, point[1] - roi.y});
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     const auto duplicate = std::find_if(
@@ -748,6 +1196,8 @@ bool Camera_2D_Cross_Template_Service::Save(
     node.append_attribute("threshold") = item.threshold;
     node.append_attribute("foregroundRatio") = item.foreground_ratio;
     node.append_attribute("referenceAngle") = item.reference_angle_deg;
+    node.append_attribute("featureCenterX") = item.feature_center_x;
+    node.append_attribute("featureCenterY") = item.feature_center_y;
     node.append_attribute("referenceImage") =
       item.reference_image.c_str();
   }

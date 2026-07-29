@@ -43,9 +43,12 @@ private:
   void On_Size(wxSizeEvent &event);
   void On_Left_Down(wxMouseEvent &event);
   void On_Left_Up(wxMouseEvent &event);
+  void On_Right_Down(wxMouseEvent &event);
+  void On_Right_Up(wxMouseEvent &event);
   void On_Mouse_Move(wxMouseEvent &event);
   void On_Mouse_Wheel(wxMouseEvent &event);
   wxPoint Image_Point(const wxPoint &canvas_point) const;
+  wxPoint Display_Offset(double scale) const;
   double Display_Scale() const;
   wxBitmap m_bitmap;
   std::optional<Camera_2D_Cross_Detection> m_detection;
@@ -53,6 +56,10 @@ private:
   bool m_selecting_roi = false;
   wxPoint m_roi_start;
   wxPoint m_roi_end;
+  bool m_panning = false;
+  wxPoint m_pan_start;
+  wxPoint m_pan_origin;
+  wxPoint m_pan_offset;
   bool m_fit_to_window = true;
   double m_zoom = 1.0;
 };

@@ -22,6 +22,8 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
   Bind(wxEVT_SIZE, &Camera_2D_Bitmap_Canvas::On_Size, this);
   Bind(wxEVT_LEFT_DOWN, &Camera_2D_Bitmap_Canvas::On_Left_Down, this);
   Bind(wxEVT_LEFT_UP, &Camera_2D_Bitmap_Canvas::On_Left_Up, this);
+  Bind(wxEVT_RIGHT_DOWN, &Camera_2D_Bitmap_Canvas::On_Right_Down, this);
+  Bind(wxEVT_RIGHT_UP, &Camera_2D_Bitmap_Canvas::On_Right_Up, this);
   Bind(wxEVT_MOTION, &Camera_2D_Bitmap_Canvas::On_Mouse_Move, this);
   Bind(
     wxEVT_MOUSEWHEEL,
@@ -31,6 +33,12 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
 
 void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
 {
+  if (!m_bitmap.IsOk() ||
+      m_bitmap.GetWidth() != bitmap.GetWidth() ||
+      m_bitmap.GetHeight() != bitmap.GetHeight())
+  {
+    m_pan_offset = wxPoint();
+  }
   m_bitmap = std::move(bitmap);
   Refresh(false);
 }
@@ -94,7 +102,20 @@ void Camera_2D_Bitmap_Canvas::Zoom_Out()
 void Camera_2D_Bitmap_Canvas::Fit_To_Window()
 {
   m_fit_to_window = true;
+  m_pan_offset = wxPoint();
   Refresh(false);
+}
+
+wxPoint Camera_2D_Bitmap_Canvas::Display_Offset(double scale) const
+{
+  const wxSize area = GetClientSize();
+  return wxPoint(
+    static_cast<int>(std::lround(
+      (area.x - m_bitmap.GetWidth() * scale) * 0.5)) +
+      m_pan_offset.x,
+    static_cast<int>(std::lround(
+      (area.y - m_bitmap.GetHeight() * scale) * 0.5)) +
+      m_pan_offset.y);
 }
 
 void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
@@ -119,11 +140,12 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
     1, static_cast<int>(source_width * scale));
   const int height = std::max(
     1, static_cast<int>(source_height * scale));
+  const wxPoint offset = Display_Offset(scale);
   wxMemoryDC source_dc;
   source_dc.SelectObject(m_bitmap);
   dc.StretchBlit(
-    (area.x - width) / 2,
-    (area.y - height) / 2,
+    offset.x,
+    offset.y,
     width,
     height,
     &source_dc,
@@ -134,8 +156,8 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
     wxCOPY,
     false);
   source_dc.SelectObject(wxNullBitmap);
-  const int offset_x = (area.x - width) / 2;
-  const int offset_y = (area.y - height) / 2;
+  const int offset_x = offset.x;
+  const int offset_y = offset.y;
   const auto canvas_x = [offset_x, scale](double x)
   {
     return offset_x + static_cast<int>(std::lround(x * scale));
@@ -200,17 +222,15 @@ wxPoint Camera_2D_Bitmap_Canvas::Image_Point(
   const wxPoint &canvas_point) const
 {
   if (!m_bitmap.IsOk()) return wxPoint(-1, -1);
-  const wxSize area = GetClientSize();
   const double scale = Display_Scale();
   if (scale <= 0.0) return wxPoint(-1, -1);
-  const double offset_x = (area.x - m_bitmap.GetWidth() * scale) * 0.5;
-  const double offset_y = (area.y - m_bitmap.GetHeight() * scale) * 0.5;
+  const wxPoint offset = Display_Offset(scale);
   return wxPoint(
     std::clamp(
-      static_cast<int>((canvas_point.x - offset_x) / scale),
+      static_cast<int>((canvas_point.x - offset.x) / scale),
       0, m_bitmap.GetWidth() - 1),
     std::clamp(
-      static_cast<int>((canvas_point.y - offset_y) / scale),
+      static_cast<int>((canvas_point.y - offset.y) / scale),
       0, m_bitmap.GetHeight() - 1));
 }
 
@@ -226,9 +246,18 @@ void Camera_2D_Bitmap_Canvas::On_Left_Down(wxMouseEvent &event)
 
 void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
 {
-  if (!m_selecting_roi || !event.Dragging()) return;
-  m_roi_end = Image_Point(event.GetPosition());
-  Refresh(false);
+  if (m_panning && event.RightIsDown())
+  {
+    const wxPoint delta = event.GetPosition() - m_pan_start;
+    m_pan_offset = m_pan_origin + delta;
+    Refresh(false);
+    return;
+  }
+  if (m_selecting_roi && event.LeftIsDown())
+  {
+    m_roi_end = Image_Point(event.GetPosition());
+    Refresh(false);
+  }
 }
 
 void Camera_2D_Bitmap_Canvas::On_Mouse_Wheel(wxMouseEvent &event)
@@ -257,6 +286,26 @@ void Camera_2D_Bitmap_Canvas::On_Left_Up(wxMouseEvent &event)
   m_roi_callback = nullptr;
   Refresh(false);
   if (callback) callback(roi);
+}
+
+void Camera_2D_Bitmap_Canvas::On_Right_Down(wxMouseEvent &event)
+{
+  if (!m_bitmap.IsOk() || m_selecting_roi) return;
+  m_panning = true;
+  m_pan_start = event.GetPosition();
+  m_pan_origin = m_pan_offset;
+  if (!HasCapture()) CaptureMouse();
+  SetCursor(wxCursor(wxCURSOR_HAND));
+}
+
+void Camera_2D_Bitmap_Canvas::On_Right_Up(wxMouseEvent &)
+{
+  if (!m_panning) return;
+  m_panning = false;
+  if (HasCapture()) ReleaseMouse();
+  SetCursor(m_roi_callback
+    ? wxCursor(wxCURSOR_CROSS)
+    : wxNullCursor);
 }
 
 Camera_2D_Image_View::Camera_2D_Image_View(

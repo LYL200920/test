@@ -28,7 +28,11 @@ struct Camera_2D_Cross_Template
   int threshold = 128;
   double foreground_ratio = 0.0;
   double reference_angle_deg = 0.0;
+  double feature_center_x = 0.0;
+  double feature_center_y = 0.0;
   std::string reference_image;
+  std::vector<std::uint8_t> reference_gray;
+  std::vector<std::array<int, 2>> reference_outline;
 };
 
 struct Camera_2D_Cross_Detection
