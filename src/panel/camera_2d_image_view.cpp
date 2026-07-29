@@ -3,7 +3,9 @@
 #include "camera_2d_service.h"
 
 #include <wx/dcbuffer.h>
+#include <wx/dcmemory.h>
 #include <wx/image.h>
+#include <wx/button.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
@@ -51,6 +53,59 @@ void Camera_2D_Bitmap_Canvas::Begin_Roi_Selection(
   SetCursor(wxCursor(wxCURSOR_CROSS));
 }
 
+double Camera_2D_Bitmap_Canvas::Display_Scale() const
+{
+  if (!m_bitmap.IsOk()) return 1.0;
+  if (!m_fit_to_window) return m_zoom;
+  const wxSize area = GetClientSize();
+  return std::max(
+    0.01,
+    std::min(
+      static_cast<double>(area.x) / m_bitmap.GetWidth(),
+      static_cast<double>(area.y) / m_bitmap.GetHeight()));
+}
+
+void Camera_2D_Bitmap_Canvas::Zoom_In()
+{
+  if (m_fit_to_window)
+  {
+    m_zoom = Display_Scale();
+    m_fit_to_window = false;
+  }
+  m_zoom = std::min(8.0, m_zoom * 1.25);
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::Zoom_Out()
+{
+  if (m_fit_to_window)
+  {
+    m_zoom = Display_Scale();
+    m_fit_to_window = false;
+  }
+  m_zoom = std::max(0.05, m_zoom / 1.25);
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::Fit_To_Window()
+{
+  m_fit_to_window = true;
+  Refresh(false);
+}
+
+void Camera_2D_Bitmap_Canvas::Actual_Size()
+{
+  m_fit_to_window = false;
+  m_zoom = 1.0;
+  Refresh(false);
+}
+
+wxString Camera_2D_Bitmap_Canvas::Zoom_Label() const
+{
+  if (m_fit_to_window) return wxString::FromUTF8(u8"适应窗口");
+  return wxString::Format("%.0f%%", m_zoom * 100.0);
+}
+
 void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
 {
   wxAutoBufferedPaintDC dc(this);
@@ -68,25 +123,26 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
   {
     return;
   }
-  const double scale = std::min(
-    static_cast<double>(area.x) / source_width,
-    static_cast<double>(area.y) / source_height);
+  const double scale = Display_Scale();
   const int width = std::max(
     1, static_cast<int>(source_width * scale));
   const int height = std::max(
     1, static_cast<int>(source_height * scale));
-  wxBitmap rendered = m_bitmap;
-  if (width != source_width || height != source_height)
-  {
-    rendered = wxBitmap(
-      m_bitmap.ConvertToImage().Scale(
-        width, height, wxIMAGE_QUALITY_HIGH));
-  }
-  dc.DrawBitmap(
-    rendered,
+  wxMemoryDC source_dc;
+  source_dc.SelectObject(m_bitmap);
+  dc.StretchBlit(
     (area.x - width) / 2,
     (area.y - height) / 2,
+    width,
+    height,
+    &source_dc,
+    0,
+    0,
+    source_width,
+    source_height,
+    wxCOPY,
     false);
+  source_dc.SelectObject(wxNullBitmap);
   const int offset_x = (area.x - width) / 2;
   const int offset_y = (area.y - height) / 2;
   const auto canvas_x = [offset_x, scale](double x)
@@ -113,6 +169,11 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
         detection.search_roi.height * scale)));
     if (detection.found)
     {
+      dc.SetPen(wxPen(wxColour(40, 255, 100), 2));
+      for (const auto &point : detection.outline)
+      {
+        dc.DrawPoint(canvas_x(point[0]), canvas_y(point[1]));
+      }
       const int cx = canvas_x(detection.center_x);
       const int cy = canvas_y(detection.center_y);
       const double angle = detection.angle_deg * 3.14159265358979323846 / 180.0;
@@ -149,9 +210,7 @@ wxPoint Camera_2D_Bitmap_Canvas::Image_Point(
 {
   if (!m_bitmap.IsOk()) return wxPoint(-1, -1);
   const wxSize area = GetClientSize();
-  const double scale = std::min(
-    static_cast<double>(area.x) / m_bitmap.GetWidth(),
-    static_cast<double>(area.y) / m_bitmap.GetHeight());
+  const double scale = Display_Scale();
   if (scale <= 0.0) return wxPoint(-1, -1);
   const double offset_x = (area.x - m_bitmap.GetWidth() * scale) * 0.5;
   const double offset_y = (area.y - m_bitmap.GetHeight() * scale) * 0.5;
@@ -210,9 +269,33 @@ Camera_2D_Image_View::Camera_2D_Image_View(
     m_template_service(template_service)
 {
   m_canvas = new Camera_2D_Bitmap_Canvas(this);
+  auto *zoom_out = new wxButton(this, wxID_ANY, "-", wxDefaultPosition,
+                                wxSize(36, -1));
+  auto *zoom_in = new wxButton(this, wxID_ANY, "+", wxDefaultPosition,
+                               wxSize(36, -1));
+  auto *fit = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"适应窗口"));
+  auto *actual = new wxButton(this, wxID_ANY, "1:1");
+  m_zoom_text = new wxStaticText(
+    this, wxID_ANY, wxString::FromUTF8(u8"适应窗口"));
+  zoom_out->Bind(
+    wxEVT_BUTTON, &Camera_2D_Image_View::On_Zoom_Out, this);
+  zoom_in->Bind(
+    wxEVT_BUTTON, &Camera_2D_Image_View::On_Zoom_In, this);
+  fit->Bind(wxEVT_BUTTON, &Camera_2D_Image_View::On_Fit, this);
+  actual->Bind(
+    wxEVT_BUTTON, &Camera_2D_Image_View::On_Actual_Size, this);
+  auto *zoom_sizer = new wxBoxSizer(wxHORIZONTAL);
+  zoom_sizer->Add(zoom_out, 0, wxRIGHT, 4);
+  zoom_sizer->Add(zoom_in, 0, wxRIGHT, 8);
+  zoom_sizer->Add(fit, 0, wxRIGHT, 4);
+  zoom_sizer->Add(actual, 0, wxRIGHT, 8);
+  zoom_sizer->Add(
+    m_zoom_text, 0, wxALIGN_CENTER_VERTICAL);
   m_status_text = new wxStaticText(
     this, wxID_ANY, wxString::FromUTF8(u8"请先打开2D相机"));
   auto *sizer = new wxBoxSizer(wxVERTICAL);
+  sizer->Add(zoom_sizer, 0, wxEXPAND | wxALL, 6);
   sizer->Add(m_canvas, 1, wxEXPAND);
   sizer->Add(m_status_text, 0, wxEXPAND | wxALL, 6);
   SetSizer(sizer);
@@ -231,6 +314,41 @@ void Camera_2D_Image_View::Begin_Template_Roi_Selection(
   m_canvas->Begin_Roi_Selection(std::move(callback));
   m_status_text->SetLabel(
     wxString::FromUTF8(u8"请在图像中拖动框选完整的平面十字"));
+}
+
+void Camera_2D_Image_View::Show_Template_Detection(
+  std::optional<Camera_2D_Cross_Detection> detection)
+{
+  m_canvas->Set_Detection(std::move(detection));
+}
+
+void Camera_2D_Image_View::On_Zoom_In(wxCommandEvent &)
+{
+  m_canvas->Zoom_In();
+  Update_Zoom_Label();
+}
+
+void Camera_2D_Image_View::On_Zoom_Out(wxCommandEvent &)
+{
+  m_canvas->Zoom_Out();
+  Update_Zoom_Label();
+}
+
+void Camera_2D_Image_View::On_Fit(wxCommandEvent &)
+{
+  m_canvas->Fit_To_Window();
+  Update_Zoom_Label();
+}
+
+void Camera_2D_Image_View::On_Actual_Size(wxCommandEvent &)
+{
+  m_canvas->Actual_Size();
+  Update_Zoom_Label();
+}
+
+void Camera_2D_Image_View::Update_Zoom_Label()
+{
+  if (m_zoom_text) m_zoom_text->SetLabel(m_canvas->Zoom_Label());
 }
 
 Camera_2D_Image_View::~Camera_2D_Image_View()
@@ -354,16 +472,14 @@ void Camera_2D_Image_View::Consume_Result()
   {
     m_status_text->SetLabel(wxString::Format(
       wxString::FromUTF8(
-        u8"%u × %u  Frame=%llu  %.1f FPS  十字中心=(%.2f, %.2f)  "
-        u8"角度=%.2f°  置信度=%.1f%%"),
+        u8"%u × %u  Frame=%llu  %.1f FPS  "
+        u8"十字中心（图片像素坐标系）X=%.2f px，Y=%.2f px"),
       result->image.width,
       result->image.height,
       result->image.frame_number,
       status.frames_per_second,
       result->detection->center_x,
-      result->detection->center_y,
-      result->detection->angle_deg,
-      result->detection->confidence * 100.0));
+      result->detection->center_y));
   }
 }
 
