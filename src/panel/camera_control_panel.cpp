@@ -344,7 +344,7 @@ void Camera_Control_Panel::On_Camera_Updated (wxThreadEvent& event)
     {
     case Camera_Operation::Open_Device:
       m_status_text->SetLabel (
-        From_Utf8 (u8"相机已打开，正在读取设备信息……"));
+        From_Utf8 (u8"相机已打开，正在写入默认设置……"));
       Select_Page (Camera_Function_Page::Info);
       break;
     case Camera_Operation::Get_Device_Info:

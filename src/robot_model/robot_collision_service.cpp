@@ -183,7 +183,9 @@ namespace robot_model
   const Robot_Collision_Result &Robot_Collision_Service::Check_Pose(const std::vector<Matrix4> &world_from_parts)
   {
     m_current_collision = {};
-    if (m_enabled && m_detector.Has_Robot_Geometry())
+    // The enable switch controls point-cloud volume collision only. Self and
+    // ground collision remain active after obstacle points are released.
+    if (m_detector.Has_Robot_Geometry())
     {
       m_current_collision = m_detector.Check_Pose(world_from_parts, m_settings.clearance_mm);
     }

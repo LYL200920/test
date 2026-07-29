@@ -1310,23 +1310,22 @@ void test_robot_drag_performance_collector ( )
 void test_collision_enable_switch_defaults_and_toggles ( )
 {
   robot_model::Robot_Render_Controller controller;
-  require (controller.Collision_Enabled ( ),
-           "Volume collision must be enabled by default");
-  controller.Set_Collision_Enabled (false);
   require (!controller.Collision_Enabled ( ),
-           "Volume collision switch did not turn off");
+           "Volume collision must be disabled by default");
   controller.Set_Collision_Enabled (true);
   require (controller.Collision_Enabled ( ),
            "Volume collision switch did not turn back on");
+  controller.Set_Collision_Enabled (false);
+  require (!controller.Collision_Enabled ( ),
+           "Volume collision switch did not turn off");
 }
 
 void test_collision_service_owns_disabled_state ( )
 {
   robot_model::Robot_Collision_Service service;
-  require (service.Enabled ( ),
-           "Collision service must be enabled by default");
+  require (!service.Enabled ( ),
+           "Collision service must be disabled by default");
 
-  service.Set_Enabled (false);
   auto source = std::make_shared<const std::vector<float>> (
     std::vector<float> { 10.0F, 20.0F, 30.0F });
   robot_model::Robot_Joint_State reference_state;

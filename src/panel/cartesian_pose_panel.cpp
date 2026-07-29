@@ -133,11 +133,11 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
   SetSizer (root);
 }
 
-void Cartesian_Pose_Panel::Set_World_From_Flange (
-  const robot_model::Matrix4& world_from_flange)
+void Cartesian_Pose_Panel::Set_World_From_Control_Frame (
+  const robot_model::Matrix4& world_from_control_frame)
 {
   m_actual_pose =
-    robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
+    robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_control_frame);
   m_has_actual_pose = true;
   m_has_pose = true;
   // IK feedback is an achieved pose, not a new command. During a slider drag
@@ -156,7 +156,7 @@ void Cartesian_Pose_Panel::Set_Control_Frame_Name(const std::string &name)
     return;
   }
   m_title_text->SetLabel(
-    wxString::FromUTF8(u8"工具世界坐标位姿控制（") +
+    wxString::FromUTF8(u8"位姿控制坐标系（") +
     wxString::FromUTF8(name.c_str()) +
     wxString::FromUTF8(u8" / XYZABC）"));
 }

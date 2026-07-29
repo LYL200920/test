@@ -56,7 +56,7 @@ Point_Cloud_Overlay_Toolbar::Point_Cloud_Overlay_Toolbar (
     this, wxID_ANY, wxString::FromUTF8 (u8"碰撞参数"));
   m_collision_enabled_checkbox = new wxCheckBox (
     this, wxID_ANY, wxString::FromUTF8 (u8"启用体积碰撞"));
-  m_collision_enabled_checkbox->SetValue (true);
+  m_collision_enabled_checkbox->SetValue (false);
   m_clearance_ctrl = new wxSpinCtrlDouble (
     this, wxID_ANY, "10", wxDefaultPosition, wxDefaultSize,
     wxSP_ARROW_KEYS, 0.0, 100.0, 10.0, 1.0);

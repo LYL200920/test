@@ -1,4 +1,5 @@
 #include "camera_parameter.h"
+#include "camera_parameter_registry.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -114,6 +115,28 @@ void Test_Bool_And_Float_Encoding ( )
     encoded_float.ParamInfo.stFloatParam.fCurValue == 12.5F,
     "Encoded float mismatch");
 }
+
+void Test_Default_Open_Updates ( )
+{
+  const auto updates = Default_Camera_Open_Parameter_Updates ( );
+  Require (updates.size ( ) == 3,
+           "Default camera open update count mismatch");
+  Require (
+    updates[0].key == MV3D_RGBD_INT_IMAGEALIGN &&
+    updates[0].type == Camera_Parameter_Type::Int &&
+    std::get<std::int64_t> (updates[0].value) == 2,
+    "Default image alignment is not depth");
+  Require (
+    updates[1].key == MV3D_RGBD_ENUM_POINT_CLOUD_OUTPUT &&
+    updates[1].type == Camera_Parameter_Type::Enum &&
+    std::get<std::uint32_t> (updates[1].value) == 1,
+    "Default point-cloud output is not enabled");
+  Require (
+    updates[2].key == MV3D_RGBD_ENUM_TRIGGERMODE &&
+    updates[2].type == Camera_Parameter_Type::Enum &&
+    std::get<std::uint32_t> (updates[2].value) == 0,
+    "Default trigger mode is not disabled");
+}
 } // namespace
 
 int main ( )
@@ -123,6 +146,7 @@ int main ( )
     Test_Int_Parameter ( );
     Test_Enum_Parameter ( );
     Test_Bool_And_Float_Encoding ( );
+    Test_Default_Open_Updates ( );
   }
   catch( const std::exception& error )
   {

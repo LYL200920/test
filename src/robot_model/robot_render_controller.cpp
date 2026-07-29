@@ -245,8 +245,7 @@ namespace robot_model
     if (m_collision_service.Enabled() == enabled)
       return;
     m_collision_service.Set_Enabled(enabled);
-    if (enabled)
-      Update_Current_Pose_Collision();
+    Update_Current_Pose_Collision();
 
     const auto &collision = m_collision_service.Current_Collision();
     if (collision.collided)

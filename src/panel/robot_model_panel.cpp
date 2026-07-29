@@ -1910,10 +1910,13 @@ void Robot_Model_Panel::Sync_Joint_Controls_From_State ( )
 void Robot_Model_Panel::Update_Cartesian_Pose ( )
 {
   if( !m_cartesian_pose_panel || !m_view ) return;
-  robot_model::Matrix4 world_from_tool = { };
-  if( m_view->Get_World_From_Tool (&world_from_tool) )
+  robot_model::Matrix4 world_from_flange = { };
+  if( m_view->Get_World_From_Flange (&world_from_flange) )
   {
-    m_cartesian_pose_panel->Set_World_From_Flange (world_from_tool);
+    m_cartesian_pose_panel->Set_World_From_Control_Frame (
+      robot_model::Build_World_From_Tool (
+        world_from_flange,
+        Interaction_Tool ( )));
   }
   else
   {
@@ -1937,7 +1940,7 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
   const auto result = m_view->Move_Flange_To_Pose (
     robot_model::Build_World_From_Flange_Target (
       robot_model::Build_Zyx_Pose_Matrix (target_pose),
-      Active_Tool ( )),
+      Interaction_Tool ( )),
     options);
   if( result.status == robot_model::Robot_IK_Status::Invalid_Model )
   {
@@ -2794,6 +2797,12 @@ void Robot_Model_Panel::On_Interaction_Coordinate_Changed (wxCommandEvent&)
   {
     m_view->Set_Interaction_Coordinate (Interaction_Tool ( ));
   }
+  if( m_cartesian_pose_panel )
+  {
+    m_cartesian_pose_panel->Set_Control_Frame_Name (
+      Interaction_Tool ( ).name);
+    Update_Cartesian_Pose ( );
+  }
   if( m_status_text )
   {
     m_status_text->SetLabel (
@@ -2879,7 +2888,8 @@ void Robot_Model_Panel::Apply_Active_Tool ( )
   }
   if( m_cartesian_pose_panel )
   {
-    m_cartesian_pose_panel->Set_Control_Frame_Name (tool.name);
+    m_cartesian_pose_panel->Set_Control_Frame_Name (
+      Interaction_Tool ( ).name);
   }
   if( m_tool_panel )
   {

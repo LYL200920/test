@@ -1,5 +1,7 @@
 #include "camera_service.h"
 
+#include "camera_parameter_registry.h"
+
 #include <wx/app.h>
 
 #include <utility>
@@ -303,6 +305,8 @@ void Camera_Service::On_Worker_Result(wxThreadEvent &event)
   if (result.operation == Camera_Operation::Open_Device &&
       result.success && result.device_open)
   {
+    Request_Apply_Parameters(
+      Default_Camera_Open_Parameter_Updates());
     Request_Get_Device_Info();
     Request_Get_Stream_Configuration();
   }

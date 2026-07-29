@@ -18,6 +18,9 @@ struct Camera_Parameter_Definition
 const std::vector<Camera_Parameter_Definition> &
 First_Stage_Camera_Parameter_Definitions();
 
+std::vector<Camera_Parameter_Update>
+Default_Camera_Open_Parameter_Updates();
+
 const Camera_Parameter_Definition *Find_Camera_Parameter_Definition(const std::string &key);
 
 std::string Camera_Parameter_Enum_Label(

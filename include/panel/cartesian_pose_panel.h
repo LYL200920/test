@@ -19,7 +19,8 @@ class Cartesian_Pose_Panel : public wxPanel
 public:
   explicit Cartesian_Pose_Panel(wxWindow *parent);
 
-  void Set_World_From_Flange(const robot_model::Matrix4 &world_from_flange);
+  void Set_World_From_Control_Frame(
+    const robot_model::Matrix4 &world_from_control_frame);
   void Set_Control_Frame_Name(const std::string &name);
   void Clear();
   void Set_On_World_Frame_Visibility_Changed(std::function<void(bool)> callback);

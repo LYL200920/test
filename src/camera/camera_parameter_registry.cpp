@@ -34,6 +34,28 @@ First_Stage_Camera_Parameter_Definitions()
   return definitions;
 }
 
+std::vector<Camera_Parameter_Update>
+Default_Camera_Open_Parameter_Updates()
+{
+  return {
+    {
+      MV3D_RGBD_INT_IMAGEALIGN,
+      Camera_Parameter_Type::Int,
+      std::int64_t{2}
+    },
+    {
+      MV3D_RGBD_ENUM_POINT_CLOUD_OUTPUT,
+      Camera_Parameter_Type::Enum,
+      std::uint32_t{1}
+    },
+    {
+      MV3D_RGBD_ENUM_TRIGGERMODE,
+      Camera_Parameter_Type::Enum,
+      std::uint32_t{0}
+    }
+  };
+}
+
 const Camera_Parameter_Definition *Find_Camera_Parameter_Definition(const std::string &key)
 {
   const auto &definitions = First_Stage_Camera_Parameter_Definitions();

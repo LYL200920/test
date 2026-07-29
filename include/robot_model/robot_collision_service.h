@@ -87,7 +87,7 @@ namespace robot_model
     Robot_Joint_State m_reference_joint_state;
     std::vector<Robot_Visual_Part> m_robot_parts;
     Robot_Collision_Result m_current_collision;
-    bool m_enabled = true;
+    bool m_enabled = false;
   };
 
 } // namespace robot_model
