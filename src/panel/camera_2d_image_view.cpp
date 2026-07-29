@@ -79,6 +79,24 @@ void Camera_2D_Bitmap_Canvas::Begin_Roi_Selection(
   Refresh(false);
 }
 
+void Camera_2D_Bitmap_Canvas::Begin_Roi_Editing(
+  const Camera_2D_Roi &roi,
+  std::function<void(Camera_2D_Roi)> callback)
+{
+  Begin_Roi_Selection(std::move(callback));
+  if (!m_bitmap.IsOk()) return;
+  m_editable_roi.x = std::clamp(
+    roi.x, 0, std::max(0, m_bitmap.GetWidth() - 1));
+  m_editable_roi.y = std::clamp(
+    roi.y, 0, std::max(0, m_bitmap.GetHeight() - 1));
+  m_editable_roi.width = std::clamp(
+    roi.width, 1, m_bitmap.GetWidth() - m_editable_roi.x);
+  m_editable_roi.height = std::clamp(
+    roi.height, 1, m_bitmap.GetHeight() - m_editable_roi.y);
+  m_has_editable_roi = true;
+  Refresh(false);
+}
+
 bool Camera_2D_Bitmap_Canvas::Has_Editable_Roi() const
 {
   return m_roi_callback && m_has_editable_roi &&
@@ -249,7 +267,7 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
   if (m_roi_callback && m_has_editable_roi)
   {
     dc.SetBrush(*wxTRANSPARENT_BRUSH);
-    dc.SetPen(wxPen(wxColour(255, 210, 40), 2, wxPENSTYLE_SHORT_DASH));
+    dc.SetPen(wxPen(wxColour(255, 55, 55), 2, wxPENSTYLE_SHORT_DASH));
     const int x0 = canvas_x(m_editable_roi.x);
     const int y0 = canvas_y(m_editable_roi.y);
     const int x1 = canvas_x(
@@ -257,8 +275,8 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
     const int y1 = canvas_y(
       m_editable_roi.y + m_editable_roi.height - 1);
     dc.DrawRectangle(x0, y0, x1 - x0, y1 - y0);
-    dc.SetPen(wxPen(wxColour(255, 210, 40), 1));
-    dc.SetBrush(wxBrush(wxColour(255, 245, 200)));
+    dc.SetPen(wxPen(wxColour(210, 20, 20), 1));
+    dc.SetBrush(wxBrush(wxColour(255, 95, 95)));
     const int center_x = (x0 + x1) / 2;
     const int center_y = (y0 + y1) / 2;
     const std::array<wxPoint, 8> handles{{
@@ -531,6 +549,16 @@ void Camera_2D_Image_View::Begin_Template_Roi_Selection(
   m_status_text->SetLabel(
     wxString::FromUTF8(
       u8"绘制ROI后可拖动内部移动，拖动边框或控制点调整大小"));
+}
+
+void Camera_2D_Image_View::Begin_Template_Roi_Editing(
+  const Camera_2D_Roi &roi,
+  std::function<void(Camera_2D_Roi)> callback)
+{
+  m_canvas->Begin_Roi_Editing(roi, std::move(callback));
+  m_status_text->SetLabel(
+    wxString::FromUTF8(
+      u8"正在编辑模板ROI：拖动内部移动，拖动红色控制点调整大小"));
 }
 
 bool Camera_2D_Image_View::Has_Editable_Template_Roi() const

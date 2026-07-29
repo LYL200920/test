@@ -1097,6 +1097,136 @@ bool Camera_2D_Cross_Template_Service::Create(
   return true;
 }
 
+bool Camera_2D_Cross_Template_Service::Update(
+  const std::string &template_id,
+  const Camera_2D_Display_Image &image,
+  const Camera_2D_Roi &input_roi,
+  std::string *error_message)
+{
+  Camera_2D_Cross_Template previous;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto found = std::find_if(
+      m_templates.begin(), m_templates.end(),
+      [&template_id](const auto &item)
+      {
+        return item.id == template_id;
+      });
+    if (found == m_templates.end())
+    {
+      if (error_message) *error_message = "要编辑的2D模板不存在";
+      return false;
+    }
+    previous = *found;
+  }
+
+  const auto roi = Clamp_Roi(input_roi, image.width, image.height);
+  const auto gray = Grayscale(image, roi);
+  if (gray.empty())
+  {
+    if (error_message) *error_message = "十字模板ROI无效";
+    return false;
+  }
+  const int threshold = Otsu_Threshold(gray);
+  const bool dark_on_light =
+    Infer_Dark_On_Light(gray, roi.width, roi.height);
+  Camera_2D_Cross_Detection detection;
+  std::vector<std::uint8_t> reference_gray;
+  if (!Analyze(
+        image, roi, dark_on_light, threshold, 0.0,
+        &detection, &reference_gray, error_message))
+    return false;
+  if (!detection.found || detection.confidence < 0.3)
+  {
+    if (error_message)
+      *error_message =
+        "编辑后的ROI没有识别到完整十字，请调整位置或大小";
+    return false;
+  }
+
+  Camera_2D_Cross_Template updated = previous;
+  updated.roi = roi;
+  updated.reference_width = image.width;
+  updated.reference_height = image.height;
+  updated.dark_on_light = dark_on_light;
+  updated.threshold = threshold;
+  updated.foreground_ratio = 0.0;
+  const auto component = Select_Component(
+    reference_gray,
+    roi.width,
+    roi.height,
+    threshold,
+    dark_on_light,
+    0.0);
+  if (component)
+    updated.foreground_ratio =
+      static_cast<double>(component->pixels.size()) /
+      (roi.width * roi.height);
+  updated.reference_angle_deg = detection.angle_deg;
+  updated.feature_center_x = detection.center_x - roi.x;
+  updated.feature_center_y = detection.center_y - roi.y;
+  updated.reference_gray = reference_gray;
+  updated.reference_outline.clear();
+  updated.reference_outline.reserve(detection.outline.size());
+  for (const auto &point : detection.outline)
+    updated.reference_outline.push_back(
+      {point[0] - roi.x, point[1] - roi.y});
+
+  if (updated.reference_image.empty() ||
+      !Write_Pgm(
+        Template_Root() / updated.reference_image,
+        reference_gray,
+        roi.width,
+        roi.height))
+  {
+    if (error_message) *error_message = "更新十字模板参考图失败";
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto found = std::find_if(
+      m_templates.begin(), m_templates.end(),
+      [&template_id](const auto &item)
+      {
+        return item.id == template_id;
+      });
+    if (found == m_templates.end())
+    {
+      Write_Pgm(
+        Template_Root() / previous.reference_image,
+        previous.reference_gray,
+        previous.roi.width,
+        previous.roi.height);
+      if (error_message) *error_message = "编辑过程中2D模板已被删除";
+      return false;
+    }
+    *found = updated;
+    m_active_template_id = template_id;
+    m_latest_detection.reset();
+  }
+  if (!Save(error_message))
+  {
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      const auto found = std::find_if(
+        m_templates.begin(), m_templates.end(),
+        [&template_id](const auto &item)
+        {
+          return item.id == template_id;
+        });
+      if (found != m_templates.end()) *found = previous;
+    }
+    Write_Pgm(
+      Template_Root() / previous.reference_image,
+      previous.reference_gray,
+      previous.roi.width,
+      previous.roi.height);
+    return false;
+  }
+  if (error_message) error_message->clear();
+  return true;
+}
+
 bool Camera_2D_Cross_Template_Service::Remove(
   const std::string &template_id,
   std::string *error_message)

@@ -13,6 +13,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace
@@ -98,9 +99,17 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
     wxString::FromUTF8(u8"模板类型"), wxLIST_FORMAT_LEFT, 110);
   m_delete_button = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"删除选中模板"));
+  m_edit_roi_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"编辑ROI"));
+  auto *list_button_sizer = new wxBoxSizer(wxHORIZONTAL);
+  list_button_sizer->Add(m_edit_roi_button, 1, wxRIGHT, 4);
+  list_button_sizer->Add(m_delete_button, 1);
   list_box->Add(m_template_list, 1, wxEXPAND | wxALL, 6);
   list_box->Add(
-    m_delete_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+    list_button_sizer,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
+    6);
 
   auto *information_box = new wxStaticBoxSizer(
     wxVERTICAL, this, wxString::FromUTF8(u8"当前模板匹配信息"));
@@ -150,6 +159,8 @@ Camera_2D_Template_Panel::Camera_2D_Template_Panel(
     this);
   m_delete_button->Bind(
     wxEVT_BUTTON, &Camera_2D_Template_Panel::On_Delete, this);
+  m_edit_roi_button->Bind(
+    wxEVT_BUTTON, &Camera_2D_Template_Panel::On_Edit_Roi, this);
   m_confirm_roi_button->Bind(
     wxEVT_BUTTON,
     &Camera_2D_Template_Panel::On_Confirm_Roi,
@@ -219,6 +230,8 @@ void Camera_2D_Template_Panel::Refresh_View()
     -1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
   m_delete_button->Enable(
     connected && selection != -1 && !m_roi_editing);
+  m_edit_roi_button->Enable(
+    connected && has_frame && selection != -1 && !m_roi_editing);
   const auto active = m_template_service.Active_Template();
   m_info_name->SetLabel(
     active ? From_Utf8(active->name) : wxString::FromUTF8(u8"—"));
@@ -318,6 +331,53 @@ void Camera_2D_Template_Panel::On_Delete(wxCommandEvent &)
   Refresh_View();
 }
 
+void Camera_2D_Template_Panel::On_Edit_Roi(wxCommandEvent &)
+{
+  const long selection = m_template_list->GetNextItem(
+    -1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+  if (selection < 0 ||
+      static_cast<std::size_t>(selection) >= m_template_ids.size())
+    return;
+  const auto frame = m_camera_service.Latest_Frame();
+  if (!frame)
+  {
+    Show_Error("请先采集一帧图像再编辑ROI");
+    return;
+  }
+  const std::string template_id =
+    m_template_ids[static_cast<std::size_t>(selection)];
+  const auto templates = m_template_service.Templates();
+  const auto found = std::find_if(
+    templates.begin(), templates.end(),
+    [&template_id](const auto &item)
+    {
+      return item.id == template_id;
+    });
+  if (found == templates.end())
+  {
+    Show_Error("选中的2D模板不存在");
+    Refresh_Template_List();
+    return;
+  }
+  m_template_service.Set_Active(template_id, nullptr);
+  m_creation_frame = frame;
+  m_editing_template_id = template_id;
+  m_roi_editing = true;
+  if (m_on_show_image) m_on_show_image();
+  const std::string name = found->name;
+  m_instruction_text->SetLabel(
+    wxString::FromUTF8(
+      u8"正在编辑已有模板ROI：拖动框内部移动，拖动红色边框或控制点"
+      u8"调整大小；完成后点击“确认ROI”。"));
+  m_image_view.Begin_Template_Roi_Editing(
+    found->roi,
+    [this, name](Camera_2D_Roi roi)
+    {
+      On_Roi_Selected(name, roi);
+    });
+  Refresh_View();
+}
+
 void Camera_2D_Template_Panel::On_Confirm_Roi(wxCommandEvent &)
 {
   if (!m_roi_editing ||
@@ -333,6 +393,7 @@ void Camera_2D_Template_Panel::On_Cancel_Roi(wxCommandEvent &)
   if (!m_roi_editing) return;
   m_image_view.Cancel_Template_Roi_Selection();
   m_creation_frame.reset();
+  m_editing_template_id.clear();
   m_roi_editing = false;
   m_instruction_text->SetLabel(
     wxString::FromUTF8(u8"已取消ROI编辑，可重新点击“新增”。"));
@@ -364,6 +425,7 @@ void Camera_2D_Template_Panel::On_Create(wxCommandEvent &)
     return;
   }
   m_creation_frame = m_camera_service.Latest_Frame();
+  m_editing_template_id.clear();
   m_roi_editing = true;
   if (m_on_show_image) m_on_show_image();
   const std::string utf8_name = name.ToUTF8().data();
@@ -383,6 +445,9 @@ void Camera_2D_Template_Panel::On_Roi_Selected(
   const Camera_2D_Roi &roi)
 {
   m_roi_editing = false;
+  const std::string editing_template_id =
+    std::move(m_editing_template_id);
+  m_editing_template_id.clear();
   const auto frame = std::move(m_creation_frame);
   if (!frame)
   {
@@ -397,8 +462,13 @@ void Camera_2D_Template_Panel::On_Roi_Selected(
     return;
   }
   std::string created_id;
-  if (!m_template_service.Create(
-        name, image, roi, &created_id, &error))
+  const bool updating = !editing_template_id.empty();
+  const bool saved = updating
+    ? m_template_service.Update(
+        editing_template_id, image, roi, &error)
+    : m_template_service.Create(
+        name, image, roi, &created_id, &error);
+  if (!saved)
   {
     Show_Error(error);
     return;
@@ -406,9 +476,12 @@ void Camera_2D_Template_Panel::On_Roi_Selected(
   const auto detection = m_template_service.Detect(image);
   m_image_view.Show_Template_Detection(detection);
   m_instruction_text->SetLabel(
-    wxString::FromUTF8(
-      u8"识别成功，模板已添加到下方2D模板列表。"));
-  m_name_text->Clear();
+    updating
+      ? wxString::FromUTF8(
+          u8"识别成功，选中模板的ROI和标准模板图已更新。")
+      : wxString::FromUTF8(
+          u8"识别成功，模板已添加到下方2D模板列表。"));
+  if (!updating) m_name_text->Clear();
   Refresh_Template_List();
   Refresh_View();
 }

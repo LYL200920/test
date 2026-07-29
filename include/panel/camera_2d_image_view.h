@@ -34,6 +34,9 @@ public:
     std::optional<Camera_2D_Cross_Detection> detection);
   void Begin_Roi_Selection(
     std::function<void(Camera_2D_Roi)> callback);
+  void Begin_Roi_Editing(
+    const Camera_2D_Roi &roi,
+    std::function<void(Camera_2D_Roi)> callback);
   bool Has_Editable_Roi() const;
   void Confirm_Roi_Selection();
   void Cancel_Roi_Selection();
@@ -92,6 +95,9 @@ public:
     Camera_2D_Cross_Template_Service &template_service);
   ~Camera_2D_Image_View() override;
   void Begin_Template_Roi_Selection(
+    std::function<void(Camera_2D_Roi)> callback);
+  void Begin_Template_Roi_Editing(
+    const Camera_2D_Roi &roi,
     std::function<void(Camera_2D_Roi)> callback);
   bool Has_Editable_Template_Roi() const;
   void Confirm_Template_Roi_Selection();

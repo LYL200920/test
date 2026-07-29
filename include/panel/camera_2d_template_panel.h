@@ -41,6 +41,7 @@ private:
   void Show_Error(const std::string &message);
   void On_Template_Selected(wxListEvent &event);
   void On_Create(wxCommandEvent &event);
+  void On_Edit_Roi(wxCommandEvent &event);
   void On_Delete(wxCommandEvent &event);
   void On_Confirm_Roi(wxCommandEvent &event);
   void On_Cancel_Roi(wxCommandEvent &event);
@@ -56,6 +57,7 @@ private:
   wxChoice *m_type_choice = nullptr;
   wxTextCtrl *m_name_text = nullptr;
   wxButton *m_create_button = nullptr;
+  wxButton *m_edit_roi_button = nullptr;
   wxButton *m_confirm_roi_button = nullptr;
   wxButton *m_cancel_roi_button = nullptr;
   wxButton *m_delete_button = nullptr;
@@ -70,6 +72,7 @@ private:
   std::vector<std::string> m_template_ids;
   std::shared_ptr<const jutze_camera::camera_frame> m_creation_frame;
   bool m_roi_editing = false;
+  std::string m_editing_template_id;
   wxTimer m_timer;
 };
 

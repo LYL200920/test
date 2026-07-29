@@ -71,6 +71,11 @@ public:
     const Camera_2D_Roi &roi,
     std::string *created_id,
     std::string *error_message = nullptr);
+  bool Update(
+    const std::string &template_id,
+    const Camera_2D_Display_Image &image,
+    const Camera_2D_Roi &roi,
+    std::string *error_message = nullptr);
   bool Remove(
     const std::string &template_id,
     std::string *error_message = nullptr);
