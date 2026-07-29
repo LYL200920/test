@@ -93,6 +93,9 @@ src/config.h
 src/config.h.in
 src/pcre2.h
 src/pcre2_chartables.c
+
+# Required by wxWidgets' built-in PCRE build and shipped in source releases.
+!src/pcre2_chartables.c
 src/stamp-h1
 
 /bazel-*

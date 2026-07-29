@@ -139,9 +139,13 @@ CMake*.json
 !CMakePresets.json
 CMakeLists.txt.*
 pnglibconf.[ch]
+
+# Required by wxWidgets' built-in libpng build and shipped in source releases.
+!pnglibconf.h
 pnglibconf.dfn
 pnglibconf.pre
 pngprefix.h
+!pngprefix.h
 
 # Libpng test programs
 png-fix-itxt

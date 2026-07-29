@@ -1,6 +1,7 @@
 /build/
 /vtk_build/
 /.vs/
+build_config.ini
 *.exe
 *.ilk
 *.log
