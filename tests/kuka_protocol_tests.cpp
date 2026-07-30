@@ -1,5 +1,8 @@
 #include "kuka_protocol.h"
+#include "kuka_connection_config.h"
 
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -55,8 +58,18 @@ int main()
                 "V1,C,43,MOVEL,150,50,0,2,3,520,10,630,180,0,90,NEAR,0,0;",
             "MOVEL encoding mismatch");
 
+    kuka::Cartesian_Motion_Options ptp_options = linear_options;
+    ptp_options.velocity = 20.0;
+    const std::string guided_move_ptp =
+        kuka::Encode_Move_Pose_Ptp(44, pose, axis, ptp_options);
+    Require(guided_move_ptp ==
+                "V1,C,44,MOVEPTP,20,50,0,2,3,"
+                "520,10,630,180,0,90,NEAR,0,0,"
+                "AXIS,0,-90,90,0,45,0;",
+            "Axis-guided MOVEPTP encoding mismatch");
+
     Require(kuka::Decode_Message(
-                "V1,S,44,IDLE,0,0,-90,90,0,45,0,"
+                "V1,S,45,IDLE,0,0,-90,90,0,45,0,"
                 "520,10,630,180,0,90,2,3,80",
                 &message, &error),
             "Robot state decode failed");
@@ -78,6 +91,33 @@ int main()
     frames.clear();
     Require(!small_decoder.Feed("123456789", &frames, &error),
             "Oversized unterminated frame was accepted");
+
+    const auto config_test_path =
+        std::filesystem::temp_directory_path() /
+        ("kuka_connection_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()) +
+         ".ini");
+    kuka::Connection_Config saved_config;
+    saved_config.host = "10.20.30.40";
+    saved_config.port = 12345;
+    saved_config.model_id = "test_model";
+    Require(
+        kuka::Save_Connection_Config(
+            config_test_path, saved_config, &error),
+        "Connection configuration save failed");
+    kuka::Connection_Config loaded_config;
+    Require(
+        kuka::Load_Connection_Config(
+            config_test_path, &loaded_config, &error),
+        "Connection configuration load failed");
+    Require(
+        loaded_config.host == saved_config.host &&
+            loaded_config.port == saved_config.port &&
+            loaded_config.model_id == saved_config.model_id,
+        "Connection configuration round-trip mismatch");
+    std::error_code remove_error;
+    std::filesystem::remove(config_test_path, remove_error);
   }
   catch (const std::exception &error)
   {

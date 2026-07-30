@@ -105,7 +105,7 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
     fine_adjust->Set_On_Adjust (
       [this, index] (double delta) { Adjust_Pose (index, delta); });
 
-    m_value_labels[index] = value_label;
+    value_label->Hide ( );
     m_pose_sliders[index] = slider;
     m_fine_adjust_controls[index] = fine_adjust;
     root->Add (row_header, 0, wxEXPAND | wxTOP, index == 0 ? 0 : 6);
@@ -129,7 +129,11 @@ Cartesian_Pose_Panel::Cartesian_Pose_Panel (wxWindow* parent)
     wxEVT_TOGGLEBUTTON, &Cartesian_Pose_Panel::On_Toggle_World_Frame, this);
   buttons->Add (copy_button, 0, wxRIGHT, 6);
   buttons->Add (m_world_frame_button, 0);
-  root->Add (buttons, 0, wxEXPAND);
+  root->Insert (1, buttons, 0, wxEXPAND | wxBOTTOM, 8);
+
+  m_pose_summary_label = new wxStaticText (this, wxID_ANY, "--");
+  root->Insert (
+    2, m_pose_summary_label, 0, wxEXPAND | wxBOTTOM, 8);
   SetSizer (root);
 }
 
@@ -224,6 +228,30 @@ void Cartesian_Pose_Panel::Update_Sliders ( )
 
 void Cartesian_Pose_Panel::Update_Labels ( )
 {
+  if( m_pose_summary_label )
+  {
+    if( !m_has_pose )
+    {
+      m_pose_summary_label->SetLabel ("--");
+      m_warning_text->SetLabel ("");
+      return;
+    }
+    m_pose_summary_label->SetLabel (wxString::Format (
+      "(%.3f, %.3f, %.3f, %.3f, %.3f, %.3f)",
+      m_pose[0],
+      m_pose[1],
+      m_pose[2],
+      m_pose[3],
+      m_pose[4],
+      m_pose[5]));
+    const double summary_b_radians =
+      m_pose[4] * 3.14159265358979323846 / 180.0;
+    m_warning_text->SetLabel (
+      std::abs (std::cos (summary_b_radians)) < 0.02
+        ? "ZYX Euler singularity"
+        : "");
+    return;
+  }
   if( !m_has_pose )
   {
     for( auto* label : m_value_labels ) if( label ) label->SetLabel ("--");
@@ -252,11 +280,8 @@ void Cartesian_Pose_Panel::Notify_Pose_Changed (size_t index)
     ? m_drag_start_pose
     : m_pose;
   target[index] = static_cast<double> (m_pose_sliders[index]->GetValue ( ));
-  if( m_pose_dragging && index == m_pose_drag_index )
-  {
-    m_pose = target;
-    Update_Labels ( );
-  }
+  m_pose = target;
+  Update_Labels ( );
   if( m_on_pose_changed ) m_on_pose_changed (target);
 }
 
@@ -288,6 +313,9 @@ void Cartesian_Pose_Panel::Adjust_Pose (size_t index, double delta)
     static_cast<double> (slider->GetMin ( )),
     static_cast<double> (slider->GetMax ( )));
   if( std::abs (target[index] - m_pose[index]) < 1.0e-12 ) return;
+  m_pose = target;
+  Update_Sliders ( );
+  Update_Labels ( );
   if( m_on_pose_changed ) m_on_pose_changed (target);
 }
 

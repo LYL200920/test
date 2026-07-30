@@ -79,9 +79,13 @@ Joint_Control_Panel::Joint_Control_Panel (wxWindow* parent)
   : wxPanel (parent, wxID_ANY)
 {
   auto* sizer = new wxBoxSizer (wxVERTICAL);
+  m_joint_summary_label = new wxStaticText (this, wxID_ANY, "");
+  Update_Summary_Label ( );
   auto* title = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"关节姿态"));
   sizer->Add (title, 0, wxEXPAND | wxBOTTOM, 8);
+  sizer->Add (
+    m_joint_summary_label, 0, wxEXPAND | wxBOTTOM, 8);
 
   for( size_t i = 0; i < m_joint_sliders.size ( ); ++i )
   {
@@ -122,7 +126,7 @@ Joint_Control_Panel::Joint_Control_Panel (wxWindow* parent)
       [this, i] (double delta_deg) { Adjust_Joint (i, delta_deg); });
 
     m_joint_sliders[i] = slider;
-    m_joint_value_labels[i] = value_label;
+    value_label->Hide ( );
     m_fine_adjust_controls[i] = fine_adjust;
 
     sizer->Add (row_header, 0, wxEXPAND | wxTOP, i == 0 ? 0 : 7);
@@ -164,6 +168,7 @@ void Joint_Control_Panel::Set_Input_Angles (
       slider->GetMax ( ));
     slider->SetValue (value);
   }
+  Update_Summary_Label ( );
 }
 
 void Joint_Control_Panel::Set_Joint_Range_And_Value (
@@ -182,6 +187,7 @@ void Joint_Control_Panel::Set_Joint_Range_And_Value (
   const int clamped = std::clamp (value, min_value, max_value);
   slider->SetValue (clamped);
   m_input_angles_deg[index] = static_cast<double> (clamped);
+  Update_Summary_Label ( );
 }
 
 void Joint_Control_Panel::Set_Joint_Value_Label (
@@ -189,16 +195,41 @@ void Joint_Control_Panel::Set_Joint_Value_Label (
   double input_angle,
   double effective_angle)
 {
+  (void) effective_angle;
+  if( index < m_input_angles_deg.size ( ) )
+  {
+    m_input_angles_deg[index] = input_angle;
+    Update_Summary_Label ( );
+  }
+  return;
   if( index >= m_joint_value_labels.size ( ) || !m_joint_value_labels[index] )
   {
     return;
   }
 
   m_joint_value_labels[index]->SetLabel (
+    wxString::Format ("%.3f deg", input_angle));
+  /*
+  m_joint_value_labels[index]->SetLabel (
     wxString::Format (
       wxString::FromUTF8 (u8"%.3f / %.3f°"),
       input_angle,
       effective_angle));
+  */
+}
+
+void Joint_Control_Panel::Update_Summary_Label ( )
+{
+  if( !m_joint_summary_label ) return;
+  m_joint_summary_label->SetLabel (wxString::Format (
+    wxString::FromUTF8 (
+      u8"(%.3f°, %.3f°, %.3f°, %.3f°, %.3f°, %.3f°)"),
+    m_input_angles_deg[0],
+    m_input_angles_deg[1],
+    m_input_angles_deg[2],
+    m_input_angles_deg[3],
+    m_input_angles_deg[4],
+    m_input_angles_deg[5]));
 }
 
 void Joint_Control_Panel::Set_Joint_Controls_Enabled (bool enabled)
@@ -221,6 +252,7 @@ void Joint_Control_Panel::On_Joint_Slider_Changed (size_t index)
   if( index >= m_joint_sliders.size ( ) || !m_joint_sliders[index] ) return;
   m_input_angles_deg[index] = static_cast<double> (
     m_joint_sliders[index]->GetValue ( ));
+  Update_Summary_Label ( );
   Notify_Joint_Changed ( );
 }
 
@@ -234,6 +266,10 @@ void Joint_Control_Panel::Adjust_Joint (size_t index, double delta_deg)
     static_cast<double> (slider->GetMax ( )));
   if( std::abs (adjusted - m_input_angles_deg[index]) < 1.0e-12 ) return;
   m_input_angles_deg[index] = adjusted;
+  Update_Summary_Label ( );
+  if( m_joint_value_labels[index] )
+    m_joint_value_labels[index]->SetLabel (
+      wxString::Format ("%.3f deg", adjusted));
   slider->SetValue (std::clamp (
     static_cast<int> (std::lround (adjusted)),
     slider->GetMin ( ), slider->GetMax ( )));

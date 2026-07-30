@@ -27,10 +27,12 @@
 #include <wx/choicdlg.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
+#include <wx/grid.h>
 #include <wx/msgdlg.h>
 #include <wx/scrolwin.h>
 #include <wx/sizer.h>
 #include <wx/simplebook.h>
+#include <wx/slider.h>
 #include <wx/splitter.h>
 #include <wx/tglbtn.h>
 #include <wx/utils.h>
@@ -41,6 +43,9 @@
 #include <filesystem>
 #include <unordered_map>
 #include <utility>
+
+wxDEFINE_EVENT(wxEVT_KUKA_MODEL_STATE, wxThreadEvent);
+wxDEFINE_EVENT(wxEVT_KUKA_SERVICE_STATUS, wxThreadEvent);
 
 namespace
 {
@@ -208,6 +213,34 @@ Robot_Model_Panel::Robot_Model_Panel (
   wxWindowID id)
   : wxPanel (parent, id)
 {
+  m_kuka_service = std::make_shared<kuka::Robot_Service> ( );
+  Bind (
+    wxEVT_KUKA_MODEL_STATE,
+    &Robot_Model_Panel::On_Kuka_Model_State,
+    this);
+  Bind (
+    wxEVT_KUKA_SERVICE_STATUS,
+    &Robot_Model_Panel::On_Kuka_Service_Status,
+    this);
+
+  kuka::Service_Observer kuka_observer;
+  kuka_observer.robot_state =
+    [this] (const kuka::Robot_State& state, std::uint64_t revision)
+    {
+      auto* event = new wxThreadEvent (wxEVT_KUKA_MODEL_STATE);
+      event->SetPayload (std::make_pair (state, revision));
+      wxQueueEvent (this, event);
+    };
+  kuka_observer.service_status =
+    [this] (const kuka::Service_Status& status)
+    {
+      auto* event = new wxThreadEvent (wxEVT_KUKA_SERVICE_STATUS);
+      event->SetPayload (status);
+      wxQueueEvent (this, event);
+    };
+  m_kuka_observer_token =
+    m_kuka_service->Subscribe (std::move (kuka_observer));
+
   auto* title = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"显示区域"));
   m_model_name_text = new wxStaticText (
@@ -457,7 +490,8 @@ Robot_Model_Panel::Robot_Model_Panel (
     [this] (int width) { Resize_Right_Tool (width); });
 
   m_tcp_panel = new Net_Panel (
-    m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp));
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp),
+    m_kuka_service);
   m_flow_panel = new Flow_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Flow));
   m_camera_control_panel = new Camera_Control_Panel (
@@ -677,7 +711,181 @@ Robot_Model_Panel::Robot_Model_Panel (
   Apply_Tool_Visualization ( );
 
   Load_Model_List ( );
+  std::string connection_error;
+  if( !kuka::Load_Connection_Config (
+        kuka::Connection_Config_Path ( ),
+        &m_kuka_connection_configuration,
+        &connection_error) )
+  {
+    m_kuka_connection_configuration = { };
+    if( m_status_text )
+      m_status_text->SetLabel (wxString::FromUTF8 (connection_error.c_str ( )));
+  }
   Load_Default_Model ( );
+  Refresh_Kuka_Status_Table ( );
+}
+
+Robot_Model_Panel::~Robot_Model_Panel()
+{
+  if( m_kuka_service )
+  {
+    m_kuka_service->Unsubscribe (m_kuka_observer_token);
+    m_kuka_observer_token = 0;
+    m_kuka_service->Disconnect ( );
+  }
+  DeletePendingEvents ( );
+  Unbind (
+    wxEVT_KUKA_MODEL_STATE,
+    &Robot_Model_Panel::On_Kuka_Model_State,
+    this);
+  Unbind (
+    wxEVT_KUKA_SERVICE_STATUS,
+    &Robot_Model_Panel::On_Kuka_Service_Status,
+    this);
+}
+
+void Robot_Model_Panel::On_Kuka_Model_State(wxThreadEvent &event)
+{
+  const auto payload =
+    event.GetPayload<std::pair<kuka::Robot_State, std::uint64_t>> ( );
+  if( payload.second <= m_kuka_state_revision ) return;
+  m_kuka_state_revision = payload.second;
+  Apply_Kuka_Actual_State (payload.first);
+}
+
+void Robot_Model_Panel::On_Kuka_Service_Status(wxThreadEvent &event)
+{
+  Refresh_Kuka_Command_Controls (
+    event.GetPayload<kuka::Service_Status> ( ));
+}
+
+void Robot_Model_Panel::Apply_Kuka_Actual_State(
+  const kuka::Robot_State &state)
+{
+  m_kuka_latest_state = state;
+  m_kuka_has_latest_state = true;
+  Refresh_Kuka_Status_Table ( );
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+
+  const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
+    m_view->Kinematic_Params ( ), state.axis);
+  // This is measured hardware state, not a proposed target. Always display
+  // it even if the local collision guard would reject a commanded move.
+  m_view->Set_Joint_State (joint_state);
+  Sync_Joint_Controls_From_State ( );
+
+  if( m_status_text )
+  {
+    m_status_text->SetLabel (wxString::Format (
+      "KUKA actual state synchronized: "
+      "A=[%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+      state.axis[0], state.axis[1], state.axis[2],
+      state.axis[3], state.axis[4], state.axis[5]));
+  }
+}
+
+void Robot_Model_Panel::Refresh_Kuka_Command_Controls(
+  const kuka::Service_Status &status)
+{
+  m_kuka_service_status = status;
+  if( status.state == kuka::Control_State::Disconnected )
+    m_kuka_has_latest_state = false;
+  if( status.state != kuka::Control_State::Disconnected ||
+      !status.detail.empty ( ) )
+    m_kuka_connecting = false;
+  const bool ready = status.state == kuka::Control_State::Ready;
+  const bool connected =
+    status.state != kuka::Control_State::Disconnected;
+  const bool busy =
+    status.state == kuka::Control_State::Command_Sent ||
+    status.state == kuka::Control_State::Running ||
+    status.state == kuka::Control_State::Completed;
+
+  if( m_kuka_move_joint_button ) m_kuka_move_joint_button->Enable (ready);
+  if( m_kuka_move_ptp_button ) m_kuka_move_ptp_button->Enable (ready);
+  if( m_kuka_move_linear_button ) m_kuka_move_linear_button->Enable (ready);
+  if( m_kuka_sync_button ) m_kuka_sync_button->Enable (connected && !busy);
+  if( m_kuka_stop_button ) m_kuka_stop_button->Enable (connected);
+  if( m_kuka_ptp_velocity_slider )
+    m_kuka_ptp_velocity_slider->Enable (!busy);
+  if( m_kuka_linear_velocity_slider )
+    m_kuka_linear_velocity_slider->Enable (!busy);
+  if( m_kuka_acceleration_slider )
+    m_kuka_acceleration_slider->Enable (!busy);
+  if( m_kuka_connect_button )
+  {
+    m_kuka_connect_button->SetLabel (
+      connected ? "Disconnect" : (m_kuka_connecting ? "Connecting..." : "Connect"));
+    m_kuka_connect_button->Enable (!m_kuka_connecting || connected);
+  }
+  if( m_joint_panel ) m_joint_panel->Set_Joint_Controls_Enabled (!busy);
+  if( m_cartesian_pose_panel )
+    m_cartesian_pose_panel->Set_Pose_Controls_Enabled (!busy);
+
+  if( m_kuka_status_text )
+  {
+    wxString label =
+      "KUKA: " + wxString::FromUTF8 (kuka::To_String (status.state));
+    if( status.active_sequence != 0 )
+      label += wxString::Format ("  seq=%u", status.active_sequence);
+    if( !status.detail.empty ( ) )
+      label += "  " + wxString::FromUTF8 (status.detail);
+    m_kuka_status_text->SetLabel (label);
+  }
+  Refresh_Kuka_Status_Table ( );
+}
+
+void Robot_Model_Panel::Refresh_Kuka_Status_Table ( )
+{
+  if( !m_kuka_status_table ) return;
+  const bool connected =
+    m_kuka_service && m_kuka_service->Is_Connected ( );
+  const auto set_value = [this] (long row, const wxString& value)
+  {
+    m_kuka_status_table->SetCellValue (
+      static_cast<int> (row), 1, value);
+  };
+  set_value (0, connected ? "Connected" :
+    (m_kuka_connecting ? "Connecting" : "Disconnected"));
+  set_value (
+    1,
+    wxString::FromUTF8 (kuka::To_String (m_kuka_service_status.state)));
+}
+
+void Robot_Model_Panel::On_Kuka_Connect (wxCommandEvent&)
+{
+  if( !m_kuka_service ) return;
+  if( m_kuka_service->Is_Connected ( ) || m_kuka_connecting )
+  {
+    m_kuka_connecting = false;
+    m_kuka_service->Disconnect ( );
+    Refresh_Kuka_Command_Controls (m_kuka_service->Status ( ));
+    return;
+  }
+
+  std::string error_message;
+  if( !Load_Bound_Robot_Model (&error_message) )
+  {
+    m_status_text->SetLabel (
+      "KUKA connect failed: " + wxString::FromUTF8 (error_message.c_str ( )));
+    return;
+  }
+
+  try
+  {
+    m_kuka_connecting = true;
+    Refresh_Kuka_Command_Controls (m_kuka_service->Status ( ));
+    m_kuka_service->Connect (
+      m_kuka_connection_configuration.host,
+      m_kuka_connection_configuration.port);
+  }
+  catch( const std::exception& error )
+  {
+    m_kuka_connecting = false;
+    m_status_text->SetLabel (
+      "KUKA connect failed: " + wxString::FromUTF8 (error.what ( )));
+    Refresh_Kuka_Command_Controls (m_kuka_service->Status ( ));
+  }
 }
 
 void Robot_Model_Panel::On_Robot_Display (wxCommandEvent&)
@@ -899,7 +1107,8 @@ void Robot_Model_Panel::Show_Model_Configuration (wxWindow* parent)
     parent ? parent : this,
     m_models,
     m_current_model_id,
-    m_tool_configuration);
+    m_tool_configuration,
+    m_kuka_connection_configuration);
   if( dialog.ShowModal ( ) != wxID_OK )
   {
     return;
@@ -927,6 +1136,39 @@ void Robot_Model_Panel::Show_Model_Configuration (wxWindow* parent)
     m_status_text->SetLabel (
       wxString::FromUTF8 (u8"当前工具坐标：") +
       wxString::FromUTF8 (Active_Tool ( ).name.c_str ( )));
+    return;
+  }
+
+  if( dialog.Connection_Save_Requested ( ) )
+  {
+    std::string error_message;
+    if( !kuka::Save_Connection_Config (
+          kuka::Connection_Config_Path ( ),
+          dialog.Connection_Configuration ( ),
+          &error_message) )
+    {
+      wxMessageBox (
+        wxString::FromUTF8 (error_message.c_str ( )),
+        "Connection settings",
+        wxOK | wxICON_ERROR,
+        parent ? parent : this);
+      return;
+    }
+    if( m_kuka_service && m_kuka_service->Is_Connected ( ) )
+      m_kuka_service->Disconnect ( );
+    m_kuka_connection_configuration =
+      dialog.Connection_Configuration ( );
+    if( !Load_Bound_Robot_Model (&error_message) )
+    {
+      wxMessageBox (
+        wxString::FromUTF8 (error_message.c_str ( )),
+        "Bound robot model",
+        wxOK | wxICON_ERROR,
+        parent ? parent : this);
+      return;
+    }
+    Refresh_Kuka_Command_Controls (m_kuka_service->Status ( ));
+    m_status_text->SetLabel ("Robot connection settings saved");
     return;
   }
 
@@ -1737,6 +1979,9 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
 
   auto* operation_title = new wxStaticText (
     panel, wxID_ANY, wxString::FromUTF8 (u8"机械臂操作"));
+  m_kuka_connect_button = new wxButton (panel, wxID_ANY, "Connect");
+  m_kuka_connect_button->Bind (
+    wxEVT_BUTTON, &Robot_Model_Panel::On_Kuka_Connect, this);
   m_flange_frame_button = new wxToggleButton (
     panel, wxID_ANY, wxString::FromUTF8 (u8"显示法兰坐标系"));
   m_flange_free_drag_button = new wxToggleButton (
@@ -1773,22 +2018,33 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
   operation_sizer->Add (m_flange_6d_button, 1, wxEXPAND);
   operation_sizer->Add (m_reset_robot_button, 1, wxEXPAND);
 
-  auto* move_joint_button = new wxButton (panel, wxID_ANY, "Send MOVEJ");
-  auto* move_ptp_button = new wxButton (panel, wxID_ANY, "Send MOVEPTP");
-  auto* move_linear_button = new wxButton (panel, wxID_ANY, "Send MOVEL");
-  auto* query_state_button = new wxButton (panel, wxID_ANY, "Get state");
-  auto* stop_robot_button = new wxButton (panel, wxID_ANY, "Stop");
+  m_kuka_status_text =
+    new wxStaticText (panel, wxID_ANY, "KUKA: Disconnected");
+  m_kuka_move_joint_button =
+    new wxButton (panel, wxID_ANY, "MoveJ");
+  m_kuka_move_ptp_button =
+    new wxButton (panel, wxID_ANY, "MoveP");
+  m_kuka_move_linear_button =
+    new wxButton (panel, wxID_ANY, "MoveL");
+  m_kuka_sync_button = new wxButton (panel, wxID_ANY, "State");
+  m_kuka_stop_button = new wxButton (panel, wxID_ANY, "Stop");
 
-  move_joint_button->Bind (
+  m_kuka_move_joint_button->Bind (
     wxEVT_BUTTON,
     [this] (wxCommandEvent&)
     {
       try
       {
-        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
-        if( !client || !client->Is_Connected ( ) )
-          throw std::runtime_error ("KUKA is not connected.");
-        const auto sequence = client->Move_Joint (Read_Joint_Input_Angles ( ));
+        if( !m_kuka_service )
+          throw std::runtime_error ("KUKA service is unavailable.");
+        kuka::Joint_Motion_Options options;
+        options.velocity_percent =
+          static_cast<double> (m_kuka_ptp_velocity_slider->GetValue ( ));
+        options.acceleration_percent =
+          static_cast<double> (m_kuka_acceleration_slider->GetValue ( ));
+        const auto sequence =
+          m_kuka_service->Move_Joint (
+            Read_Joint_Input_Angles ( ), options);
         m_status_text->SetLabel (
           wxString::Format ("KUKA MOVEJ sent, sequence=%u", sequence));
       }
@@ -1804,9 +2060,8 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
     {
       try
       {
-        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
-        if( !client || !client->Is_Connected ( ) )
-          throw std::runtime_error ("KUKA is not connected.");
+        if( !m_kuka_service )
+          throw std::runtime_error ("KUKA service is unavailable.");
         robot_model::Matrix4 world_from_flange = { };
         if( !m_view || !m_view->Get_World_From_Flange (&world_from_flange) )
           throw std::runtime_error ("No valid robot pose is available.");
@@ -1816,10 +2071,16 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
         const kuka::Pose target =
           robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
         kuka::Cartesian_Motion_Options options;
-        options.velocity = linear ? 100.0 : 20.0;
+        options.velocity = static_cast<double> (
+          linear
+            ? m_kuka_linear_velocity_slider->GetValue ( )
+            : m_kuka_ptp_velocity_slider->GetValue ( ));
+        options.acceleration_percent = static_cast<double> (
+          m_kuka_acceleration_slider->GetValue ( ));
         const auto sequence = linear
-          ? client->Move_Linear (target, options)
-          : client->Move_Pose_Ptp (target, options);
+          ? m_kuka_service->Move_Linear (target, options)
+          : m_kuka_service->Move_Pose_Ptp (
+              target, Read_Joint_Input_Angles ( ), options);
         m_status_text->SetLabel (wxString::Format (
           linear
             ? "KUKA MOVEL sent, sequence=%u"
@@ -1833,22 +2094,21 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
           wxString::FromUTF8 (error.what ( )));
       }
     };
-  move_ptp_button->Bind (
+  m_kuka_move_ptp_button->Bind (
     wxEVT_BUTTON,
     [send_cartesian] (wxCommandEvent&) { send_cartesian (false); });
-  move_linear_button->Bind (
+  m_kuka_move_linear_button->Bind (
     wxEVT_BUTTON,
     [send_cartesian] (wxCommandEvent&) { send_cartesian (true); });
-  query_state_button->Bind (
+  m_kuka_sync_button->Bind (
     wxEVT_BUTTON,
     [this] (wxCommandEvent&)
     {
       try
       {
-        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
-        if( !client || !client->Is_Connected ( ) )
-          throw std::runtime_error ("KUKA is not connected.");
-        client->Get_State ( );
+        if( !m_kuka_service )
+          throw std::runtime_error ("KUKA service is unavailable.");
+        m_kuka_service->Synchronize ( );
       }
       catch( const std::exception& error )
       {
@@ -1857,16 +2117,15 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
           wxString::FromUTF8 (error.what ( )));
       }
     });
-  stop_robot_button->Bind (
+  m_kuka_stop_button->Bind (
     wxEVT_BUTTON,
     [this] (wxCommandEvent&)
     {
       try
       {
-        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
-        if( !client || !client->Is_Connected ( ) )
-          throw std::runtime_error ("KUKA is not connected.");
-        client->Stop (true);
+        if( !m_kuka_service )
+          throw std::runtime_error ("KUKA service is unavailable.");
+        m_kuka_service->Request_Stop ( );
       }
       catch( const std::exception& error )
       {
@@ -1875,12 +2134,13 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
       }
     });
 
-  auto* robot_command_sizer = new wxGridSizer (5, 6, 6);
-  robot_command_sizer->Add (move_joint_button, 1, wxEXPAND);
-  robot_command_sizer->Add (move_ptp_button, 1, wxEXPAND);
-  robot_command_sizer->Add (move_linear_button, 1, wxEXPAND);
-  robot_command_sizer->Add (query_state_button, 1, wxEXPAND);
-  robot_command_sizer->Add (stop_robot_button, 1, wxEXPAND);
+  // Keep hardware controls readable on narrower layouts: two columns.
+  auto* robot_command_sizer = new wxGridSizer (2, 6, 6);
+  robot_command_sizer->Add (m_kuka_move_joint_button, 1, wxEXPAND);
+  robot_command_sizer->Add (m_kuka_move_ptp_button, 1, wxEXPAND);
+  robot_command_sizer->Add (m_kuka_move_linear_button, 1, wxEXPAND);
+  robot_command_sizer->Add (m_kuka_sync_button, 1, wxEXPAND);
+  robot_command_sizer->Add (m_kuka_stop_button, 1, wxEXPAND);
 
   m_joint_panel = new Joint_Control_Panel (panel);
   m_joint_panel->Set_On_Joint_Changed (
@@ -1898,15 +2158,144 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
       Apply_Cartesian_Pose_Target (target_pose);
     });
 
+  auto* motion_parameter_sizer = new wxStaticBoxSizer (
+    wxVERTICAL, panel, "Motion parameters");
+  const auto add_motion_parameter =
+    [panel, motion_parameter_sizer] (
+      const wxString& name,
+      int minimum,
+      int maximum,
+      int initial,
+      const wxString& suffix,
+      wxSlider** output)
+    {
+      auto* row = new wxBoxSizer (wxHORIZONTAL);
+      auto* name_text = new wxStaticText (panel, wxID_ANY, name);
+      name_text->SetMinSize (wxSize (145, -1));
+      auto* slider = new wxSlider (
+        panel,
+        wxID_ANY,
+        initial,
+        minimum,
+        maximum,
+        wxDefaultPosition,
+        wxDefaultSize,
+        wxSL_HORIZONTAL);
+      auto* value_text = new wxStaticText (
+        panel,
+        wxID_ANY,
+        wxString::Format ("%d", initial) + suffix);
+      value_text->SetMinSize (wxSize (85, -1));
+      slider->Bind (
+        wxEVT_SLIDER,
+        [slider, value_text, suffix] (wxCommandEvent&)
+        {
+          value_text->SetLabel (
+            wxString::Format ("%d", slider->GetValue ( )) + suffix);
+        });
+      row->Add (name_text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+      row->Add (slider, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+      row->Add (value_text, 0, wxALIGN_CENTER_VERTICAL);
+      motion_parameter_sizer->Add (row, 0, wxEXPAND | wxALL, 4);
+      *output = slider;
+    };
+  add_motion_parameter (
+    "PTP speed (MoveJ / MoveP)",
+    1,
+    100,
+    20,
+    "%",
+    &m_kuka_ptp_velocity_slider);
+  add_motion_parameter (
+    "Linear speed (MoveL)",
+    1,
+    2000,
+    100,
+    " mm/s",
+    &m_kuka_linear_velocity_slider);
+  add_motion_parameter (
+    "Acceleration",
+    1,
+    100,
+    50,
+    "%",
+    &m_kuka_acceleration_slider);
+
+  m_kuka_status_table = new wxGrid (
+    panel, wxID_ANY, wxDefaultPosition, wxSize (-1, 50));
+  m_kuka_status_table->CreateGrid (2, 2);
+  m_kuka_status_table->EnableEditing (false);
+  m_kuka_status_table->EnableGridLines (true);
+  m_kuka_status_table->SetRowLabelSize (0);
+  m_kuka_status_table->SetColLabelSize (0);
+  m_kuka_status_table->DisableDragGridSize ( );
+  m_kuka_status_table->DisableDragColSize ( );
+  m_kuka_status_table->DisableDragRowSize ( );
+  m_kuka_status_table->SetDefaultCellAlignment (
+    wxALIGN_CENTER, wxALIGN_CENTER);
+  m_kuka_status_table->SetGridLineColour (wxColour (205, 205, 205));
+  m_kuka_status_table->SetMargins (0, 0);
+  m_kuka_status_table->ShowScrollbars (
+    wxSHOW_SB_NEVER, wxSHOW_SB_NEVER);
+  m_kuka_status_table->SetColSize (0, 105);
+  m_kuka_status_table->SetColSize (1, 520);
+  m_kuka_status_table->SetMinSize (wxSize (210, 50));
+  const std::array<const char*, 2> status_rows = {
+    "Connection", "State"
+  };
+  for( std::size_t row = 0; row < status_rows.size ( ); ++row )
+  {
+    m_kuka_status_table->SetCellValue (
+      static_cast<int> (row), 0, status_rows[row]);
+    m_kuka_status_table->SetCellValue (
+      static_cast<int> (row), 1, "--");
+    m_kuka_status_table->SetCellBackgroundColour (
+      static_cast<int> (row), 0, wxColour (238, 238, 238));
+    m_kuka_status_table->SetRowSize (static_cast<int> (row), 24);
+  }
+  m_kuka_status_table->Bind (
+    wxEVT_SIZE,
+    [this] (wxSizeEvent& event)
+    {
+      const int width =
+        std::max (210, m_kuka_status_table->GetClientSize ( ).x);
+      m_kuka_status_table->SetColSize (0, 105);
+      m_kuka_status_table->SetColSize (1, std::max (80, width - 105));
+      event.Skip ( );
+    });
+
+  auto* connection_sizer = new wxBoxSizer (wxHORIZONTAL);
+  connection_sizer->Add (m_kuka_connect_button, 0, wxRIGHT, 8);
+  connection_sizer->Add (
+    m_kuka_status_text, 1, wxALIGN_CENTER_VERTICAL);
+
   auto* sizer = new wxBoxSizer (wxVERTICAL);
+  sizer->Add (
+    connection_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 8);
   sizer->Add (operation_title, 0, wxEXPAND | wxALL, 8);
   sizer->Add (operation_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-  sizer->Add (
-    robot_command_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->Add (m_joint_panel, 0, wxEXPAND | wxTOP, 6);
   sizer->Add (m_cartesian_pose_panel, 0, wxEXPAND | wxTOP, 14);
+  sizer->Add (
+    motion_parameter_sizer,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxTOP,
+    8);
+  sizer->Add (
+    robot_command_sizer, 0, wxEXPAND | wxALL, 8);
+  sizer->Add (
+    new wxStaticText (panel, wxID_ANY, "Robot status"),
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxTOP,
+    8);
+  sizer->Add (
+    m_kuka_status_table,
+    0,
+    wxEXPAND | wxLEFT | wxRIGHT | wxTOP | wxBOTTOM,
+    8);
   sizer->AddStretchSpacer (1);
   panel->SetSizer (sizer);
+  Refresh_Kuka_Command_Controls (m_kuka_service->Status ( ));
   panel->FitInside ( );
   return panel;
 }
@@ -3103,6 +3492,9 @@ void Robot_Model_Panel::Load_Model_List ( )
 
 void Robot_Model_Panel::Load_Default_Model ( )
 {
+  if( Load_Bound_Robot_Model ( ) )
+    return;
+
   const auto default_model = std::find_if (
     m_models.begin ( ), m_models.end ( ),
     [] (const robot_model::Robot_Model_Info& model)
@@ -3127,6 +3519,36 @@ void Robot_Model_Panel::Load_Default_Model ( )
       wxString::FromUTF8 (u8"默认机械臂模型加载失败"));
     m_right_tool_panel->Set_Robot_Tool_Enabled (false);
   }
+}
+
+bool Robot_Model_Panel::Load_Bound_Robot_Model (
+  std::string* error_message)
+{
+  const auto bound_model = std::find_if (
+    m_models.begin ( ),
+    m_models.end ( ),
+    [this] (const robot_model::Robot_Model_Info& model)
+    {
+      return model_id (model) == m_kuka_connection_configuration.model_id;
+    });
+  if( bound_model == m_models.end ( ) )
+  {
+    if( error_message )
+      *error_message =
+        "The bound robot model was not found: " +
+        m_kuka_connection_configuration.model_id;
+    return false;
+  }
+  if( m_current_model_id == m_kuka_connection_configuration.model_id &&
+      m_view && m_view->Has_Current_Model ( ) )
+  {
+    if( error_message ) error_message->clear ( );
+    return true;
+  }
+  return Load_Model (
+    static_cast<std::size_t> (
+      std::distance (m_models.begin ( ), bound_model)),
+    error_message);
 }
 
 bool Robot_Model_Panel::Load_Model (
@@ -3187,6 +3609,7 @@ bool Robot_Model_Panel::Load_Model (
   m_status_text->SetLabel (wxString::FromUTF8 (u8"模型加载成功"));
   if( m_reset_robot_button ) m_reset_robot_button->Enable (true);
   m_right_tool_panel->Set_Robot_Tool_Enabled (true);
+  Refresh_Kuka_Status_Table ( );
   Select_Display_Page (Main_Display_Page::Robot);
   return true;
 }

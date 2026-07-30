@@ -14,6 +14,8 @@
 #include "template_configuration.h"
 #include "camera_2d_service.h"
 #include "camera_2d_cross_template.h"
+#include "kuka_robot_service.h"
+#include "kuka_connection_config.h"
 
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -21,6 +23,7 @@
 #include <wx/timer.h>
 
 #include <array>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -41,9 +44,14 @@ class Teach_Point_List_Panel;
 class Tool_Panel;
 class wxButton;
 class wxChoice;
+class wxGrid;
+class wxSlider;
 class wxSimplebook;
 class wxSplitterWindow;
 class wxToggleButton;
+
+wxDECLARE_EVENT(wxEVT_KUKA_MODEL_STATE, wxThreadEvent);
+wxDECLARE_EVENT(wxEVT_KUKA_SERVICE_STATUS, wxThreadEvent);
 
 enum class Main_Display_Page
 {
@@ -62,6 +70,7 @@ public:
       Camera_2D_Service &camera_2d_service,
       Camera_2D_Cross_Template_Service &camera_2d_template_service,
       wxWindowID id = wxID_ANY);
+  ~Robot_Model_Panel() override;
 
   void Show_Model_Configuration(wxWindow *parent = nullptr);
   void Refresh_Template_Configuration();
@@ -86,6 +95,12 @@ private:
   void On_Camera_2D_Image_Display(wxCommandEvent &event);
   void On_Point_Cloud_Display(wxCommandEvent &event);
   void On_Reset_Robot(wxCommandEvent &event);
+  void On_Kuka_Model_State(wxThreadEvent &event);
+  void On_Kuka_Service_Status(wxThreadEvent &event);
+  void Apply_Kuka_Actual_State(const kuka::Robot_State &state);
+  void Refresh_Kuka_Command_Controls(const kuka::Service_Status &status);
+  void Refresh_Kuka_Status_Table();
+  void On_Kuka_Connect(wxCommandEvent &event);
   bool Reset_Robot_To_Home();
   bool Set_Camera_Pose_Visible(bool visible);
   void On_Toggle_Flange_Frame(wxCommandEvent &event);
@@ -142,6 +157,7 @@ private:
   void Load_Model_List();
   void Load_Default_Model();
   bool Load_Model(size_t model_index, std::string *error_message = nullptr);
+  bool Load_Bound_Robot_Model(std::string *error_message = nullptr);
   const robot_model::Tool_Coordinate_Profile &Active_Tool() const;
   const robot_model::Tool_Coordinate_Profile &Interaction_Tool() const;
   void Apply_Active_Tool();
@@ -179,6 +195,25 @@ private:
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel *m_right_tool_panel = nullptr;
   Net_Panel *m_tcp_panel = nullptr;
+  std::shared_ptr<kuka::Robot_Service> m_kuka_service;
+  kuka::Robot_Service::Observer_Token m_kuka_observer_token = 0;
+  std::uint64_t m_kuka_state_revision = 0;
+  wxStaticText *m_kuka_status_text = nullptr;
+  wxButton *m_kuka_connect_button = nullptr;
+  wxGrid *m_kuka_status_table = nullptr;
+  wxButton *m_kuka_move_joint_button = nullptr;
+  wxButton *m_kuka_move_ptp_button = nullptr;
+  wxButton *m_kuka_move_linear_button = nullptr;
+  wxButton *m_kuka_sync_button = nullptr;
+  wxButton *m_kuka_stop_button = nullptr;
+  wxSlider *m_kuka_ptp_velocity_slider = nullptr;
+  wxSlider *m_kuka_linear_velocity_slider = nullptr;
+  wxSlider *m_kuka_acceleration_slider = nullptr;
+  kuka::Connection_Config m_kuka_connection_configuration;
+  kuka::Service_Status m_kuka_service_status;
+  kuka::Robot_State m_kuka_latest_state;
+  bool m_kuka_has_latest_state = false;
+  bool m_kuka_connecting = false;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;
@@ -199,7 +234,7 @@ private:
   robot_model::Tool_Coordinate_Configuration m_tool_configuration;
   robot_model::Tool_Visualization_Configuration
     m_tool_visualization_configuration;
-  std::string m_interaction_tool_id;
+  std::string m_interaction_tool_id = "flange";
   std::string m_teach_pose_coordinate_id;
   bool m_speed_zero_paused_playback = false;
   std::vector<std::size_t> m_playback_waypoint_frame_indices;

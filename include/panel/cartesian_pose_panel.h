@@ -44,6 +44,7 @@ private:
   std::array<Fine_Adjust_Control *, 6> m_fine_adjust_controls = {};
   wxStaticText *m_warning_text = nullptr;
   wxStaticText *m_title_text = nullptr;
+  wxStaticText *m_pose_summary_label = nullptr;
   wxToggleButton *m_world_frame_button = nullptr;
   robot_model::XyzabcPose m_pose = {};
   robot_model::XyzabcPose m_actual_pose = {};

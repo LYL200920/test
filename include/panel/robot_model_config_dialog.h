@@ -3,6 +3,7 @@
 
 #include "robot_model_data.h"
 #include "tool_coordinate.h"
+#include "kuka_connection_config.h"
 
 #include <wx/dialog.h>
 
@@ -13,9 +14,11 @@
 
 class wxButton;
 class wxBookCtrlEvent;
+class wxChoice;
 class wxListBox;
 class wxNotebook;
 class wxSpinCtrlDouble;
+class wxSpinCtrl;
 class wxStaticText;
 class wxTextCtrl;
 
@@ -26,20 +29,24 @@ public:
     wxWindow *parent,
     const std::vector<robot_model::Robot_Model_Info> &models,
     const std::string &current_model_id,
-    const robot_model::Tool_Coordinate_Configuration &tool_configuration);
+    const robot_model::Tool_Coordinate_Configuration &tool_configuration,
+    const kuka::Connection_Config &connection_configuration);
 
   std::size_t Selected_Model_Index() const;
   bool Model_Load_Requested() const;
   bool Tool_Apply_Requested() const;
+  bool Connection_Save_Requested() const;
   const robot_model::Tool_Coordinate_Configuration &
     Tool_Configuration() const;
+  const kuka::Connection_Config &Connection_Configuration() const;
 
 private:
   enum class Result_Action
   {
     None,
     Load_Model,
-    Apply_Tool
+    Apply_Tool,
+    Save_Connection
   };
 
   void On_Page_Changed(wxBookCtrlEvent &event);
@@ -56,6 +63,7 @@ private:
 private:
   const std::vector<robot_model::Robot_Model_Info> &m_models;
   robot_model::Tool_Coordinate_Configuration m_tool_configuration;
+  kuka::Connection_Config m_connection_configuration;
   wxNotebook *m_notebook = nullptr;
   wxListBox *m_model_list = nullptr;
   wxStaticText *m_model_status_text = nullptr;
@@ -63,6 +71,9 @@ private:
   wxTextCtrl *m_tool_name = nullptr;
   std::array<wxSpinCtrlDouble *, 6> m_tool_pose_controls = {};
   wxButton *m_delete_tool_button = nullptr;
+  wxTextCtrl *m_connection_host = nullptr;
+  wxSpinCtrl *m_connection_port = nullptr;
+  wxChoice *m_connection_model = nullptr;
   wxButton *m_action_button = nullptr;
   std::size_t m_tool_editor_index = 0;
   Result_Action m_result_action = Result_Action::None;

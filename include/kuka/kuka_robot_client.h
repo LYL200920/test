@@ -41,6 +41,10 @@ public:
   std::uint32_t Move_Pose_Ptp(
       const Pose &target,
       const Cartesian_Motion_Options &options = {});
+  std::uint32_t Move_Pose_Ptp(
+      const Pose &target,
+      const Axis &joint_solution,
+      const Cartesian_Motion_Options &options = {});
   std::uint32_t Move_Linear(
       const Pose &target,
       const Cartesian_Motion_Options &options = {});

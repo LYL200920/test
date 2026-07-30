@@ -1,6 +1,7 @@
 #include "robot_model_config_dialog.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/listbox.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
@@ -31,7 +32,8 @@ Robot_Model_Config_Dialog::Robot_Model_Config_Dialog(
   wxWindow *parent,
   const std::vector<robot_model::Robot_Model_Info> &models,
   const std::string &current_model_id,
-  const robot_model::Tool_Coordinate_Configuration &tool_configuration)
+  const robot_model::Tool_Coordinate_Configuration &tool_configuration,
+  const kuka::Connection_Config &connection_configuration)
   : wxDialog(
       parent,
       wxID_ANY,
@@ -40,7 +42,8 @@ Robot_Model_Config_Dialog::Robot_Model_Config_Dialog(
       wxSize(620, 500),
       wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
     m_models(models),
-    m_tool_configuration(tool_configuration)
+    m_tool_configuration(tool_configuration),
+    m_connection_configuration(connection_configuration)
 {
   robot_model::Normalize_Tool_Coordinate_Configuration(
     &m_tool_configuration);
@@ -143,6 +146,74 @@ Robot_Model_Config_Dialog::Robot_Model_Config_Dialog(
   m_notebook->AddPage(
     tool_page, wxString::FromUTF8(u8"工具坐标系"), false);
 
+  auto *connection_page = new wxPanel(m_notebook, wxID_ANY);
+  m_connection_host = new wxTextCtrl(
+    connection_page,
+    wxID_ANY,
+    From_Utf8(m_connection_configuration.host));
+  m_connection_port = new wxSpinCtrl(
+    connection_page,
+    wxID_ANY,
+    std::to_string(m_connection_configuration.port),
+    wxDefaultPosition,
+    wxDefaultSize,
+    wxSP_ARROW_KEYS,
+    1,
+    65535,
+    m_connection_configuration.port);
+  m_connection_model = new wxChoice(connection_page, wxID_ANY);
+  int bound_model_selection = wxNOT_FOUND;
+  for (std::size_t index = 0; index < m_models.size(); ++index)
+  {
+    const std::string label = m_models[index].display_name.empty()
+      ? Model_Id(m_models[index])
+      : m_models[index].display_name;
+    m_connection_model->Append(From_Utf8(label));
+    if (Model_Id(m_models[index]) == m_connection_configuration.model_id)
+      bound_model_selection = static_cast<int>(index);
+  }
+  if (bound_model_selection == wxNOT_FOUND && !m_models.empty())
+    bound_model_selection = 0;
+  if (bound_model_selection != wxNOT_FOUND)
+    m_connection_model->SetSelection(bound_model_selection);
+
+  auto *connection_grid = new wxFlexGridSizer(2, 10, 10);
+  connection_grid->AddGrowableCol(1, 1);
+  connection_grid->Add(
+    new wxStaticText(connection_page, wxID_ANY, "Robot IP"),
+    0,
+    wxALIGN_CENTER_VERTICAL);
+  connection_grid->Add(m_connection_host, 1, wxEXPAND);
+  connection_grid->Add(
+    new wxStaticText(connection_page, wxID_ANY, "TCP Port"),
+    0,
+    wxALIGN_CENTER_VERTICAL);
+  connection_grid->Add(m_connection_port, 1, wxEXPAND);
+  connection_grid->Add(
+    new wxStaticText(
+      connection_page,
+      wxID_ANY,
+      wxString::FromUTF8(u8"绑定机械臂模型")),
+    0,
+    wxALIGN_CENTER_VERTICAL);
+  connection_grid->Add(m_connection_model, 1, wxEXPAND);
+
+  auto *connection_sizer = new wxBoxSizer(wxVERTICAL);
+  connection_sizer->Add(
+    new wxStaticText(
+      connection_page,
+      wxID_ANY,
+      wxString::FromUTF8(
+        u8"Robot 页面将使用该地址连接，并自动加载绑定的机械臂模型。")),
+    0,
+    wxEXPAND | wxALL,
+    10);
+  connection_sizer->Add(
+    connection_grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  connection_page->SetSizer(connection_sizer);
+  m_notebook->AddPage(
+    connection_page, wxString::FromUTF8(u8"连接设置"), false);
+
   m_action_button = new wxButton(this, wxID_ANY, "");
   auto *cancel_button = new wxButton(
     this, wxID_CANCEL, wxString::FromUTF8(u8"取消"));
@@ -218,10 +289,21 @@ bool Robot_Model_Config_Dialog::Tool_Apply_Requested() const
   return m_result_action == Result_Action::Apply_Tool;
 }
 
+bool Robot_Model_Config_Dialog::Connection_Save_Requested() const
+{
+  return m_result_action == Result_Action::Save_Connection;
+}
+
 const robot_model::Tool_Coordinate_Configuration &
 Robot_Model_Config_Dialog::Tool_Configuration() const
 {
   return m_tool_configuration;
+}
+
+const kuka::Connection_Config &
+Robot_Model_Config_Dialog::Connection_Configuration() const
+{
+  return m_connection_configuration;
 }
 
 void Robot_Model_Config_Dialog::On_Page_Changed(wxBookCtrlEvent &event)
@@ -241,7 +323,8 @@ void Robot_Model_Config_Dialog::On_Model_Activated(wxCommandEvent &)
 
 void Robot_Model_Config_Dialog::On_Action(wxCommandEvent &)
 {
-  if (m_notebook->GetSelection() == 0)
+  const int page = m_notebook->GetSelection();
+  if (page == 0)
   {
     if (Selected_Model_Index() >= m_models.size())
     {
@@ -249,7 +332,7 @@ void Robot_Model_Config_Dialog::On_Action(wxCommandEvent &)
     }
     m_result_action = Result_Action::Load_Model;
   }
-  else
+  else if (page == 1)
   {
     if (!Store_Tool_Editor())
     {
@@ -265,6 +348,22 @@ void Robot_Model_Config_Dialog::On_Action(wxCommandEvent &)
     robot_model::Normalize_Tool_Coordinate_Configuration(
       &m_tool_configuration);
     m_result_action = Result_Action::Apply_Tool;
+  }
+  else
+  {
+    const int selection = m_connection_model->GetSelection();
+    const std::string host = m_connection_host->GetValue().ToUTF8().data();
+    if (host.empty() || selection == wxNOT_FOUND ||
+        static_cast<std::size_t>(selection) >= m_models.size())
+    {
+      return;
+    }
+    m_connection_configuration.host = host;
+    m_connection_configuration.port =
+      static_cast<unsigned short>(m_connection_port->GetValue());
+    m_connection_configuration.model_id =
+      Model_Id(m_models[static_cast<std::size_t>(selection)]);
+    m_result_action = Result_Action::Save_Connection;
   }
   EndModal(wxID_OK);
 }
@@ -399,6 +498,15 @@ void Robot_Model_Config_Dialog::Refresh_Tool_List(std::size_t selection)
 
 void Robot_Model_Config_Dialog::Update_Action_Button()
 {
+  if (m_notebook->GetSelection() == 2)
+  {
+    m_action_button->SetLabel(wxString::FromUTF8(u8"保存连接设置"));
+    m_action_button->Enable(
+      !m_connection_host->GetValue().empty() &&
+      m_connection_model->GetSelection() != wxNOT_FOUND);
+    m_action_button->SetDefault();
+    return;
+  }
   const bool model_page = m_notebook->GetSelection() == 0;
   m_action_button->SetLabel(wxString::FromUTF8(
     model_page ? u8"加载机械臂" : u8"应用工具坐标"));

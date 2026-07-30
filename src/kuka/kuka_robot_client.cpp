@@ -76,6 +76,19 @@ std::uint32_t Robot_Client::Move_Pose_Ptp(
       { return Encode_Move_Pose_Ptp(sequence, target, options); });
 }
 
+std::uint32_t Robot_Client::Move_Pose_Ptp(
+    const Pose &target,
+    const Axis &joint_solution,
+    const Cartesian_Motion_Options &options)
+{
+  return Send_Command(
+      [&](std::uint32_t sequence)
+      {
+        return Encode_Move_Pose_Ptp(
+            sequence, target, joint_solution, options);
+      });
+}
+
 std::uint32_t Robot_Client::Move_Linear(
     const Pose &target,
     const Cartesian_Motion_Options &options)

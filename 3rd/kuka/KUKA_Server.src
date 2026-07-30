@@ -229,8 +229,11 @@ GLOBAL DEF KS_MOVECART(Sequence:IN, Rest[]:IN, Linear:IN)
    DECL INT ToolNo
    DECL INT StatusValue
    DECL INT TurnValue
+   DECL BOOL AxisGuided
+   DECL CHAR Guidance[16]
 
    Values[] = Rest[]
+   AxisGuided = FALSE
    IF NOT KS_READ_REAL(Values[], Velocity) THEN
       KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
       RETURN
@@ -289,6 +292,51 @@ GLOBAL DEF KS_MOVECART(Sequence:IN, Rest[]:IN, Linear:IN)
    IF NOT KS_READ_INT(Values[], TurnValue) THEN
       KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
       RETURN
+   ENDIF
+
+   ; Robot-side pose control may append the IK solution:
+   ; ...,NEAR,S,T,AXIS,A1,A2,A3,A4,A5,A6
+   ; PTP then uses this unambiguous joint endpoint instead of selecting a
+   ; potentially unreachable Cartesian S/T branch a second time.
+   IF STRLEN(Values[]) <> 0 THEN
+      IF Linear THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1202, "LINEAR_AXIS_GUIDANCE")
+         RETURN
+      ENDIF
+      IF NOT KS_POP_FIELD(Values[], Guidance[]) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT STRCOMP(Guidance[], "AXIS", #CASE_SENS) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      KS_AXIS_TARGET = $AXIS_ACT
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A1) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A2) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A3) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A4) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A5) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A6) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_PTP_AXIS")
+         RETURN
+      ENDIF
+      AxisGuided = TRUE
    ENDIF
 
    IF STRLEN(Values[]) <> 0 THEN
@@ -364,10 +412,18 @@ GLOBAL DEF KS_MOVECART(Sequence:IN, Rest[]:IN, Linear:IN)
       BAS(#VEL_PTP, Velocity)
       BAS(#ACC_PTP, Acceleration)
       $APO.CPTP = Blend
-      IF Blend > 0.0 THEN
-         PTP KS_POSE_TARGET C_PTP
+      IF AxisGuided THEN
+         IF Blend > 0.0 THEN
+            PTP KS_AXIS_TARGET C_PTP
+         ELSE
+            PTP KS_AXIS_TARGET
+         ENDIF
       ELSE
-         PTP KS_POSE_TARGET
+         IF Blend > 0.0 THEN
+            PTP KS_POSE_TARGET C_PTP
+         ELSE
+            PTP KS_POSE_TARGET
+         ENDIF
       ENDIF
    ENDIF
 

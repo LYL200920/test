@@ -424,6 +424,28 @@ std::string Encode_Move_Pose_Ptp(
   return Encode_Cartesian("MOVEPTP", sequence, target, options, false);
 }
 
+std::string Encode_Move_Pose_Ptp(
+    std::uint32_t sequence,
+    const Pose &target,
+    const Axis &joint_solution,
+    const Cartesian_Motion_Options &options)
+{
+  if (!std::all_of(
+          joint_solution.begin(),
+          joint_solution.end(),
+          [](double value) { return std::isfinite(value); }))
+  {
+    throw std::invalid_argument(
+        "MOVEPTP joint solution contains a non-finite value.");
+  }
+  std::string message =
+      Encode_Cartesian("MOVEPTP", sequence, target, options, false);
+  message.pop_back();
+  message += ",AXIS";
+  Append_Array(&message, joint_solution);
+  return message + FRAME_TERMINATOR;
+}
+
 std::string Encode_Move_Linear(
     std::uint32_t sequence,
     const Pose &target,

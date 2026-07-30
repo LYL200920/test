@@ -23,6 +23,9 @@ terminator. Do not append CR/LF to KUKA frames.
 - XYZ and blend distance: millimetres
 - MOVEL velocity: millimetres per second
 - MOVEJ/MOVEPTP velocity and all acceleration values: percent
+- Robot-page MOVEPTP appends `AXIS,A1..A6` as an IK solution. The server
+  executes that endpoint as `PTP E6AXIS`, avoiding ambiguous Cartesian S/T
+  branch selection. Older pose-only MOVEPTP frames remain supported.
 
 ## Safety boundary
 

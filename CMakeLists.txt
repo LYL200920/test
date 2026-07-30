@@ -173,6 +173,8 @@ file(GLOB kuka_sources CONFIGURE_DEPENDS "src/kuka/*.cpp")
 file(GLOB kuka_headers CONFIGURE_DEPENDS "include/kuka/*.h" "include/kuka/*.hpp")
 add_library(kuka STATIC ${kuka_sources} ${kuka_headers})
 target_include_directories(kuka PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/kuka")
+target_compile_definitions(kuka PRIVATE
+  KUKA_CONFIG_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/Resource/Config")
 target_link_libraries(kuka PUBLIC net)
 
 file(GLOB robot_model_sources CONFIGURE_DEPENDS "src/robot_model/*.cpp")
@@ -307,6 +309,9 @@ if(BUILD_TESTING)
 
   add_project_test(kuka_protocol_tests kuka_protocol_tests.cpp)
   target_link_libraries(kuka_protocol_tests PRIVATE kuka)
+
+  add_project_test(kuka_robot_service_tests kuka_robot_service_tests.cpp)
+  target_link_libraries(kuka_robot_service_tests PRIVATE kuka)
 
   add_project_test(camera_image_converter_tests camera_image_converter_tests.cpp)
   target_link_libraries(camera_image_converter_tests PRIVATE camera)

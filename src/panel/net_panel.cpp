@@ -9,6 +9,8 @@
 #include <wx/tokenzr.h>
 
 #include <algorithm>
+#include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -103,9 +105,15 @@ wxBEGIN_EVENT_TABLE(Net_Panel, wxPanel)
                 EVT_BUTTON(ID_CLEAR_BTN, Net_Panel::On_Clear_Click)
                     wxEND_EVENT_TABLE()
 
-                        Net_Panel::Net_Panel(wxWindow *parent, wxWindowID id)
-    : wxPanel(parent, id)
+                        Net_Panel::Net_Panel(
+                            wxWindow *parent,
+                            std::shared_ptr<kuka::Robot_Service> kuka_service,
+                            wxWindowID id)
+    : wxPanel(parent, id),
+      m_kuka_service(std::move(kuka_service))
 {
+  if (!m_kuka_service)
+    throw std::invalid_argument("KUKA robot service is null.");
   // 端点角色初始化：第一个 HIK，第二个 KUKA
   m_endpoints[0].name = HIK_NAME;
   m_endpoints[0].default_ip = HIK_DEFAULT_IP;
@@ -141,16 +149,16 @@ wxBEGIN_EVENT_TABLE(Net_Panel, wxPanel)
 
   // KUKA client（第二个端点）
   {
-    m_kuka_client = std::make_shared<kuka::Robot_Client>();
-    m_kuka_client->Set_Connection_Callback(
+    kuka::Service_Observer observer;
+    observer.connection =
         [this](bool connected, const std::string &info)
         {
           auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_STATUS);
           evt->SetInt(connected ? 1 : 0);
           evt->SetString(wxString::FromUTF8(info));
           wxQueueEvent(this, evt);
-        });
-    m_kuka_client->Set_Acknowledgement_Callback(
+        };
+    observer.acknowledgement =
         [this](const kuka::Acknowledgement &ack)
         {
           auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
@@ -161,9 +169,9 @@ wxBEGIN_EVENT_TABLE(Net_Panel, wxPanel)
               ack.error_code,
               wxString::FromUTF8(ack.detail)));
           wxQueueEvent(this, evt);
-        });
-    m_kuka_client->Set_State_Callback(
-        [this](const kuka::Robot_State &state)
+        };
+    observer.robot_state =
+        [this](const kuka::Robot_State &state, std::uint64_t)
         {
           auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
           evt->SetString(wxString::Format(
@@ -179,15 +187,16 @@ wxBEGIN_EVENT_TABLE(Net_Panel, wxPanel)
               state.pose[3], state.pose[4], state.pose[5],
               state.base, state.tool, state.override_percent));
           wxQueueEvent(this, evt);
-        });
-    m_kuka_client->Set_Protocol_Error_Callback(
+        };
+    observer.protocol_error =
         [this](const std::string &error, const std::string &frame)
         {
           auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
           evt->SetString("Protocol error: " + wxString::FromUTF8(error) +
                          " frame=" + wxString::FromUTF8(frame));
           wxQueueEvent(this, evt);
-        });
+        };
+    m_kuka_observer_token = m_kuka_service->Subscribe(std::move(observer));
   }
 }
 
@@ -203,14 +212,12 @@ Net_Panel::~Net_Panel()
       ep.client.reset();
     }
   }
-  if (m_kuka_client)
+  if (m_kuka_service)
   {
-    m_kuka_client->Set_Connection_Callback(nullptr);
-    m_kuka_client->Set_Acknowledgement_Callback(nullptr);
-    m_kuka_client->Set_State_Callback(nullptr);
-    m_kuka_client->Set_Protocol_Error_Callback(nullptr);
-    m_kuka_client->Disconnect();
-    m_kuka_client.reset();
+    m_kuka_service->Unsubscribe(m_kuka_observer_token);
+    m_kuka_observer_token = 0;
+    m_kuka_service->Disconnect();
+    m_kuka_service.reset();
   }
 
   DeletePendingEvents();
@@ -366,8 +373,8 @@ void Net_Panel::Try_Connect(Net_Endpoint& ep)
 
   if (ep.name == KUKA_NAME)
   {
-    m_kuka_client->Connect(std::string(ip.mb_str(wxConvUTF8)),
-                           static_cast<unsigned short>(port_val));
+    m_kuka_service->Connect(std::string(ip.mb_str(wxConvUTF8)),
+                            static_cast<unsigned short>(port_val));
   }
   else
   {
@@ -383,7 +390,7 @@ void Net_Panel::On_Disconnect_Click(wxCommandEvent& event)
     return;
 
   if (ep->name == KUKA_NAME)
-    m_kuka_client->Disconnect();
+    m_kuka_service->Disconnect();
   else
     ep->client->disconnect();
 
@@ -409,14 +416,22 @@ void Net_Panel::On_Send_Click(wxCommandEvent& event)
     return;
 
   std::string msg(text.mb_str(wxConvUTF8));
-  if (ep->name == KUKA_NAME)
+  try
   {
-    m_kuka_client->Send_Raw(msg);
+    if (ep->name == KUKA_NAME)
+    {
+      m_kuka_service->Send_Raw(msg);
+    }
+    else
+    {
+      msg += "\r\n";
+      ep->client->send(msg);
+    }
   }
-  else
+  catch (const std::exception &error)
   {
-    msg += "\r\n";
-    ep->client->send(msg);
+    Append_Log(ep->name, "[Error]", wxString::FromUTF8(error.what()));
+    return;
   }
   Append_Log(ep->name, "[Send]", text);
 
@@ -592,14 +607,14 @@ void Net_Panel::Refresh_Net_Inputs(Net_Endpoint& ep, const wxString& ip, const w
   Fill_Combo_Box(ep.port_input, ep.port_history, port);
 }
 
-std::shared_ptr<kuka::Robot_Client> Net_Panel::Kuka_Client() const
+std::shared_ptr<kuka::Robot_Service> Net_Panel::Kuka_Service() const
 {
-  return m_kuka_client;
+  return m_kuka_service;
 }
 
 bool Net_Panel::Is_Connected(const Net_Endpoint& ep) const
 {
   if (ep.name == KUKA_NAME)
-    return m_kuka_client && m_kuka_client->Is_Connected();
+    return m_kuka_service && m_kuka_service->Is_Connected();
   return ep.client && ep.client->is_connected();
 }

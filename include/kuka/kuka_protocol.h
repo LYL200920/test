@@ -126,6 +126,11 @@ std::string Encode_Move_Pose_Ptp(
     std::uint32_t sequence,
     const Pose &target,
     const Cartesian_Motion_Options &options = {});
+std::string Encode_Move_Pose_Ptp(
+    std::uint32_t sequence,
+    const Pose &target,
+    const Axis &joint_solution,
+    const Cartesian_Motion_Options &options = {});
 std::string Encode_Move_Linear(
     std::uint32_t sequence,
     const Pose &target,
