@@ -1,0 +1,28 @@
+<ETHERNETKRL>
+  <CONFIGURATION>
+    <EXTERNAL>
+      <TYPE>Client</TYPE>
+    </EXTERNAL>
+    <INTERNAL>
+      <IP>192.168.1.25</IP>
+      <PORT>54600</PORT>
+      <BUFFERING Mode="FIFO" Limit="512" />
+      <MESSAGES Display="disabled"/>
+      <BUFFSIZE Limit="16384"/>
+	   <TIMEOUT Connect="6000"/>
+      <ALIVE Set_Flag="10"/>
+      <PROTOCOL>TCP</PROTOCOL>
+      <MESSAGES Logging="error" Display="disabled"/>
+    </INTERNAL>
+  </CONFIGURATION>
+  <RECEIVE>
+    <RAW>
+      <ELEMENT Tag="MsgRecv" Type="STREAM" Set_Flag="11" Size="2047" EOS="59"/>
+    </RAW>
+  </RECEIVE>
+  <SEND>
+    <RAW>
+      <ELEMENT Tag="MsgSend" Type="STREAM" EOS="59"/>
+    </RAW>
+  </SEND>
+</ETHERNETKRL>

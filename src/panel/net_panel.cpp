@@ -141,19 +141,53 @@ wxBEGIN_EVENT_TABLE(Net_Panel, wxPanel)
 
   // KUKA client（第二个端点）
   {
-    auto& ep = m_endpoints[1];
-    ep.client = std::make_shared<tcp_client>();
-    ep.client->set_status_callback([this](bool connected, const std::string &info)
-                                   {
-      auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_STATUS);
-      evt->SetInt(connected ? 1 : 0);
-      evt->SetString(wxString::FromUTF8(info));
-      wxQueueEvent(this, evt); });
-    ep.client->set_recv_callback([this](const std::string &msg)
-                                 {
-      auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
-      evt->SetString(wxString::FromUTF8(msg));
-      wxQueueEvent(this, evt); });
+    m_kuka_client = std::make_shared<kuka::Robot_Client>();
+    m_kuka_client->Set_Connection_Callback(
+        [this](bool connected, const std::string &info)
+        {
+          auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_STATUS);
+          evt->SetInt(connected ? 1 : 0);
+          evt->SetString(wxString::FromUTF8(info));
+          wxQueueEvent(this, evt);
+        });
+    m_kuka_client->Set_Acknowledgement_Callback(
+        [this](const kuka::Acknowledgement &ack)
+        {
+          auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
+          evt->SetString(wxString::Format(
+              "ACK seq=%u state=%s code=%d detail=%s",
+              ack.sequence,
+              wxString::FromUTF8(kuka::To_String(ack.state)),
+              ack.error_code,
+              wxString::FromUTF8(ack.detail)));
+          wxQueueEvent(this, evt);
+        });
+    m_kuka_client->Set_State_Callback(
+        [this](const kuka::Robot_State &state)
+        {
+          auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
+          evt->SetString(wxString::Format(
+              "STATE %s active=%u "
+              "A=[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f] "
+              "P=[%.2f,%.2f,%.2f,%.2f,%.2f,%.2f] "
+              "base=%d tool=%d ov=%.1f%%",
+              wxString::FromUTF8(state.motion_state),
+              state.active_sequence,
+              state.axis[0], state.axis[1], state.axis[2],
+              state.axis[3], state.axis[4], state.axis[5],
+              state.pose[0], state.pose[1], state.pose[2],
+              state.pose[3], state.pose[4], state.pose[5],
+              state.base, state.tool, state.override_percent));
+          wxQueueEvent(this, evt);
+        });
+    m_kuka_client->Set_Protocol_Error_Callback(
+        [this](const std::string &error, const std::string &frame)
+        {
+          auto* evt = new wxThreadEvent(wxEVT_NET_KUKA_RECV);
+          evt->SetString("Protocol error: " + wxString::FromUTF8(error) +
+                         " frame=" + wxString::FromUTF8(frame));
+          wxQueueEvent(this, evt);
+        });
   }
 }
 
@@ -168,6 +202,15 @@ Net_Panel::~Net_Panel()
       ep.client->disconnect();
       ep.client.reset();
     }
+  }
+  if (m_kuka_client)
+  {
+    m_kuka_client->Set_Connection_Callback(nullptr);
+    m_kuka_client->Set_Acknowledgement_Callback(nullptr);
+    m_kuka_client->Set_State_Callback(nullptr);
+    m_kuka_client->Set_Protocol_Error_Callback(nullptr);
+    m_kuka_client->Disconnect();
+    m_kuka_client.reset();
   }
 
   DeletePendingEvents();
@@ -294,7 +337,7 @@ void Net_Panel::On_Connect_Click(wxCommandEvent& event)
 
 void Net_Panel::Try_Connect(Net_Endpoint& ep)
 {
-  if (ep.client->is_connected())
+  if (Is_Connected(ep))
     return;
 
   wxString ip = Trim_Value(ep.ip_input->GetValue());
@@ -321,8 +364,16 @@ void Net_Panel::Try_Connect(Net_Endpoint& ep)
   ep.port_input->Disable();
   ep.status_label->SetLabel("Status: Connecting...");
 
-  ep.client->connect(std::string(ip.mb_str(wxConvUTF8)),
-                     static_cast<unsigned short>(port_val));
+  if (ep.name == KUKA_NAME)
+  {
+    m_kuka_client->Connect(std::string(ip.mb_str(wxConvUTF8)),
+                           static_cast<unsigned short>(port_val));
+  }
+  else
+  {
+    ep.client->connect(std::string(ip.mb_str(wxConvUTF8)),
+                       static_cast<unsigned short>(port_val));
+  }
 }
 
 void Net_Panel::On_Disconnect_Click(wxCommandEvent& event)
@@ -331,7 +382,10 @@ void Net_Panel::On_Disconnect_Click(wxCommandEvent& event)
   if (ep == nullptr)
     return;
 
-  ep->client->disconnect();
+  if (ep->name == KUKA_NAME)
+    m_kuka_client->Disconnect();
+  else
+    ep->client->disconnect();
 
   ep->connect_btn->Enable();
   ep->disconnect_btn->Disable();
@@ -347,7 +401,7 @@ void Net_Panel::On_Send_Click(wxCommandEvent& event)
   if (ep == nullptr)
     return;
 
-  if (!ep->client->is_connected())
+  if (!Is_Connected(*ep))
     return;
 
   wxString text = ep->send_input->GetValue();
@@ -355,9 +409,15 @@ void Net_Panel::On_Send_Click(wxCommandEvent& event)
     return;
 
   std::string msg(text.mb_str(wxConvUTF8));
-  msg += "\r\n";
-
-  ep->client->send(msg);
+  if (ep->name == KUKA_NAME)
+  {
+    m_kuka_client->Send_Raw(msg);
+  }
+  else
+  {
+    msg += "\r\n";
+    ep->client->send(msg);
+  }
   Append_Log(ep->name, "[Send]", text);
 
   // 保留输入框内容，方便重复发送，光标置末尾
@@ -369,7 +429,7 @@ void Net_Panel::On_Send_Key(wxKeyEvent& event)
   if (event.GetKeyCode() == WXK_RETURN && !event.ShiftDown())
   {
     auto* ep = Find_Endpoint_By_Window(dynamic_cast<wxWindow*>(event.GetEventObject()));
-    if (ep != nullptr && ep->client->is_connected())
+    if (ep != nullptr && Is_Connected(*ep))
     {
       wxCommandEvent dummy;
       dummy.SetEventObject(ep->send_btn);
@@ -530,4 +590,16 @@ void Net_Panel::Refresh_Net_Inputs(Net_Endpoint& ep, const wxString& ip, const w
 {
   Fill_Combo_Box(ep.ip_input, ep.ip_history, ip);
   Fill_Combo_Box(ep.port_input, ep.port_history, port);
+}
+
+std::shared_ptr<kuka::Robot_Client> Net_Panel::Kuka_Client() const
+{
+  return m_kuka_client;
+}
+
+bool Net_Panel::Is_Connected(const Net_Endpoint& ep) const
+{
+  if (ep.name == KUKA_NAME)
+    return m_kuka_client && m_kuka_client->Is_Connected();
+  return ep.client && ep.client->is_connected();
 }

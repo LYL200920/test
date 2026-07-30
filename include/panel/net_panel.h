@@ -2,6 +2,7 @@
 #define includeguard_net_panel_h_includeguard
 
 #include "tcp_client.h"
+#include "kuka_robot_client.h"
 
 #include <wx/button.h>
 #include <wx/combobox.h>
@@ -25,6 +26,7 @@ class Net_Panel : public wxPanel
 public:
   explicit Net_Panel (wxWindow* parent, wxWindowID id = wxID_ANY);
   ~Net_Panel ( ) override;
+  std::shared_ptr<kuka::Robot_Client> Kuka_Client ( ) const;
 
 private:
   // 一个连接端点：对应一个独立的 tcp_client（KUKA / HIK）
@@ -70,9 +72,11 @@ private:
   void Load_Net_Config ( );
   void Save_Net_Config (const Net_Endpoint& ep);
   void Refresh_Net_Inputs (Net_Endpoint& ep, const wxString& ip, const wxString& port);
+  bool Is_Connected (const Net_Endpoint& ep) const;
 
 private:
-  std::array<Net_Endpoint, 2> m_endpoints;  // [0]=KUKA, [1]=HIK
+  std::array<Net_Endpoint, 2> m_endpoints;  // [0]=HIK, [1]=KUKA
+  std::shared_ptr<kuka::Robot_Client> m_kuka_client;
 
   wxTextCtrl* m_log = nullptr;
   wxButton* m_clear_btn = nullptr;

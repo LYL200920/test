@@ -1,0 +1,497 @@
+&ACCESS RVP
+&REL 3
+DEF KUKA_SERVER()
+   ; KUKA supervisory TCP motion server.
+   ; Protocol: V1,<type>,<sequence>,<name>,...;
+   ; The semicolon is added/removed by EthernetKRL EOS configuration.
+
+   GLOBAL INTERRUPT DECL 3 WHEN $STOPMESS==TRUE DO IR_STOPM()
+   INTERRUPT ON 3
+   BAS(#INITMOV, 0)
+
+   KS_ACTIVE_SEQUENCE = 0
+   KS_DEBUG_STEP = 0
+   KS_LAST_RECV_RESULT = 0
+   KS_LAST_SEND_RESULT = 0
+   KS_BASE = 0
+   KS_TOOL = 0
+   KS_MOTION_STATE[] = "IDLE"
+   $BASE = $NULLFRAME
+   $TOOL = $NULLFRAME
+
+   TCP_INIT(10)
+
+KS_RECONNECT:
+   KS_RESULT = TCP_CONNECT(10, ",")
+   IF KS_RESULT <> 0 THEN
+      WAIT SEC 0.5
+      GOTO KS_RECONNECT
+   ENDIF
+
+   KS_DEBUG_STEP = 10
+   KS_ACTIVE_SEQUENCE = 0
+   KS_MOTION_STATE[] = "IDLE"
+   ; Send a protocol-level greeting before entering the receive loop.
+   ; If the PC cannot see this frame, diagnose EKI send/configuration first.
+   KS_LAST_SEND_RESULT = TCP_SEND_STR("V1,A,0,DONE,0,CONNECTED")
+   KS_DEBUG_STEP = 20
+
+   LOOP
+      KS_RX[] = "\0"
+      KS_DEBUG_STEP = 30
+      ; Let the proven non-empty Head path in TCP_RECV_STR validate and
+      ; remove the protocol version. KS_RX then starts with "C,...".
+      KS_LAST_RECV_RESULT = TCP_RECV_STR("V1", KS_RX[], 1)
+
+      IF NOT $FLAG[10] THEN
+         GOTO KS_DISCONNECTED
+      ENDIF
+
+      IF KS_LAST_RECV_RESULT == 0 THEN
+         KS_DEBUG_STEP = 40
+         KS_LAST_RX[] = KS_RX[]
+         KS_HANDLE_COMMAND(KS_RX[])
+      ENDIF
+   ENDLOOP
+
+KS_DISCONNECTED:
+   KS_ACTIVE_SEQUENCE = 0
+   KS_MOTION_STATE[] = "DISCONNECTED"
+   KS_RESULT = TCP_CLOSE()
+   GOTO KS_RECONNECT
+END
+
+GLOBAL DEF KS_HANDLE_COMMAND(Buffer[]:IN)
+   DECL CHAR Buffer[]
+   DECL CHAR Rest[2047]
+   DECL CHAR Field[64]
+   DECL CHAR MsgType[8]
+   DECL CHAR Command[32]
+   DECL INT Sequence
+
+   KS_DEBUG_STEP = 50
+   Rest[] = Buffer[]
+
+   IF NOT KS_POP_FIELD(Rest[], MsgType[]) THEN
+      KS_SEND_ACK(0, "REJECTED", 1001, "BAD_FRAME")
+      RETURN
+   ENDIF
+   IF NOT STRCOMP(MsgType[], "C", #CASE_SENS) THEN
+      KS_SEND_ACK(0, "REJECTED", 1003, "BAD_TYPE")
+      RETURN
+   ENDIF
+
+   IF NOT KS_POP_FIELD(Rest[], Field[]) THEN
+      KS_SEND_ACK(0, "REJECTED", 1001, "BAD_FRAME")
+      RETURN
+   ENDIF
+   IF NOT STRTOINT(Field[], Sequence) THEN
+      KS_SEND_ACK(0, "REJECTED", 1004, "BAD_SEQUENCE")
+      RETURN
+   ENDIF
+
+   IF NOT KS_POP_FIELD(Rest[], Command[]) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1001, "BAD_FRAME")
+      RETURN
+   ENDIF
+
+   IF STRCOMP(Command[], "MOVEJ", #CASE_SENS) THEN
+      KS_MOVEJ(Sequence, Rest[])
+      RETURN
+   ENDIF
+   IF STRCOMP(Command[], "MOVEPTP", #CASE_SENS) THEN
+      KS_MOVECART(Sequence, Rest[], FALSE)
+      RETURN
+   ENDIF
+   IF STRCOMP(Command[], "MOVEL", #CASE_SENS) THEN
+      KS_MOVECART(Sequence, Rest[], TRUE)
+      RETURN
+   ENDIF
+   IF STRCOMP(Command[], "GET_STATE", #CASE_SENS) THEN
+      KS_SEND_ACK(Sequence, "DONE", 0, "OK")
+      KS_SEND_STATE(Sequence)
+      RETURN
+   ENDIF
+   IF STRCOMP(Command[], "PING", #CASE_SENS) THEN
+      KS_SEND_ACK(Sequence, "DONE", 0, "PONG")
+      RETURN
+   ENDIF
+   IF STRCOMP(Command[], "STOP", #CASE_SENS) THEN
+      ; Program-level stop. Safety stop remains the responsibility of
+      ; the controller safety circuit and must never depend on TCP.
+      KS_ACTIVE_SEQUENCE = 0
+      KS_MOTION_STATE[] = "IDLE"
+      KS_SEND_ACK(Sequence, "DONE", 0, "STOPPED")
+      RETURN
+   ENDIF
+
+   KS_SEND_ACK(Sequence, "REJECTED", 1005, "UNKNOWN_COMMAND")
+END
+
+GLOBAL DEF KS_MOVEJ(Sequence:IN, Rest[]:IN)
+   DECL INT Sequence
+   DECL CHAR Rest[]
+   DECL CHAR Values[2047]
+   DECL REAL Velocity
+   DECL REAL Acceleration
+   DECL REAL Blend
+
+   Values[] = Rest[]
+   IF NOT KS_READ_REAL(Values[], Velocity) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], Acceleration) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], Blend) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+
+   KS_AXIS_TARGET = $AXIS_ACT
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A1) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A2) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A3) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A4) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A5) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_AXIS_TARGET.A6) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1101, "BAD_MOVEJ")
+      RETURN
+   ENDIF
+
+   IF STRLEN(Values[]) <> 0 THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1102, "MOVEJ_EXTRA_DATA")
+      RETURN
+   ENDIF
+   IF (Velocity <= 0.0) OR (Velocity > 100.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1103, "MOVEJ_VEL_RANGE")
+      RETURN
+   ENDIF
+   IF (Acceleration <= 0.0) OR (Acceleration > 100.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1104, "MOVEJ_ACC_RANGE")
+      RETURN
+   ENDIF
+   IF (Blend < 0.0) OR (Blend > 100.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1105, "MOVEJ_BLEND_RANGE")
+      RETURN
+   ENDIF
+
+   KS_SEQUENCE = Sequence
+   KS_ACTIVE_SEQUENCE = Sequence
+   KS_MOTION_STATE[] = "ACCEPTED"
+   KS_SEND_ACK(Sequence, "ACCEPTED", 0, "OK")
+
+   BAS(#VEL_PTP, Velocity)
+   BAS(#ACC_PTP, Acceleration)
+   $APO.CPTP = Blend
+
+   KS_MOTION_STATE[] = "RUNNING"
+   KS_SEND_ACK(Sequence, "RUNNING", 0, "OK")
+   IF Blend > 0.0 THEN
+      PTP KS_AXIS_TARGET C_PTP
+   ELSE
+      PTP KS_AXIS_TARGET
+   ENDIF
+
+   KS_ACTIVE_SEQUENCE = 0
+   KS_MOTION_STATE[] = "IDLE"
+   KS_SEND_ACK(Sequence, "DONE", 0, "OK")
+   KS_SEND_STATE(Sequence)
+END
+
+GLOBAL DEF KS_MOVECART(Sequence:IN, Rest[]:IN, Linear:IN)
+   DECL INT Sequence
+   DECL CHAR Rest[]
+   DECL BOOL Linear
+   DECL CHAR Values[2047]
+   DECL CHAR Configuration[16]
+   DECL REAL Velocity
+   DECL REAL Acceleration
+   DECL REAL Blend
+   DECL INT BaseNo
+   DECL INT ToolNo
+   DECL INT StatusValue
+   DECL INT TurnValue
+
+   Values[] = Rest[]
+   IF NOT KS_READ_REAL(Values[], Velocity) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], Acceleration) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], Blend) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_INT(Values[], BaseNo) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_INT(Values[], ToolNo) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+
+   ; Start from the actual pose so NEAR preserves the current S/T values.
+   KS_POSE_TARGET = $POS_ACT
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.X) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.Y) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.Z) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.A) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.B) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_REAL(Values[], KS_POSE_TARGET.C) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_POP_FIELD(Values[], Configuration[]) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_INT(Values[], StatusValue) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+   IF NOT KS_READ_INT(Values[], TurnValue) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1201, "BAD_CART")
+      RETURN
+   ENDIF
+
+   IF STRLEN(Values[]) <> 0 THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1202, "CART_EXTRA_DATA")
+      RETURN
+   ENDIF
+   IF Velocity <= 0.0 THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1204, "CART_VEL_RANGE")
+      RETURN
+   ENDIF
+   IF (Acceleration <= 0.0) OR (Acceleration > 100.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1205, "CART_ACC_RANGE")
+      RETURN
+   ENDIF
+   IF Blend < 0.0 THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1206, "CART_BLEND_RANGE")
+      RETURN
+   ENDIF
+   IF (BaseNo < 0) OR (BaseNo > 32) OR (ToolNo < 0) OR (ToolNo > 32) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1207, "CART_FRAME_RANGE")
+      RETURN
+   ENDIF
+   IF Linear AND (Velocity > 2000.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1202, "CART_RANGE")
+      RETURN
+   ENDIF
+   IF (NOT Linear) AND (Velocity > 100.0) THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1202, "CART_RANGE")
+      RETURN
+   ENDIF
+
+   IF STRCOMP(Configuration[], "EXACT", #CASE_SENS) THEN
+      KS_POSE_TARGET.S = StatusValue
+      KS_POSE_TARGET.T = TurnValue
+   ELSE
+      IF NOT STRCOMP(Configuration[], "NEAR", #CASE_SENS) THEN
+         KS_SEND_ACK(Sequence, "REJECTED", 1203, "BAD_CONFIG")
+         RETURN
+      ENDIF
+   ENDIF
+
+   IF BaseNo == 0 THEN
+      $BASE = $NULLFRAME
+   ELSE
+      $BASE = BASE_DATA[BaseNo]
+   ENDIF
+   IF ToolNo == 0 THEN
+      $TOOL = $NULLFRAME
+   ELSE
+      $TOOL = TOOL_DATA[ToolNo]
+   ENDIF
+   KS_BASE = BaseNo
+   KS_TOOL = ToolNo
+
+   KS_SEQUENCE = Sequence
+   KS_ACTIVE_SEQUENCE = Sequence
+   KS_MOTION_STATE[] = "ACCEPTED"
+   KS_SEND_ACK(Sequence, "ACCEPTED", 0, "OK")
+
+   KS_MOTION_STATE[] = "RUNNING"
+   KS_SEND_ACK(Sequence, "RUNNING", 0, "OK")
+   IF Linear THEN
+      ; Protocol velocity is mm/s; KRL $VEL.CP uses m/s.
+      $VEL.CP = Velocity / 1000.0
+      $ACC.CP = 2.0 * Acceleration / 100.0
+      $APO.CDIS = Blend
+      IF Blend > 0.0 THEN
+         LIN KS_POSE_TARGET C_DIS
+      ELSE
+         LIN KS_POSE_TARGET
+      ENDIF
+   ELSE
+      BAS(#VEL_PTP, Velocity)
+      BAS(#ACC_PTP, Acceleration)
+      $APO.CPTP = Blend
+      IF Blend > 0.0 THEN
+         PTP KS_POSE_TARGET C_PTP
+      ELSE
+         PTP KS_POSE_TARGET
+      ENDIF
+   ENDIF
+
+   KS_ACTIVE_SEQUENCE = 0
+   KS_MOTION_STATE[] = "IDLE"
+   KS_SEND_ACK(Sequence, "DONE", 0, "OK")
+   KS_SEND_STATE(Sequence)
+END
+
+GLOBAL DEF KS_SEND_ACK(Sequence:IN, State[]:IN, ErrorCode:IN, Detail[]:IN)
+   DECL INT Sequence
+   DECL CHAR State[]
+   DECL INT ErrorCode
+   DECL CHAR Detail[]
+   DECL STATE_T WriteState
+   DECL INT Offset
+
+   KS_TX[] = "\0"
+   Offset = 0
+   SWRITE(KS_TX[], WriteState, Offset, "V1,A,%d,%s,%d,%s", Sequence, State[], ErrorCode, Detail[])
+   IF WriteState.RET1 == #CMD_OK THEN
+      KS_LAST_SEND_RESULT = TCP_SEND_STR(KS_TX[])
+   ENDIF
+END
+
+GLOBAL DEF KS_SEND_STATE(RequestSequence:IN)
+   DECL INT RequestSequence
+   DECL STATE_T WriteState
+   DECL INT Offset
+   DECL E6AXIS ActualAxis
+   DECL E6POS ActualPose
+
+   ActualAxis = $AXIS_ACT
+   ActualPose = $POS_ACT
+   KS_TX[] = "\0"
+   Offset = 0
+   SWRITE(KS_TX[], WriteState, Offset, "V1,S,%d,%s,%d,%f,%f,%f,%f,%f,%f,", RequestSequence, KS_MOTION_STATE[], KS_ACTIVE_SEQUENCE, ActualAxis.A1, ActualAxis.A2, ActualAxis.A3, ActualAxis.A4, ActualAxis.A5, ActualAxis.A6)
+   IF WriteState.RET1 <> #CMD_OK THEN
+      RETURN
+   ENDIF
+   SWRITE(KS_TX[], WriteState, Offset, "%f,%f,%f,%f,%f,%f,%d,%d,%f", ActualPose.X, ActualPose.Y, ActualPose.Z, ActualPose.A, ActualPose.B, ActualPose.C, KS_BASE, KS_TOOL, $OV_PRO)
+   IF WriteState.RET1 == #CMD_OK THEN
+      KS_LAST_SEND_RESULT = TCP_SEND_STR(KS_TX[])
+   ENDIF
+END
+
+GLOBAL DEFFCT BOOL KS_POP_FIELD(Buffer[]:OUT, Field[]:OUT)
+   DECL CHAR Buffer[]
+   DECL CHAR Field[]
+   DECL CHAR Remaining[2047]
+   DECL INT Index
+   DECL INT Length
+   DECL INT Separator
+   DECL INT OutIndex
+
+   Length = STRLEN(Buffer[])
+   IF Length == 0 THEN
+      RETURN FALSE
+   ENDIF
+
+   Separator = 0
+   FOR Index = 1 TO Length
+      IF Buffer[Index] == 44 THEN
+         Separator = Index
+         EXIT
+      ENDIF
+   ENDFOR
+
+   Field[] = "\0"
+   IF Separator == 0 THEN
+      IF Length >= STRDECLLEN(Field[]) THEN
+         RETURN FALSE
+      ENDIF
+      FOR Index = 1 TO Length
+         Field[Index] = Buffer[Index]
+      ENDFOR
+      Field[Length + 1] = 0
+      ; Clear the caller-owned string explicitly. On some KSS versions,
+      ; assigning "\0" to an unsized OUT parameter does not update the
+      ; caller's first character reliably.
+      Buffer[1] = 0
+      RETURN TRUE
+   ENDIF
+
+   IF (Separator - 1) >= STRDECLLEN(Field[]) THEN
+      RETURN FALSE
+   ENDIF
+
+   OutIndex = 1
+   FOR Index = 1 TO Separator - 1
+      Field[OutIndex] = Buffer[Index]
+      OutIndex = OutIndex + 1
+   ENDFOR
+   Field[OutIndex] = 0
+
+   Remaining[] = "\0"
+   OutIndex = 1
+   FOR Index = Separator + 1 TO Length
+      Remaining[OutIndex] = Buffer[Index]
+      OutIndex = OutIndex + 1
+   ENDFOR
+   Remaining[OutIndex] = 0
+   Buffer[] = Remaining[]
+   RETURN TRUE
+ENDFCT
+
+GLOBAL DEFFCT BOOL KS_READ_REAL(Buffer[]:OUT, Value:OUT)
+   DECL CHAR Buffer[]
+   DECL REAL Value
+   DECL CHAR Field[64]
+
+   IF NOT KS_POP_FIELD(Buffer[], Field[]) THEN
+      RETURN FALSE
+   ENDIF
+   RETURN STRTOREAL(Field[], Value)
+ENDFCT
+
+GLOBAL DEFFCT BOOL KS_READ_INT(Buffer[]:OUT, Value:OUT)
+   DECL CHAR Buffer[]
+   DECL INT Value
+   DECL CHAR Field[64]
+
+   IF NOT KS_POP_FIELD(Buffer[], Field[]) THEN
+      RETURN FALSE
+   ENDIF
+   RETURN STRTOINT(Field[], Value)
+ENDFCT

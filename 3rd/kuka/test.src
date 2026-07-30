@@ -1,0 +1,94 @@
+&ACCESS RVP
+&REL 3
+&PARAM DISKPATH = KRC:\R1\Program\JUZI\AAA
+DEF  test ( )
+   ;FOLD INI;%{PE}
+      ;FOLD BASISTECH INI
+         GLOBAL INTERRUPT DECL 3 WHEN $STOPMESS==TRUE DO IR_STOPM ( )
+         INTERRUPT ON 3 
+         BAS (#INITMOV,0 )
+      ;ENDFOLD (BASISTECH INI)
+      ;FOLD USER INI
+         ;Make your modifications here
+      ;ENDFOLD (USER INI)
+   ;ENDFOLD (INI)
+   ;FOLD SPTP HOME Vel=100 % DEFAULT ;%{PE}
+      ;FOLD Parameters ;%{h}
+         ;Params IlfProvider=kukaroboter.basistech.inlineforms.movement.spline; Kuka.IsGlobalPoint=False; Kuka.PointName=HOME; Kuka.BlendingEnabled=False; Kuka.MoveDataPtpName=DEFAULT; Kuka.VelocityPtp=100; Kuka.VelocityFieldEnabled=True; Kuka.CurrentCDSetIndex=0; Kuka.MovementParameterFieldEnabled=True; IlfCommand=SPTP
+      ;ENDFOLD
+      SPTP XHOME5 WITH $VEL_AXIS[1] = SVEL_JOINT(100.0), $TOOL = STOOL2(FHOME), $BASE = SBASE(FHOME.BASE_NO), $IPO_MODE = SIPO_MODE(FHOME.IPO_FRAME), $LOAD = SLOAD(FHOME.TOOL_NO), $ACC_AXIS[1] = SACC_JOINT(PDEFAULT), $APO = SAPO_PTP(PDEFAULT), $GEAR_JERK[1] = SGEAR_JERK(PDEFAULT), $COLLMON_TOL_PRO[1] = USE_CM_PRO_VALUES(0)
+   ;ENDFOLD
+   
+   TCP_INIT(10)
+   
+   TEST_CONNECT:
+   RST = TCP_CONNECT(10, ",")
+   IF RST <> 0 THEN
+      GOTO TEST_CONNECT
+   ENDIF
+   
+   WHILE TRUE 
+      
+      RST = TCP_SEND_STR("HIK_LYL")
+      IF (RST <> 0) OR (END_FLAG == TRUE) THEN
+         GOTO END_TEST
+      ENDIF
+      
+      RST = TCP_RECV_REAL("MSG", rVal[], nLen, 20)
+      IF (NOT $FLAG[10]) OR (END_FLAG == TRUE) THEN
+         GOTO END_TEST
+      ELSE
+         XP1.X = rVal[1]
+         XP1.Y = rVal[2]
+         XP1.Z = rVal[3]
+         XP1.A = rVal[4]
+         XP1.B = rVal[5]
+         XP1.C = rVal[6]
+         
+         XP2.X = rVal[7]
+         XP2.Y = rVal[8]
+         XP2.Z = rVal[9]
+         XP2.A = rVal[10]
+         XP2.B = rVal[11]
+         XP2.C = rVal[12]
+         
+         ;XP3.X = rVal[13]
+         ;XP3.Y = rVal[14]
+         ;XP3.Z = rVal[15]
+         ;XP3.A = rVal[16]
+         ;XP3.B = rVal[17]
+         ;XP3.C = rVal[18]
+         SLIN XP1
+         WAIT SEC 1.0
+         
+         SLIN XP2
+         WAIT SEC 1.0
+         
+         ;SLIN XP3
+         ;WAIT SEC 1.0
+      ENDIF
+      
+         ;FOLD SPTP HOME Vel=100 % DEFAULT ;%{PE}
+      ;FOLD Parameters ;%{h}
+         ;Params IlfProvider=kukaroboter.basistech.inlineforms.movement.spline; Kuka.IsGlobalPoint=False; Kuka.PointName=HOME; Kuka.BlendingEnabled=False; Kuka.MoveDataPtpName=DEFAULT; Kuka.VelocityPtp=100; Kuka.VelocityFieldEnabled=True; Kuka.CurrentCDSetIndex=0; Kuka.MovementParameterFieldEnabled=True; IlfCommand=SPTP
+      ;ENDFOLD
+      SPTP XHOME5 WITH $VEL_AXIS[1] = SVEL_JOINT(100.0), $TOOL = STOOL2(FHOME), $BASE = SBASE(FHOME.BASE_NO), $IPO_MODE = SIPO_MODE(FHOME.IPO_FRAME), $LOAD = SLOAD(FHOME.TOOL_NO), $ACC_AXIS[1] = SACC_JOINT(PDEFAULT), $APO = SAPO_PTP(PDEFAULT), $GEAR_JERK[1] = SGEAR_JERK(PDEFAULT), $COLLMON_TOL_PRO[1] = USE_CM_PRO_VALUES(0)
+   ;ENDFOLD
+   ENDWHILE
+   
+   END_TEST:
+   RST = TCP_CLOSE()
+   GOTO TEST_CONNECT
+END
+
+DEF test_tcp()
+   
+END
+
+DEF set_position_test (test_vel:IN, lcpdat_test:IN, fp_test:IN)
+   REAL test_vel
+   DECL LDAT lcpdat_test
+   DECL FDAT fp_test
+   
+   SLIN XP_test WITH $VEL = SVEL_CP(test_vel, , lcpdat_test), $TOOL = STOOL2(fp_test), $BASE = SBASE(fp_test.BASE_NO), $IPO_MODE = SIPO_MODE(fp_test.IPO_FRAME), $LOAD = SLOAD(fp_test.TOOL_NO), $ACC = SACC_CP(lcpdat_test), $ORI_TYPE = SORI_TYP(lcpdat_test), $APO = SAPO(lcpdat_test), $JERK = SJERK(lcpdat_test), $COLLMON_TOL_PRO[1] = USE_CM_PRO_VALUES(0)
+END

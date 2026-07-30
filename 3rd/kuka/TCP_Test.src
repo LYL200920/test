@@ -1,0 +1,739 @@
+&ACCESS RVO1
+DEF  TCP_Test ( )
+   
+END
+
+GLOBAL DEF TCP_INIT(Timeout:IN)
+   INT Timeout
+   
+   CONNECT_TIMEOUT = Timeout
+   
+   TXT_LOG_ON = FALSE
+   SOCKET_XML[] = "Jutze_HIK"
+   RECV_TAG[] = "MsgRecv"
+   SEND_TAG[] = "MsgSend"
+   
+   $FLAG[CONNECT_FLAG] = FALSE
+   $FLAG[MSG_FLAG] = FALSE
+   
+   EKI_RTN = EKI_Init(SOCKET_XML[])
+END
+
+GLOBAL DEFFCT INT TCP_CONNECT(Timeout:IN, Split:IN)
+   INT Timeout
+   CHAR Split
+   INT COUNT
+   REAL TICK 
+   
+   ;IF Timeout<10 THEN
+      ;RETURN PARAM_ERROR
+   ;ENDIF
+   
+   MSG_SPLIT = Split
+   
+   ;TCP_INIT(Timeout)
+   ;EKI_RTN = EKI_Init(SOCKET_XML[])
+   EKI_RTN = EKI_Open(SOCKET_XML[])
+   IF (EKI_RTN.Msg_No <> 0) THEN
+      RETURN CONNECT_ERROR
+   ENDIF
+   
+   COUNT = 0
+   TICK  = 0.05
+   WHILE ($FLAG[CONNECT_FLAG] == FALSE) AND (COUNT <= Timeout / TICK)
+      COUNT = COUNT + 1
+      WAIT SEC TICK
+   ENDWHILE
+
+   IF $FLAG[CONNECT_FLAG] == TRUE THEN
+      RETURN OK
+   ELSE
+      RETURN CONNECT_ERROR
+   ENDIF
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_CLOSE()
+   EKI_RTN = EKI_Close(SOCKET_XML[])
+   EKI_RTN = EKI_Clear(SOCKET_XML[])
+   EKI_RTN = EKI_Init(SOCKET_XML[])
+   WAIT SEC 1.0
+   IF EKI_RTN.Msg_No == 0 THEN
+      RETURN OK
+   ELSE
+      RETURN CONNECT_ERROR
+   ENDIF
+ENDFCT
+
+DEFFCT BOOL IS_TCP_ALIVE()
+   RETURN $FLAG[CONNECT_FLAG] == TRUE
+   ;INT COUNT  
+   ;REAL TICK
+   ;
+   ;COUNT = 0
+   ;TICK = 0.05
+   ;TRY_AGAIN_ALIVE:
+   ;IF $FLAG[CONNECT_FLAG] == FALSE THEN
+      ;COUNT = COUNT + 1
+      ;WAIT SEC TICK
+      ;IF COUNT > CONNECT_TIMEOUT / TICK THEN
+         ;RETURN FALSE
+      ;ENDIF
+      ;GOTO TRY_AGAIN_ALIVE
+   ;ENDIF
+   ;RETURN TRUE
+ENDFCT
+
+DEFFCT BOOL IS_TCP_RECV(Timeout:IN)
+   INT Timeout
+   
+   INT COUNT
+   REAL TICK
+   
+   COUNT = 0
+   TICK = 0.05
+   
+   TRY_AGAIN_RECV:
+   IF $FLAG[MSG_FLAG] == FALSE THEN
+      COUNT = COUNT + 1
+      WAIT SEC TICK
+      IF COUNT > Timeout / TICK THEN
+         RETURN FALSE
+      ENDIF
+      GOTO TRY_AGAIN_RECV
+   ENDIF
+   $FLAG[MSG_FLAG] = FALSE
+   RETURN TRUE
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_SEND_STR(DATA[]:IN)
+   DECL CHAR DATA[]
+   
+   IF (STRLEN(DATA[]) == 0) THEN
+      RETURN PARAM_ERROR
+   ENDIF
+   
+   IF (IS_TCP_ALIVE() <> TRUE) THEN
+      RETURN NOT_CONNECTED
+   ENDIF
+   
+   EKI_RTN = EKI_Send(SOCKET_XML[], DATA[])
+   
+   IF (EKI_RTN.Msg_No <> 0) THEN
+      RETURN SEND_ERROR
+   ENDIF
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_SEND_POSE(Head[]:IN, Pose:IN)
+   DECL CHAR Head[]
+   DECL E6POS Pose
+   
+   DECL CHAR StrMsg[256]
+   
+   IF (STRLEN(Head[]) == 0) THEN
+      RETURN PARAM_ERROR
+   ENDIF
+   
+   IF (IS_TCP_ALIVE() <> TRUE) THEN
+      RETURN NOT_CONNECTED
+   ENDIF
+   
+   StrMsg[] = "\0"
+   nOffset = 0
+   SWRITE(StrMsg[],FSTATE,nOffset,"%s%c%f%c%f%c%f%c",Head[],MSG_SPLIT,Pose.X,MSG_SPLIT,Pose.Y,MSG_SPLIT,Pose.Z,MSG_SPLIT)
+   IF(FSTATE.RET1 <> #CMD_OK) THEN
+      RETURN PACK_ERROR
+   ENDIF
+   SWRITE(StrMsg[],FSTATE,nOffset,"%f%c%f%c%f",Pose.A,MSG_SPLIT,Pose.B,MSG_SPLIT,Pose.C)
+   IF(FSTATE.RET1 <> #CMD_OK) THEN
+      RETURN PACK_ERROR
+   ENDIF
+   
+   EKI_RTN = EKI_Send(SOCKET_XML[], StrMsg[])
+   
+   IF (EKI_RTN.Msg_No <> 0) THEN
+      RETURN SEND_ERROR
+   ENDIF
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_SEND_AXIS(Head[]:IN, Joint:IN)
+   DECL CHAR Head[]
+   DECL E6AXIS Joint
+   
+   DECL CHAR StrMsg[256]
+   
+   IF (STRLEN(Head[]) == 0) THEN
+      RETURN PARAM_ERROR
+   ENDIF
+   
+   IF (IS_TCP_ALIVE() <> TRUE) THEN
+      RETURN NOT_CONNECTED
+   ENDIF
+   
+   StrMsg[] = "\0"
+   nOffset = 0
+   SWRITE(StrMsg[],FSTATE,nOffset,"%s%c%f%c%f%c%f%c",Head[],MSG_SPLIT,Joint.A1,MSG_SPLIT,Joint.A2,MSG_SPLIT,Joint.A3,MSG_SPLIT)
+   IF(FSTATE.RET1 <> #CMD_OK) THEN
+      RETURN PACK_ERROR
+   ENDIF
+   SWRITE(StrMsg[],FSTATE,nOffset,"%f%c%f%c%f",Joint.A4,MSG_SPLIT,Joint.A5,MSG_SPLIT,Joint.A6)
+   IF(FSTATE.RET1 <> #CMD_OK) THEN
+      RETURN PACK_ERROR
+   ENDIF
+   
+   EKI_RTN = EKI_Send(SOCKET_XML[], StrMsg[])
+   
+   IF (EKI_RTN.Msg_No <> 0) THEN
+      RETURN SEND_ERROR
+   ENDIF
+   RETURN OK
+ENDFCT
+
+DEFFCT INT MIN(Value1:IN, Value2:IN)
+   INT Value1, Value2
+   
+   IF (Value1 > Value2) THEN
+      RETURN Value2
+   ENDIF
+   RETURN Value1
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_STATE(Head[]:IN, Data:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   INT Data
+   INT Timeout
+   
+   INT RET, HeadLen, nStrPos
+   DECL CHAR StrSeg[64]
+   DECL CHAR RecvData[256]
+   
+   IF (IS_TCP_RECV(Timeout) <> TRUE) THEN
+      RETURN RECV_ERROR
+   ENDIF
+   
+   RecvData[] = "\0"
+   EKI_RTN = EKI_GetString(SOCKET_XML[], RECV_TAG[], RecvData[])
+   EKI_CHECK(EKI_RTN, #NOTIFY, SOCKET_XML[])
+   
+   HeadLen = STRLEN(Head[])
+   IF (HeadLen <> 0) THEN
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, HeadLen+1, RecvData[], StrSeg[])
+      IF ((NOT STRCOMP(Head[], StrSeg[], #CASE_SENS)) OR (RecvData[HeadLen+1] <> MSG_SPLIT)) THEN
+         RETURN UNPACK_ERROR
+      ENDIF
+      StrSeg[] = "/0"
+      STRCOPY_SEGMENT(HeadLen+2, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ELSE
+      StrSeg[] = "/0"
+      STRCOPY_SEGMENT(1, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ENDIF
+   
+   nStrPos = STRFIND(1, StrSeg[], MSG_SPLIT, #CASE_SENS)
+   IF (NOT STRTOINT(StrSeg[], Data)) THEN
+      RETURN UNPACK_ERROR
+   ENDIF
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_INT(Head[]:IN, Data[]:OUT, Len:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL INT Data[]
+   INT Len
+   INT Timeout
+   
+   INT RP_RET, HeadLen
+   DECL CHAR StrSeg[2047]
+   DECL CHAR RecvData[2047]
+   
+   Len=0
+   IF (IS_TCP_RECV(Timeout) <> TRUE) THEN
+      RETURN RECV_ERROR
+   ENDIF
+   
+   RecvData[] = "\0"
+   EKI_RTN=EKI_GetString(SOCKET_XML[], RECV_TAG[], RecvData[])
+   EKI_CHECK(EKI_RTN, #NOTIFY, SOCKET_XML[])
+   
+   HeadLen = STRLEN(Head[])
+   IF (HeadLen<>0) THEN
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, HeadLen+1,RecvData[],StrSeg[])
+      IF((NOT STRCOMP(Head[], StrSeg[], #CASE_SENS)) OR (RecvData[HeadLen+1] <> MSG_SPLIT)) THEN
+         RETURN UNPACK_ERROR
+      ENDIF
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(HeadLen+2, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ELSE
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ENDIF
+   
+   RP_RET = MSGSPLIT_INT(StrSeg[], Data[], Len)
+   RETURN RP_RET
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_REAL(Head[]:IN, Data[]:OUT, Len:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL REAL Data[]
+   INT Len
+   INT Timeout
+   
+   INT RP_RET, HeadLen
+   DECL REAL DataTemp[200]
+   INT LenTemp, idx
+   DECL CHAR StrSeg[2047]
+   DECL CHAR RecvData[2047]
+   
+   Len=0
+   IF (IS_TCP_RECV(Timeout) <> TRUE) THEN
+      RETURN RECV_ERROR
+   ENDIF
+   
+   RecvData[] = "\0"
+   EKI_RTN=EKI_GetString(SOCKET_XML[], RECV_TAG[], RecvData[])
+   EKI_CHECK(EKI_RTN, #NOTIFY, SOCKET_XML[])
+   
+   ;Head Check
+   HeadLen = STRLEN(Head[])
+   IF (HeadLen<>0) THEN
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, HeadLen+1,RecvData[],StrSeg[])
+      IF((NOT STRCOMP(Head[], StrSeg[], #CASE_SENS)) OR (RecvData[HeadLen+1] <> MSG_SPLIT)) THEN
+         RETURN UNPACK_ERROR
+      ENDIF
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(HeadLen+2, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ELSE
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, STRLEN(RecvData[])+1, RecvData[], StrSeg[])
+   ENDIF
+   LenTemp = 0
+   RP_RET = MSGSPLIT_REAL(StrSeg[], DataTemp[], LenTemp)
+   IF(RP_RET<>0)THEN
+      RETURN RP_RET
+   ENDIF
+   LEN = MIN(LenTemp, 200)
+   FOR idx=1 TO LEN
+      DATA[idx] = DataTemp[idx]
+   ENDFOR
+   RETURN RP_RET
+ENDFCT
+
+DEFFCT INT TCP_RECV_HELPER(Head[]:IN, Len:OUT, StrLeft[]:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL CHAR StrLeft[]
+   INT Len
+   INT Timeout
+   
+   INT Real_Len, idx, nStrPos
+   INT RET, HeadLen
+   DECL CHAR StrSeg[2047]
+   DECL CHAR SizeData[10]
+   
+   Len=0
+   IF (IS_TCP_RECV(Timeout) <> TRUE) THEN
+      RETURN RECV_ERROR
+   ENDIF
+   
+   StrLeft[] = "\0"
+   EKI_RTN=EKI_GetString(SOCKET_XML[], RECV_TAG[], StrLeft[])
+   EKI_CHECK(EKI_RTN, #NOTIFY, SOCKET_XML[])    
+   
+   ;Head Check
+   HeadLen = STRLEN(Head[])
+   IF (HeadLen<>0) THEN
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, HeadLen+1,StrLeft[],StrSeg[])
+      IF((NOT STRCOMP(Head[], StrSeg[], #CASE_SENS)) OR (StrLeft[HeadLen+1] <> MSG_SPLIT)) THEN
+         Len = 0
+         RETURN UNPACK_ERROR
+      ENDIF
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(HeadLen+2, STRLEN(StrLeft[])+1, StrLeft[], StrSeg[])
+   ELSE
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, STRLEN(StrLeft[])+1, StrLeft[], StrSeg[])
+   ENDIF
+   ;Size Check
+   nStrPos = STRFIND(1, StrSeg[], MSG_SPLIT, #CASE_SENS)
+   
+   IF(nStrPos<=1) THEN
+      StrLeft[] = "\0"
+      SizeData[] = StrSeg[]
+      IF(NOT STRTOINT(SizeData[], Len)) THEN
+         Len = 0
+         RETURN UNPACK_ERROR
+      ENDIF
+      IF(Len <= 0) THEN
+         RETURN OK
+      ENDIF
+      RETURN UNPACK_ERROR
+   ENDIF
+   
+   SizeData[] = "\0"
+   STRCOPY_SEGMENT(1, nStrPos, StrSeg[], SizeData[])
+   IF(NOT STRTOINT(SizeData[], Len)) THEN
+      StrLeft[] = "\0"
+      Len = 0
+      STRCOPY_SEGMENT(nStrPos+1, STRLEN(StrSeg[])+1, StrSeg[], StrLeft[])
+      RETURN UNPACK_ERROR
+   ENDIF
+   IF(Len < 1) THEN
+      StrLeft[] = "\0"
+      Len = 0
+      STRCOPY_SEGMENT(nStrPos+1, STRLEN(StrSeg[])+1, StrSeg[], StrLeft[])
+      RETURN OK
+   ENDIF
+   
+   StrLeft[] = "\0"
+   STRCOPY_SEGMENT(nStrPos+1, STRLEN(StrSeg[])+1, StrSeg[], StrLeft[])
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_POSE(Head[]:IN, Data[]:OUT, Len:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL E6POS Data[]
+   INT Len
+   INT Timeout
+   
+   DECL REAL Real_Data[200]
+   INT Real_Len, idx, nStrPos
+   INT RET
+   DECL CHAR RecvData[2047]
+   
+   RET = TCP_RECV_HELPER(Head[], Len, RecvData[], Timeout)
+   IF((RET <> OK) OR (Len == 0)) THEN
+      RETURN RET
+   ENDIF
+   
+   ;兄 ?n?    Real_Len = Len*6
+   RET = MSGSPLIT_REAL(RecvData[], Real_Data[], Real_Len)
+   IF(RET <> OK) THEN
+      RETURN RET
+   ENDIF
+   
+   FOR idx = 1 to LEN
+      Data[idx].X = Real_Data[idx*6-5]
+      Data[idx].Y = Real_Data[idx*6-4]
+      Data[idx].Z = Real_Data[idx*6-3]
+      Data[idx].A = Real_Data[idx*6-2]
+      Data[idx].B = Real_Data[idx*6-1]
+      Data[idx].C = Real_Data[idx*6]
+   ENDFOR
+   
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_POSE_RLAB(Head[]:IN, Data[]:OUT, Len:OUT, rValue[]:OUT, rNum:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL E6POS Data[]
+   INT Len
+   DECL REAL rValue[]
+   INT rNum
+   INT Timeout
+   
+   DECL REAL Real_Data[200]
+   INT Real_Len, idx, nStrPos
+   INT RET
+   DECL CHAR RecvData[2047]
+   
+   RET = TCP_RECV_HELPER(Head[], Len, RecvData[], Timeout)
+   IF(RET <> OK) THEN
+      RETURN RET
+   ENDIF
+   
+   IF(Len <> 0) THEN
+      ;兄 ?n筡:POSEpn
+      Real_Len = Len*6
+      RET = MSGSPLIT_REAL(RecvData[], Real_Data[], Real_Len)
+      IF(RET <> OK) THEN
+         RETURN RET
+      ENDIF
+      
+      FOR idx = 1 to LEN
+         Data[idx].X = Real_Data[idx*6-5]
+         Data[idx].Y = Real_Data[idx*6-4]
+         Data[idx].Z = Real_Data[idx*6-3]
+         Data[idx].A = Real_Data[idx*6-2]
+         Data[idx].B = Real_Data[idx*6-1]
+         Data[idx].C = Real_Data[idx*6]
+      ENDFOR
+   ENDIF
+   ;兄i
+n筽
+   rNum = 0
+   RET = MSGSPLIT_REAL(RecvData[], rValue[], rNum)
+   RETURN RET
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_POSE_ILAB(Head[]:IN, Data[]:OUT, Len:OUT, iValue[]:OUT, iNum:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL E6POS Data[]
+   INT Len
+   DECL INT iValue[]
+   INT iNum
+   INT Timeout
+   
+   DECL REAL Real_Data[200]
+   INT Real_Len, idx, nStrPos
+   INT RET
+   DECL CHAR RecvData[2047]
+   
+   RET = TCP_RECV_HELPER(Head[], Len, RecvData[], Timeout)
+   IF(RET <> OK) THEN
+      RETURN RET
+   ENDIF
+   
+   IF(Len <> 0) THEN
+      ;兄 ?n筡:POSEpn
+      Real_Len = Len*6
+      RET = MSGSPLIT_REAL(RecvData[], Real_Data[], Real_Len)
+      IF(RET <> OK) THEN
+         RETURN RET
+      ENDIF
+      
+      FOR idx = 1 to LEN
+         Data[idx].X = Real_Data[idx*6-5]
+         Data[idx].Y = Real_Data[idx*6-4]
+         Data[idx].Z = Real_Data[idx*6-3]
+         Data[idx].A = Real_Data[idx*6-2]
+         Data[idx].B = Real_Data[idx*6-1]
+         Data[idx].C = Real_Data[idx*6]
+      ENDFOR
+   ENDIF
+   ;兄i
+INT
+   iNum = 0
+   RET = MSGSPLIT_INT(RecvData[], iValue[], iNum)
+   RETURN RET
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_AXIS(Head[]:IN, Data[]:OUT, Len:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL E6AXIS Data[]
+   INT Len
+   INT Timeout
+   
+   DECL REAL Real_Data[200]
+   INT Real_Len, idx, nStrPos
+   INT RET
+   DECL CHAR RecvData[2047]
+   
+   RET = TCP_RECV_HELPER(Head[], Len, RecvData[], Timeout)
+   IF((RET <> OK) OR (Len == 0)) THEN
+      RETURN RET
+   ENDIF
+   
+   ;兄 ?n?    Real_Len = Len*6
+   RET = MSGSPLIT_REAL(RecvData[], Real_Data[], Real_Len)
+   IF(RET <> OK) THEN
+      RETURN RET
+   ENDIF
+   
+   FOR idx = 1 to LEN
+      Data[idx].A1 = Real_Data[idx*6-5]
+      Data[idx].A2 = Real_Data[idx*6-4]
+      Data[idx].A3 = Real_Data[idx*6-3]
+      Data[idx].A4 = Real_Data[idx*6-2]
+      Data[idx].A5 = Real_Data[idx*6-1]
+      Data[idx].A6 = Real_Data[idx*6]
+   ENDFOR
+   
+   RETURN OK
+ENDFCT
+
+GLOBAL DEFFCT INT TCP_RECV_STR(Head[]:IN, DATA[]:OUT, Timeout:IN)
+   DECL CHAR Head[]
+   DECL CHAR DATA[]
+   INT Timeout
+   
+   DECL CHAR StrSeg[64]
+   DECL CHAR RecvData[2047]
+   INT nIdx,HeadLen
+   
+   IF (IS_TCP_RECV(Timeout) <> TRUE) THEN
+      RETURN RECV_ERROR
+   ENDIF
+   
+   RecvData[] = "\0"
+   EKI_RTN=EKI_GetString(SOCKET_XML[], RECV_TAG[], RecvData[])
+   EKI_CHECK(EKI_RTN, #NOTIFY, SOCKET_XML[])
+   
+   ;Head Check
+   HeadLen = STRLEN(Head[])
+   IF (HeadLen<>0) THEN
+      StrSeg[] = "\0"
+      STRCOPY_SEGMENT(1, HeadLen+1,RecvData[],StrSeg[])
+      IF((NOT STRCOMP(Head[], StrSeg[], #CASE_SENS)) OR (RecvData[HeadLen+1] <> MSG_SPLIT)) THEN
+         RETURN UNPACK_ERROR
+      ENDIF
+      DATA[] = "\0"
+      STRCOPY_SEGMENT(HeadLen+2, STRLEN(RecvData[])+1, RecvData[], DATA[])
+   ELSE
+      DATA[] = "\0"
+      STRCOPY_SEGMENT(1, STRLEN(RecvData[])+1, RecvData[], DATA[])
+   ENDIF
+   
+   RETURN OK
+ENDFCT
+
+DEFFCT INT MSGSPLIT_INT(StrMsg[]:IN, ArrInt[]:OUT, ArrayLen:OUT)
+   DECL CHAR StrMsg[]
+   DECL INT ArrInt[]
+   INT ArrayLen
+   
+   DECL CHAR StrSeg[64]
+   INT nIdx, nStart, nEnd, nLen, nVal, nStrPos
+   
+   StrSeg[] = "\0"
+   nStrPos = 1
+   
+   nLen = STRLEN(StrMsg[])
+   IF nStrPos >= nLen THEN
+      RETURN UNPACK_ERROR
+   ENDIF
+   
+   ArrayLen = 0
+   nStart = nStrPos
+   REPEAT
+      IF (ArrayLen >= 200) THEN
+         RETURN OK
+      ENDIF
+      nStrPos = STRFIND(nStart, StrMsg[], MSG_SPLIT, #CASE_SENS)
+      IF nStrPos==0 THEN
+         nEnd = nLen + 1
+      ELSE
+         nEnd = nStart + nStrPos - 1
+      ENDIF
+      STRCOPY_SEGMENT(nStart, nEnd, StrMsg[], StrSeg[])
+      IF STRTOINT(StrSeg[], nVal) THEN  
+         ArrayLen = ArrayLen + 1
+         ArrInt[ArrayLen] = nVal
+      ELSE
+         IF(ArrayLen>0) THEN
+            RETURN OK
+         ELSE
+            RETURN UNPACK_ERROR
+         ENDIF
+      ENDIF
+      StrSeg[] = "\0"
+      nStart = nEnd + 1
+   UNTIL nEnd >= nLen
+   RETURN OK
+ENDFCT
+
+DEFFCT INT MSGSPLIT_REAL(StrMsg[]:OUT, ArrReal[]:OUT, ArrayLen:OUT)
+   DECL CHAR StrMsg[]
+   DECL REAL ArrReal[]
+   INT ArrayLen
+   
+   DECL CHAR StrMsgLeft[2047]
+   DECL CHAR StrSeg[64]
+   INT nIdx, nStart, nEnd, nLen, nStrPos, rNum
+   REAL nVal
+   
+   nStrPos = 1
+   StrSeg[] = "\0"
+   
+   nLen = STRLEN(StrMsg[])
+   IF nStrPos >= nLen THEN
+      RETURN UNPACK_ERROR
+   ENDIF
+   
+   rNum = 0
+   nStart = nStrPos
+   REPEAT
+      IF ((rNum == 200) OR ((ArrayLen <> 0) AND (rNum == ArrayLen))) THEN
+         StrMsgLeft[] = "\0"
+         STRCOPY_SEGMENT(nStart, nLen + 1, StrMsg[], StrMsgLeft[])
+         StrMsg[] = StrMsgLeft[]
+         ArrayLen = rNum
+         RETURN OK
+      ENDIF
+      
+      nStrPos = STRFIND(nStart, StrMsg[], MSG_SPLIT, #CASE_SENS)
+      IF nStrPos==0 THEN
+         nEnd = nLen + 1
+      ELSE
+         nEnd = nStart + nStrPos - 1
+      ENDIF
+      STRCOPY_SEGMENT(nStart, nEnd, StrMsg[], StrSeg[])
+      IF STRTOREAL(StrSeg[], nVal) THEN  
+         rNum = rNum + 1
+         ArrReal[rNum] = nVal
+      ELSE
+         IF((rNum>0) AND (ArrayLen == 0)) THEN
+            ArrayLen = rNum
+            RETURN OK
+         ELSE
+            RETURN UNPACK_ERROR
+         ENDIF
+      ENDIF
+      StrSeg[] = "\0"
+      nStart = nEnd + 1
+   UNTIL nEnd >= nLen
+   
+   IF((ArrayLen <> 0) AND (rNum <> ArrayLen)) THEN
+      RETURN UNPACK_ERROR
+   ENDIF
+   ArrayLen = rNum
+   RETURN OK
+ENDFCT
+
+DEF STRCOPY_SEGMENT(nStart:IN, nEnd:IN, StrRaw[]:IN, StrCut[]:OUT)
+   INT nStart, nEnd
+   DECL CHAR StrRaw[]
+   DECL CHAR StrCut[]
+   
+   INT nIdx
+   FOR nIdx = 1 TO MIN(nEnd-nStart,STRDECLLEN(StrCut[])) STEP 1
+      StrCut[nIdx] = StrRaw[nIdx+nStart-1]
+   ENDFOR
+   StrCut[nIdx] = 0 
+END
+
+;GLOBAL DEF LOG_MSG(LOGMESSAGE[]:IN)
+;CHAR LOGMESSAGE[]
+;DECL CHAR FILENAME[32]
+;DECL CHAR SYSTIME[32]
+;DECL INT FHANDLE
+;DECL CHAR LF
+;DECL INT LOG_OFFSET
+;DECL BOOL B_RSLT
+;DECL STATE_T FSTAT
+;DECL MODUS_T FMODE
+;FHANDLE = 0
+;FMODE=#SYNC
+;LF = 10
+;IF TXT_LOG_ON == TRUE THEN
+;B_RSLT=STRCLEAR(FILENAME[])
+;B_RSLT=STRCLEAR(SYSTIME[])
+;LOG_OFFSET = 0
+;SWRITE(FILENAME[], FSTAT, LOG_OFFSET,"RPLOG_%04D-%02D-%02D.txt",($DATE.YEAR),($DATE.MONTH),($DATE.DAY))
+;LOG_OFFSET = 0
+;SWRITE(SYSTIME[], FSTAT, LOG_OFFSET,"%02D:%02D:%02D ",($DATE.HOUR),($DATE.MIN),($DATE.SEC))
+;CWRITE($FCT_CALL, FSTAT, FMODE, "krl_fopen", FILENAME[], "a", FHANDLE)
+;CWRITE($FCT_CALL, FSTAT, FMODE, "krl_fputs", FHANDLE, SYSTIME[])
+;CWRITE($FCT_CALL, FSTAT, FMODE, "krl_fputs", FHANDLE, LOGMESSAGE[])
+;CWRITE($FCT_CALL, FSTAT, FMODE, "krl_fputc", FHANDLE, LF)
+;CWRITE($FCT_CALL, FSTAT, FMODE, "krl_fclose", FHANDLE)
+;ENDIF
+;C:\KRC\ROBOTER\UserFiles\RPLOGxxx
+;END
+
+;GLOBAL DEF UI_MSG(MSG_STR[]:IN)
+;DECL CHAR MSG_STR[]
+;
+;DECL KRLMSG_T RPMETA_MSG
+;DECL KRLMSGPAR_T RPUI_PARAS[3]
+;DECL KRLMSGOPT_T RPUI_OPT
+;INT RPUI_HDLE
+;
+;RPMETA_MSG = {modul[] "RP_VISION", Nr 1988, msg_txt[] "RP: %1"}
+;RPUI_PARAS[1].Par_Type = #VALUE
+;RPUI_PARAS[1].Par_txt[] = MSG_STR[]
+;RPUI_OPT = {VL_STOP FALSE, Clear_P_Reset TRUE, Clear_P_SAW FALSE, Log_to_DB FALSE}
+;RPUI_HDLE = SET_KRLMSG(#notify, RPMETA_MSG, RPUI_PARAS[], RPUI_OPT)
+;END

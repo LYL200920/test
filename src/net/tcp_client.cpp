@@ -124,6 +124,18 @@ void tcp_client::do_connect(tcp::resolver::results_type endpoints)
                           return;
                         }
 
+                        // Robot-control messages are short and latency-sensitive.
+                        // Disable Nagle aggregation once the connection is ready.
+                        std::error_code option_ec;
+                        m_socket.set_option(tcp::no_delay(true), option_ec);
+                        if (option_ec)
+                        {
+                          close_socket();
+                          notify_status(false, "TCP_NODELAY failed: " +
+                                                   option_ec.message());
+                          return;
+                        }
+
                         m_connected = true;
                         notify_status(true, "Connected to " + m_host + ":" + std::to_string(m_port));
                         do_read();

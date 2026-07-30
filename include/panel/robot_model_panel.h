@@ -26,6 +26,7 @@
 #include <vector>
 
 class Right_Tool_Panel;
+class Net_Panel;
 class Camera_Control_Panel;
 class Camera_Image_View;
 class Camera_2D_Control_Panel;
@@ -177,6 +178,7 @@ private:
   wxButton *m_reset_robot_button = nullptr;
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
   Right_Tool_Panel *m_right_tool_panel = nullptr;
+  Net_Panel *m_tcp_panel = nullptr;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;

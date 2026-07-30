@@ -143,6 +143,7 @@ find_package(VTK REQUIRED COMPONENTS
 
 set(project_include_dirs
   "${CMAKE_CURRENT_SOURCE_DIR}/include/camera"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/kuka"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/net"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/panel"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/point_cloud"
@@ -167,6 +168,12 @@ file(GLOB net_headers CONFIGURE_DEPENDS "include/net/*.h" "include/net/*.hpp")
 add_library(net STATIC ${net_sources} ${net_headers})
 target_include_directories(net PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/net")
 target_link_libraries(net PUBLIC asio)
+
+file(GLOB kuka_sources CONFIGURE_DEPENDS "src/kuka/*.cpp")
+file(GLOB kuka_headers CONFIGURE_DEPENDS "include/kuka/*.h" "include/kuka/*.hpp")
+add_library(kuka STATIC ${kuka_sources} ${kuka_headers})
+target_include_directories(kuka PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/kuka")
+target_link_libraries(kuka PUBLIC net)
 
 file(GLOB robot_model_sources CONFIGURE_DEPENDS "src/robot_model/*.cpp")
 file(GLOB robot_model_headers CONFIGURE_DEPENDS
@@ -215,6 +222,7 @@ add_library(panel STATIC ${panel_sources} ${panel_headers})
 target_include_directories(panel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/panel")
 target_link_libraries(panel PUBLIC
   camera
+  kuka
   net
   point_cloud
   robot_model
@@ -231,7 +239,7 @@ target_link_libraries(test_app PRIVATE panel)
 vtk_module_autoinit(TARGETS test_app MODULES ${VTK_LIBRARIES})
 
 if(MSVC)
-  foreach(target jutze_camera_huaray camera net robot_kinematics_core robot_model point_cloud panel test_app)
+  foreach(target jutze_camera_huaray camera net kuka robot_kinematics_core robot_model point_cloud panel test_app)
     target_compile_options(${target} PRIVATE /FS /utf-8)
   endforeach()
 endif()
@@ -297,6 +305,9 @@ if(BUILD_TESTING)
   add_project_test(camera_stream_config_tests camera_stream_config_tests.cpp)
   target_link_libraries(camera_stream_config_tests PRIVATE camera)
 
+  add_project_test(kuka_protocol_tests kuka_protocol_tests.cpp)
+  target_link_libraries(kuka_protocol_tests PRIVATE kuka)
+
   add_project_test(camera_image_converter_tests camera_image_converter_tests.cpp)
   target_link_libraries(camera_image_converter_tests PRIVATE camera)
 
@@ -322,8 +333,8 @@ if(BUILD_TESTING)
 endif()
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "Source Files" FILES
-             src/main.cpp ${camera_sources} ${net_sources} ${robot_model_sources}
+             src/main.cpp ${camera_sources} ${kuka_sources} ${net_sources} ${robot_model_sources}
              ${point_cloud_sources} ${panel_sources})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/include" PREFIX "Header Files" FILES
-             ${camera_headers} ${net_headers} ${robot_model_headers}
+             ${camera_headers} ${kuka_headers} ${net_headers} ${robot_model_headers}
              ${point_cloud_headers} ${panel_headers})

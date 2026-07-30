@@ -456,7 +456,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_right_tool_panel->Set_On_Width_Changed (
     [this] (int width) { Resize_Right_Tool (width); });
 
-  auto* tcp_panel = new Net_Panel (
+  m_tcp_panel = new Net_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp));
   m_flow_panel = new Flow_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Flow));
@@ -585,7 +585,7 @@ Robot_Model_Panel::Robot_Model_Panel (
     Right_Tool_Page::Robot, robot_tool_page);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Teach, teach_tool_page);
-  m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, tcp_panel);
+  m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, m_tcp_panel);
   m_right_tool_panel->Add_Page (Right_Tool_Page::Flow, m_flow_panel);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera, m_camera_control_panel);
@@ -1773,6 +1773,115 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
   operation_sizer->Add (m_flange_6d_button, 1, wxEXPAND);
   operation_sizer->Add (m_reset_robot_button, 1, wxEXPAND);
 
+  auto* move_joint_button = new wxButton (panel, wxID_ANY, "Send MOVEJ");
+  auto* move_ptp_button = new wxButton (panel, wxID_ANY, "Send MOVEPTP");
+  auto* move_linear_button = new wxButton (panel, wxID_ANY, "Send MOVEL");
+  auto* query_state_button = new wxButton (panel, wxID_ANY, "Get state");
+  auto* stop_robot_button = new wxButton (panel, wxID_ANY, "Stop");
+
+  move_joint_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&)
+    {
+      try
+      {
+        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
+        if( !client || !client->Is_Connected ( ) )
+          throw std::runtime_error ("KUKA is not connected.");
+        const auto sequence = client->Move_Joint (Read_Joint_Input_Angles ( ));
+        m_status_text->SetLabel (
+          wxString::Format ("KUKA MOVEJ sent, sequence=%u", sequence));
+      }
+      catch( const std::exception& error )
+      {
+        m_status_text->SetLabel (
+          "KUKA MOVEJ failed: " + wxString::FromUTF8 (error.what ( )));
+      }
+    });
+
+  const auto send_cartesian =
+    [this] (bool linear)
+    {
+      try
+      {
+        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
+        if( !client || !client->Is_Connected ( ) )
+          throw std::runtime_error ("KUKA is not connected.");
+        robot_model::Matrix4 world_from_flange = { };
+        if( !m_view || !m_view->Get_World_From_Flange (&world_from_flange) )
+          throw std::runtime_error ("No valid robot pose is available.");
+        // Protocol defaults to KUKA TOOL 0, therefore transmit the flange
+        // target. A configured app-tool pose must not be sent as a TOOL 0
+        // flange pose because that would introduce the tool offset twice.
+        const kuka::Pose target =
+          robot_model::Build_Xyzabc_From_Zyx_Matrix (world_from_flange);
+        kuka::Cartesian_Motion_Options options;
+        options.velocity = linear ? 100.0 : 20.0;
+        const auto sequence = linear
+          ? client->Move_Linear (target, options)
+          : client->Move_Pose_Ptp (target, options);
+        m_status_text->SetLabel (wxString::Format (
+          linear
+            ? "KUKA MOVEL sent, sequence=%u"
+            : "KUKA MOVEPTP sent, sequence=%u",
+          sequence));
+      }
+      catch( const std::exception& error )
+      {
+        m_status_text->SetLabel (
+          "KUKA Cartesian move failed: " +
+          wxString::FromUTF8 (error.what ( )));
+      }
+    };
+  move_ptp_button->Bind (
+    wxEVT_BUTTON,
+    [send_cartesian] (wxCommandEvent&) { send_cartesian (false); });
+  move_linear_button->Bind (
+    wxEVT_BUTTON,
+    [send_cartesian] (wxCommandEvent&) { send_cartesian (true); });
+  query_state_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&)
+    {
+      try
+      {
+        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
+        if( !client || !client->Is_Connected ( ) )
+          throw std::runtime_error ("KUKA is not connected.");
+        client->Get_State ( );
+      }
+      catch( const std::exception& error )
+      {
+        m_status_text->SetLabel (
+          "KUKA state query failed: " +
+          wxString::FromUTF8 (error.what ( )));
+      }
+    });
+  stop_robot_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&)
+    {
+      try
+      {
+        const auto client = m_tcp_panel ? m_tcp_panel->Kuka_Client ( ) : nullptr;
+        if( !client || !client->Is_Connected ( ) )
+          throw std::runtime_error ("KUKA is not connected.");
+        client->Stop (true);
+      }
+      catch( const std::exception& error )
+      {
+        m_status_text->SetLabel (
+          "KUKA stop failed: " + wxString::FromUTF8 (error.what ( )));
+      }
+    });
+
+  auto* robot_command_sizer = new wxGridSizer (5, 6, 6);
+  robot_command_sizer->Add (move_joint_button, 1, wxEXPAND);
+  robot_command_sizer->Add (move_ptp_button, 1, wxEXPAND);
+  robot_command_sizer->Add (move_linear_button, 1, wxEXPAND);
+  robot_command_sizer->Add (query_state_button, 1, wxEXPAND);
+  robot_command_sizer->Add (stop_robot_button, 1, wxEXPAND);
+
   m_joint_panel = new Joint_Control_Panel (panel);
   m_joint_panel->Set_On_Joint_Changed (
     [this] { Update_Joint_State_From_Sliders ( ); });
@@ -1792,6 +1901,8 @@ wxPanel* Robot_Model_Panel::Build_Robot_Tool_Page (wxWindow* parent)
   auto* sizer = new wxBoxSizer (wxVERTICAL);
   sizer->Add (operation_title, 0, wxEXPAND | wxALL, 8);
   sizer->Add (operation_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+  sizer->Add (
+    robot_command_sizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
   sizer->Add (m_joint_panel, 0, wxEXPAND | wxTOP, 6);
   sizer->Add (m_cartesian_pose_panel, 0, wxEXPAND | wxTOP, 14);
   sizer->AddStretchSpacer (1);
