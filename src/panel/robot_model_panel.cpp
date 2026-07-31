@@ -254,14 +254,18 @@ bool build_pose_mosaic(
       horizontal_is_length ? fov.length_mm : fov.width_mm;
     const double vertical_span =
       horizontal_is_length ? fov.width_mm : fov.length_mm;
+    // The 2D camera SDK delivers pixels with right/down pointing opposite to
+    // the positive FOV tool X/Y axes. Keep the exact FOV centre from the tool
+    // pose, but apply the camera pixel-axis signs when constructing its image
+    // plane. Without these signs a C~=180 degree scan is laid out P[n]..P[1].
     world_images.push_back({
       std::move(image),
       {
         world_from_camera[0][3],
         world_from_camera[1][3],
         world_from_camera[2][3]},
-      matrix_axis(world_from_camera, horizontal_axis, horizontal_span),
-      matrix_axis(world_from_camera, vertical_axis, vertical_span)});
+      matrix_axis(world_from_camera, horizontal_axis, -horizontal_span),
+      matrix_axis(world_from_camera, vertical_axis, -vertical_span)});
   }
   if( world_images.empty() )
   {
