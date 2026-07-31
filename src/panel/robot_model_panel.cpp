@@ -209,6 +209,7 @@ bool build_pose_mosaic(
     Camera_2D_Display_Image,
     robot_model::Robot_Teach_Point>> captures,
   const robot_model::Fov_Visualization_Configuration& fov_configuration,
+  const robot_model::XyzabcPose& flange_from_camera_pose,
   Camera_2D_Display_Image* output,
   std::string* error_message)
 {
@@ -240,17 +241,11 @@ bool build_pose_mosaic(
       continue;
     const auto world_from_camera = robot_model::Multiply_Matrices(
       robot_model::Build_Zyx_Pose_Matrix(point.world_pose),
-      robot_model::Build_Zyx_Pose_Matrix(
-        point.flange_from_coordinate_pose));
-    const double image_aspect =
-      static_cast<double>(image.width) / image.height;
-    const double width_length_aspect =
-      fov.width_mm / fov.length_mm;
-    const double length_width_aspect =
-      fov.length_mm / fov.width_mm;
-    const bool horizontal_is_length =
-      std::abs(std::log(image_aspect / length_width_aspect)) <
-      std::abs(std::log(image_aspect / width_length_aspect));
+      robot_model::Build_Zyx_Pose_Matrix(flange_from_camera_pose));
+    // The configured FOV is deterministic: image columns follow the
+    // configured length axis/span and image rows follow width. Do not infer
+    // this from image aspect ratio because that can transpose an entire run.
+    constexpr bool horizontal_is_length = true;
     const auto horizontal_axis = robot_model::Coordinate_Axis_Index(
       horizontal_is_length ? fov.length_axis : fov.width_axis);
     const auto vertical_axis = robot_model::Coordinate_Axis_Index(
@@ -275,8 +270,48 @@ bool build_pose_mosaic(
   }
 
   const auto origin = world_images.front().center;
-  const auto basis_u = normalized3(world_images.front().horizontal);
-  const auto basis_v = normalized3(world_images.front().vertical);
+  // Orient the mosaic by the actual Progress scan direction. This guarantees
+  // that increasing motion-point coordinates run left-to-right instead of
+  // being reversed by a camera-axis sign.
+  std::array<double, 3> scan_direction = {0.0, 0.0, 0.0};
+  for( std::size_t index = 1; index < world_images.size(); ++index )
+  {
+    scan_direction = {
+      world_images[index].center[0] - origin[0],
+      world_images[index].center[1] - origin[1],
+      world_images[index].center[2] - origin[2]};
+    if( norm3(scan_direction) > 1.0e-6 )
+      break;
+  }
+  if( world_images.size() > 1 )
+  {
+    const std::array<double, 3> full_scan = {
+      world_images.back().center[0] - origin[0],
+      world_images.back().center[1] - origin[1],
+      world_images.back().center[2] - origin[2]};
+    if( norm3(full_scan) > norm3(scan_direction) )
+      scan_direction = full_scan;
+  }
+  auto basis_u = normalized3(scan_direction);
+  if( norm3(basis_u) <= 0.0 )
+    basis_u = normalized3(world_images.front().horizontal);
+
+  const auto horizontal_direction =
+    normalized3(world_images.front().horizontal);
+  const auto vertical_direction =
+    normalized3(world_images.front().vertical);
+  const auto secondary =
+    std::abs(dot3(horizontal_direction, basis_u)) <
+      std::abs(dot3(vertical_direction, basis_u))
+      ? horizontal_direction
+      : vertical_direction;
+  const double secondary_parallel = dot3(secondary, basis_u);
+  auto basis_v = normalized3({
+    secondary[0] - secondary_parallel * basis_u[0],
+    secondary[1] - secondary_parallel * basis_u[1],
+    secondary[2] - secondary_parallel * basis_u[2]});
+  if( norm3(basis_v) <= 0.0 )
+    basis_v = normalized3(world_images.front().vertical);
   if( norm3(basis_u) <= 0.0 || norm3(basis_v) <= 0.0 )
   {
     if( error_message ) *error_message = "相机图像平面轴向无效";
@@ -2815,6 +2850,20 @@ void Robot_Model_Panel::Start_Run_Image_Processing()
 {
   if( m_run_captured_frames.empty() || m_run_image_processing.load() )
     return;
+  const auto* camera_tool = robot_model::Find_Tool_Coordinate(
+    m_tool_configuration,
+    m_tool_visualization_configuration.fov.tool_coordinate_id);
+  if( !camera_tool )
+  {
+    m_run_captured_frames.clear();
+    if( m_run_progress_panel )
+    {
+      m_run_progress_panel->Set_Status(
+        "拼图失败：FOV绑定的相机坐标系不存在，请检查Tool配置",
+        true);
+    }
+    return;
+  }
   if( m_run_image_processing_thread.joinable() )
     m_run_image_processing_thread.join();
 
@@ -2824,6 +2873,8 @@ void Robot_Model_Panel::Start_Run_Image_Processing()
   const bool save_original_images = m_run_save_images;
   const auto fov_configuration =
     m_tool_visualization_configuration.fov;
+  const auto flange_from_camera_pose =
+    camera_tool->flange_from_tool_pose;
   m_run_image_processing.store(true);
   if( m_run_progress_panel )
   {
@@ -2835,7 +2886,8 @@ void Robot_Model_Panel::Start_Run_Image_Processing()
      captures = std::move(captures),
      image_directory,
      save_original_images,
-     fov_configuration]() mutable
+     fov_configuration,
+     flange_from_camera_pose]() mutable
     {
       Run_Image_Processing_Result result;
       try
@@ -2882,6 +2934,7 @@ void Robot_Model_Panel::Start_Run_Image_Processing()
           if( !build_pose_mosaic(
                 std::move(converted),
                 fov_configuration,
+                flange_from_camera_pose,
                 &result.mosaic,
                 &error) )
           {
