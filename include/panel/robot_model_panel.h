@@ -84,7 +84,8 @@ private:
   void On_Step_Teach_Point(int direction);
   bool Start_Direct_Go_To_Teach_Point(
     std::size_t selection,
-    bool apply_bindings);
+    bool apply_bindings,
+    std::size_t frame_count_override = 0);
   bool Start_Ordered_Go_To_Teach_Point(std::size_t target_index);
   void On_Delete_Trajectory_Point(wxCommandEvent &event);
   void On_Save_Trajectory(wxCommandEvent &event);
@@ -146,6 +147,7 @@ private:
   void Sync_Trajectory_From_Teach_Points();
   int Selected_Teach_Point_Index() const;
   std::vector<int> Selected_Teach_Point_Indices() const;
+  std::size_t Current_Progress_Point_Index() const;
   bool Read_Current_Teach_Point(
     std::array<double, 6> *joint_angles,
     robot_model::XyzabcPose *world_pose) const;
@@ -223,6 +225,8 @@ private:
   kuka::Robot_State m_kuka_latest_state;
   bool m_kuka_has_latest_state = false;
   bool m_kuka_connecting = false;
+  bool m_hardware_step_preview_active = false;
+  bool m_teach_step_preview_active = false;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;

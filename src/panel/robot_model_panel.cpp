@@ -79,6 +79,31 @@ std::size_t frame_count_for_one_meter_per_second (
       std::ceil (distance_mm / millimeters_per_tick)) + 1);
 }
 
+std::size_t frame_count_for_joint_step (
+  const std::array<double, 6>& start,
+  const std::array<double, 6>& target,
+  int speed_percent)
+{
+  double maximum_delta_deg = 0.0;
+  for( std::size_t index = 0; index < start.size ( ); ++index )
+  {
+    maximum_delta_deg = std::max (
+      maximum_delta_deg,
+      std::abs (target[index] - start[index]));
+  }
+  constexpr double maximum_preview_speed_deg_per_second = 180.0;
+  const double speed_deg_per_second =
+    maximum_preview_speed_deg_per_second *
+    static_cast<double> (std::clamp (speed_percent, 10, 100)) / 100.0;
+  const double duration_seconds =
+    maximum_delta_deg / speed_deg_per_second;
+  return std::max<std::size_t> (
+    2,
+    static_cast<std::size_t> (std::ceil (
+      duration_seconds * 1000.0 /
+      static_cast<double> (TRAJECTORY_TIMER_MS))) + 1);
+}
+
 wxString teach_point_type_label (
   robot_model::Robot_Teach_Point_Type type)
 {
@@ -765,6 +790,7 @@ void Robot_Model_Panel::Apply_Kuka_Actual_State(
   m_kuka_latest_state = state;
   m_kuka_has_latest_state = true;
   Refresh_Kuka_Status_Table ( );
+  if( m_hardware_step_preview_active ) return;
   if( !m_view || !m_view->Has_Current_Model ( ) ) return;
 
   const auto joint_state = robot_model::Build_Joint_State_From_Input_Angles (
@@ -788,6 +814,18 @@ void Robot_Model_Panel::Refresh_Kuka_Command_Controls(
   const kuka::Service_Status &status)
 {
   m_kuka_service_status = status;
+  const bool finish_hardware_preview =
+    m_hardware_step_preview_active &&
+    ( status.state == kuka::Control_State::Ready ||
+      status.state == kuka::Control_State::Fault ||
+      status.state == kuka::Control_State::Disconnected );
+  if( finish_hardware_preview )
+  {
+    m_hardware_step_preview_active = false;
+    Stop_Trajectory_Playback ( );
+    if( m_kuka_has_latest_state )
+      Apply_Kuka_Actual_State (m_kuka_latest_state);
+  }
   if( status.state == kuka::Control_State::Disconnected )
     m_kuka_has_latest_state = false;
   if( status.state != kuka::Control_State::Disconnected ||
@@ -1386,10 +1424,10 @@ void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
 
 bool Robot_Model_Panel::Start_Direct_Go_To_Teach_Point (
   std::size_t selection,
-  bool apply_bindings)
+  bool apply_bindings,
+  std::size_t frame_count_override)
 {
   if( Is_Trajectory_Active ( ) ||
-      Get_Trajectory_Speed_Mps ( ) <= 0.0 ||
       selection >= m_trajectory_session.Point_Count ( ) )
   {
     return false;
@@ -1403,9 +1441,12 @@ bool Robot_Model_Panel::Start_Direct_Go_To_Teach_Point (
   const auto start_angles = Read_Joint_Input_Angles ( );
   std::array<double, 6> ignored_angles = { };
   robot_model::XyzabcPose start_pose = { };
-  std::size_t frame_count = TRAJECTORY_FRAME_COUNT;
+  std::size_t frame_count = frame_count_override > 0
+    ? frame_count_override
+    : static_cast<std::size_t> (TRAJECTORY_FRAME_COUNT);
   const auto& points = m_teach_point_store.Points (m_current_model_id);
-  if( Read_Current_Teach_Point (&ignored_angles, &start_pose) &&
+  if( frame_count_override == 0 &&
+      Read_Current_Teach_Point (&ignored_angles, &start_pose) &&
       selection < points.size ( ) &&
       points[selection].has_world_pose )
   {
@@ -1422,7 +1463,7 @@ bool Robot_Model_Panel::Start_Direct_Go_To_Teach_Point (
   }
 
   Set_Joint_Controls_Enabled (false);
-  m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
+  m_trajectory_timer.Start (TRAJECTORY_TIMER_MS);
   Update_Trajectory_Status ( );
   return true;
 }
@@ -1561,17 +1602,19 @@ void Robot_Model_Panel::On_Step_Teach_Point (int direction)
 {
   if( Is_Trajectory_Active ( ) ) return;
 
-  const int current_selection = Selected_Teach_Point_Index ( );
   const auto& points = m_teach_point_store.Points (m_current_model_id);
-  if( current_selection == wxNOT_FOUND || current_selection < 0 )
+  const std::size_t current_index = Current_Progress_Point_Index ( );
+  if( current_index >= points.size ( ) )
   {
     if( m_status_text )
       m_status_text->SetLabel (
-        wxString::FromUTF8 (u8"请先选择一个示教点"));
+        wxString::FromUTF8 (
+          u8"当前姿态不在任何 Progress 点，请先使用 Go To"));
     return;
   }
 
-  const int target_selection = current_selection + direction;
+  const int target_selection =
+    static_cast<int> (current_index) + direction;
   if( target_selection < 0 ||
       static_cast<std::size_t> (target_selection) >= points.size ( ) )
   {
@@ -1608,15 +1651,28 @@ void Robot_Model_Panel::On_Step_Teach_Point (int direction)
   }
   Update_Trajectory_Status ( );
 
+  const int step_speed_percent = m_teach_point_command_panel
+    ? m_teach_point_command_panel->Step_Speed_Percent ( )
+    : 50;
+  const std::size_t preview_frame_count = frame_count_for_joint_step (
+    Read_Joint_Input_Angles ( ),
+    points[target_index].joint_angles_deg,
+    step_speed_percent);
+  if( !Start_Direct_Go_To_Teach_Point (
+        target_index, false, preview_frame_count) )
+  {
+    return;
+  }
+  m_teach_step_preview_active = true;
+
   if( hardware_connected )
   {
+    m_hardware_step_preview_active = true;
     try
     {
       kuka::Joint_Motion_Options options;
-      options.velocity_percent = static_cast<double> (
-        m_kuka_ptp_velocity_slider
-          ? m_kuka_ptp_velocity_slider->GetValue ( )
-          : 20);
+      options.velocity_percent =
+        static_cast<double> (step_speed_percent);
       options.acceleration_percent = static_cast<double> (
         m_kuka_acceleration_slider
           ? m_kuka_acceleration_slider->GetValue ( )
@@ -1634,6 +1690,8 @@ void Robot_Model_Panel::On_Step_Teach_Point (int direction)
     }
     catch( const std::exception& error )
     {
+      m_hardware_step_preview_active = false;
+      Stop_Trajectory_Playback ( );
       if( m_status_text )
       {
         m_status_text->SetLabel (
@@ -1643,8 +1701,6 @@ void Robot_Model_Panel::On_Step_Teach_Point (int direction)
     }
     return;
   }
-
-  Start_Direct_Go_To_Teach_Point (target_index, false);
 }
 
 void Robot_Model_Panel::On_Delete_Trajectory_Point (wxCommandEvent&)
@@ -2073,6 +2129,7 @@ void Robot_Model_Panel::On_Stop_Trajectory (wxCommandEvent&)
 void Robot_Model_Panel::On_Trajectory_Speed_Changed (wxCommandEvent&)
 {
   Update_Trajectory_Speed_Label ( );
+  if( m_teach_step_preview_active ) return;
   const double speed_mps = Get_Trajectory_Speed_Mps ( );
   if( m_playback_cloud_switch_blocked )
   {
@@ -2873,16 +2930,16 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
   }
   if( m_teach_point_command_panel )
   {
-    const int selection = Selected_Teach_Point_Index ( );
     const auto point_count =
       m_teach_point_store.Point_Count (m_current_model_id);
+    const auto current_index = Current_Progress_Point_Index ( );
     m_teach_point_command_panel->Refresh_Command_State (
       enabled && !m_current_model_id.empty ( ),
       Selected_Teach_Point_Indices ( ).size ( ),
       point_count,
-      selection > 0,
-      selection != wxNOT_FOUND && selection >= 0 &&
-        static_cast<std::size_t> (selection) + 1 < point_count);
+      current_index < point_count && current_index > 0,
+      current_index < point_count &&
+        current_index + 1 < point_count);
   }
   if( m_teach_point_list_panel )
   {
@@ -2896,16 +2953,16 @@ void Robot_Model_Panel::Update_Trajectory_Status ( )
   const auto selections = Selected_Teach_Point_Indices ( );
   if( m_teach_point_command_panel )
   {
-    const int selection = Selected_Teach_Point_Index ( );
     const auto point_count =
       m_teach_point_store.Point_Count (m_current_model_id);
+    const auto current_index = Current_Progress_Point_Index ( );
     m_teach_point_command_panel->Refresh_Command_State (
       !active && !m_current_model_id.empty ( ),
       selections.size ( ),
       point_count,
-      selection > 0,
-      selection != wxNOT_FOUND && selection >= 0 &&
-        static_cast<std::size_t> (selection) + 1 < point_count);
+      current_index < point_count && current_index > 0,
+      current_index < point_count &&
+        current_index + 1 < point_count);
   }
   if( m_trajectory_panel == nullptr )
   {
@@ -3385,6 +3442,14 @@ std::vector<int> Robot_Model_Panel::Selected_Teach_Point_Indices ( ) const
     : std::vector<int> { };
 }
 
+std::size_t Robot_Model_Panel::Current_Progress_Point_Index ( ) const
+{
+  return robot_model::Find_Matching_Joint_Point_Index (
+    m_trajectory_session.Points ( ),
+    Read_Joint_Input_Angles ( ),
+    0.5);
+}
+
 bool Robot_Model_Panel::Read_Current_Teach_Point (
   std::array<double, 6>* joint_angles,
   robot_model::XyzabcPose* world_pose) const
@@ -3520,6 +3585,7 @@ void Robot_Model_Panel::Stop_Trajectory_Playback ( )
   }
 
   m_trajectory_session.Stop ( );
+  m_teach_step_preview_active = false;
   m_speed_zero_paused_playback = false;
   m_playback_waypoint_frame_indices.clear ( );
   m_playback_waypoint_point_indices.clear ( );
@@ -3528,8 +3594,8 @@ void Robot_Model_Panel::Stop_Trajectory_Playback ( )
   m_next_playback_cloud_switch = 0;
   m_waiting_for_playback_cloud = false;
   m_playback_cloud_switch_blocked = false;
-  Set_Joint_Controls_Enabled (true);
   Update_Trajectory_Status ( );
+  Set_Joint_Controls_Enabled (!m_hardware_step_preview_active);
 }
 
 void Robot_Model_Panel::Resize_Right_Tool (int requested_width)

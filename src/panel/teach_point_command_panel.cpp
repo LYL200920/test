@@ -3,6 +3,7 @@
 #include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/stattext.h>
 
 #include <utility>
@@ -32,6 +33,23 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
     this, wxID_ANY, wxString::FromUTF8 (u8"Progress 完成"));
   m_step_back_button = new wxButton (this, wxID_ANY, "Back");
   m_step_next_button = new wxButton (this, wxID_ANY, "Next");
+  m_step_speed_label = new wxStaticText (
+    this, wxID_ANY,
+    wxString::FromUTF8 (u8"Back/Next 速度：50%"));
+  m_step_speed_slider = new wxSlider (
+    this, wxID_ANY, 50, 10, 100,
+    wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL);
+  m_step_speed_slider->Bind (
+    wxEVT_SLIDER,
+    [this] (wxCommandEvent&)
+    {
+      if( m_step_speed_label && m_step_speed_slider )
+      {
+        m_step_speed_label->SetLabel (wxString::Format (
+          wxString::FromUTF8 (u8"Back/Next 速度：%d%%"),
+          m_step_speed_slider->GetValue ( )));
+      }
+    });
 
   auto* type_label = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"类型"));
@@ -51,7 +69,18 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
   auto* step_sizer = new wxBoxSizer (wxHORIZONTAL);
   step_sizer->Add (m_step_back_button, 1, wxRIGHT, 3);
   step_sizer->Add (m_step_next_button, 1, wxLEFT, 3);
-  root->Add (step_sizer, 0, wxEXPAND | wxBOTTOM, 12);
+  root->Add (step_sizer, 0, wxEXPAND | wxBOTTOM, 6);
+  root->Add (m_step_speed_label, 0, wxEXPAND);
+  root->Add (m_step_speed_slider, 0, wxEXPAND | wxTOP | wxBOTTOM, 4);
+  auto* step_speed_range = new wxBoxSizer (wxHORIZONTAL);
+  step_speed_range->Add (
+    new wxStaticText (this, wxID_ANY, "10%"),
+    0, wxALIGN_CENTER_VERTICAL);
+  step_speed_range->AddStretchSpacer (1);
+  step_speed_range->Add (
+    new wxStaticText (this, wxID_ANY, "100%"),
+    0, wxALIGN_CENTER_VERTICAL);
+  root->Add (step_speed_range, 0, wxEXPAND | wxBOTTOM, 12);
   root->Add (m_add_button, 0, wxEXPAND);
   root->Add (m_update_button, 0, wxEXPAND | wxTOP, 6);
   auto* insert_sizer = new wxBoxSizer (wxHORIZONTAL);
@@ -95,6 +124,11 @@ void Teach_Point_Command_Panel::Set_Selected_Point_Type (
       : type == robot_model::Robot_Teach_Point_Type::Wait ? 2 : 0);
 }
 
+int Teach_Point_Command_Panel::Step_Speed_Percent ( ) const
+{
+  return m_step_speed_slider ? m_step_speed_slider->GetValue ( ) : 50;
+}
+
 void Teach_Point_Command_Panel::Set_Callbacks (Callbacks callbacks)
 {
   m_callbacks = std::move (callbacks);
@@ -120,6 +154,7 @@ void Teach_Point_Command_Panel::Refresh_Command_State (
 {
   const bool single_selection = selected_count == 1;
   if( m_type_choice ) m_type_choice->Enable (enabled);
+  if( m_step_speed_slider ) m_step_speed_slider->Enable (enabled);
   if( m_add_button ) m_add_button->Enable (enabled);
   if( m_update_button )
     m_update_button->Enable (enabled && single_selection);
@@ -138,10 +173,10 @@ void Teach_Point_Command_Panel::Refresh_Command_State (
     m_complete_button->Enable (enabled && point_count > 0);
   if( m_step_back_button )
     m_step_back_button->Enable (
-      enabled && single_selection && can_step_back);
+      enabled && can_step_back);
   if( m_step_next_button )
     m_step_next_button->Enable (
-      enabled && single_selection && can_step_next);
+      enabled && can_step_next);
 }
 
 void Teach_Point_Command_Panel::Bind_Button (

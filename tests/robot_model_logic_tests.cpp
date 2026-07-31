@@ -130,6 +130,17 @@ void test_trajectory_planner ( )
   require (
     ordered_from_first == std::vector<std::size_t> ({ 1, 2 }),
     "Ordered Go To did not continue after the current point");
+  auto near_first = points[0];
+  near_first[0] += 0.04;
+  require (
+    robot_model::Find_Matching_Joint_Point_Index (
+      points, near_first, 0.05) == 0,
+    "Current Progress point matching rejected a pose within tolerance");
+  near_first[0] += 0.02;
+  require (
+    robot_model::Find_Matching_Joint_Point_Index (
+      points, near_first, 0.05) == points.size ( ),
+    "Current Progress point matching accepted a pose outside tolerance");
 
   const auto ordered_from_unknown =
     robot_model::Build_Ordered_Go_To_Point_Indices (

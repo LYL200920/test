@@ -88,21 +88,17 @@ namespace robot_model
     return frames;
   }
 
-  std::vector<size_t> Build_Ordered_Go_To_Point_Indices(
+  size_t Find_Matching_Joint_Point_Index(
     const Robot_Joint_Trajectory &points,
     const Robot_Joint_Trajectory_Point &current_angles_deg,
-    size_t target_index,
     double joint_tolerance_deg)
   {
-    std::vector<size_t> indices;
-    if (target_index >= points.size() ||
-        !std::isfinite(joint_tolerance_deg) ||
+    if (!std::isfinite(joint_tolerance_deg) ||
         joint_tolerance_deg < 0.0)
     {
-      return indices;
+      return points.size();
     }
 
-    size_t current_index = points.size();
     for (size_t point_index = 0; point_index < points.size(); ++point_index)
     {
       bool matches = true;
@@ -122,10 +118,25 @@ namespace robot_model
       }
       if (matches)
       {
-        current_index = point_index;
-        break;
+        return point_index;
       }
     }
+    return points.size();
+  }
+
+  std::vector<size_t> Build_Ordered_Go_To_Point_Indices(
+    const Robot_Joint_Trajectory &points,
+    const Robot_Joint_Trajectory_Point &current_angles_deg,
+    size_t target_index,
+    double joint_tolerance_deg)
+  {
+    std::vector<size_t> indices;
+    if (target_index >= points.size())
+    {
+      return indices;
+    }
+    const size_t current_index = Find_Matching_Joint_Point_Index(
+      points, current_angles_deg, joint_tolerance_deg);
 
     const size_t first_index =
       current_index <= target_index ? current_index + 1 : 0;

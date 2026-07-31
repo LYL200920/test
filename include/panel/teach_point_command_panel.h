@@ -10,6 +10,8 @@
 
 class wxButton;
 class wxChoice;
+class wxSlider;
+class wxStaticText;
 
 class Teach_Point_Command_Panel : public wxPanel
 {
@@ -34,6 +36,7 @@ public:
   void Set_Callbacks(Callbacks callbacks);
   robot_model::Robot_Teach_Point_Type Selected_Point_Type() const;
   void Set_Selected_Point_Type(robot_model::Robot_Teach_Point_Type type);
+  int Step_Speed_Percent() const;
   void Refresh_Command_State(
     bool enabled,
     std::size_t selected_count,
@@ -60,6 +63,8 @@ private:
   wxButton* m_step_back_button = nullptr;
   wxButton* m_step_next_button = nullptr;
   wxChoice* m_type_choice = nullptr;
+  wxSlider* m_step_speed_slider = nullptr;
+  wxStaticText* m_step_speed_label = nullptr;
 };
 
 #endif

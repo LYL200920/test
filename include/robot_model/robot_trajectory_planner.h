@@ -19,6 +19,10 @@ namespace robot_model
   Robot_Joint_Trajectory Build_Multi_Point_Joint_Ptp_Trajectory(
     const Robot_Joint_Trajectory &points,
     const std::vector<size_t> &frame_counts_per_segment);
+  size_t Find_Matching_Joint_Point_Index(
+    const Robot_Joint_Trajectory &points,
+    const Robot_Joint_Trajectory_Point &current_angles_deg,
+    double joint_tolerance_deg = 0.05);
   std::vector<size_t> Build_Ordered_Go_To_Point_Indices(
     const Robot_Joint_Trajectory &points,
     const Robot_Joint_Trajectory_Point &current_angles_deg,
