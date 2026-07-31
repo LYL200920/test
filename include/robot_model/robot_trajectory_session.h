@@ -26,6 +26,10 @@ public:
   bool Start_Go_To (const Joint_Point& current_angles,
                     size_t target_index,
                     size_t frame_count);
+  bool Start_Go_To_Path(
+    const Joint_Point &current_angles,
+    const std::vector<size_t> &waypoint_indices,
+    const std::vector<size_t> &frame_counts_per_segment);
   bool Start_Playback (size_t frame_count);
   bool Start_Playback (
     const std::vector<size_t> &frame_counts_per_segment);

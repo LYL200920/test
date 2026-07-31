@@ -123,6 +123,35 @@ void test_trajectory_planner ( )
   require_point_near (
     variable_frames.back ( ), points.back ( ),
     "Variable trajectory end mismatch");
+
+  const auto ordered_from_first =
+    robot_model::Build_Ordered_Go_To_Point_Indices (
+      points, points[0], 2);
+  require (
+    ordered_from_first == std::vector<std::size_t> ({ 1, 2 }),
+    "Ordered Go To did not continue after the current point");
+
+  const auto ordered_from_unknown =
+    robot_model::Build_Ordered_Go_To_Point_Indices (
+      points,
+      { 3.0, 3.0, 3.0, 3.0, 3.0, 3.0 },
+      2);
+  require (
+    ordered_from_unknown == std::vector<std::size_t> ({ 0, 1, 2 }),
+    "Ordered Go To did not return an unknown pose through the first point");
+
+  const auto ordered_back_to_earlier_target =
+    robot_model::Build_Ordered_Go_To_Point_Indices (
+      points, points[2], 1);
+  require (
+    ordered_back_to_earlier_target ==
+      std::vector<std::size_t> ({ 0, 1 }),
+    "Ordered Go To did not restart when the current point follows the target");
+
+  require (
+    robot_model::Build_Ordered_Go_To_Point_Indices (
+      points, points[1], 1).empty ( ),
+    "Ordered Go To moved even though the robot was already at the target");
 }
 
 void test_trajectory_session ( )
@@ -157,6 +186,30 @@ void test_trajectory_session ( )
   const auto* first = session.Step ( );
   require (first != nullptr, "Session Go To first frame missing");
   require_point_near (*first, p0, "Session Go To start frame mismatch");
+
+  const std::array<double, 6> unknown =
+    { -5.0, -5.0, 0.0, 0.0, 0.0, 0.0 };
+  require (
+    session.Start_Go_To_Path (
+      unknown,
+      std::vector<std::size_t> ({ 0, 1, 2 }),
+      std::vector<std::size_t> ({ 3, 3, 3 })),
+    "Session ordered Go To path should start");
+  require (session.Frame_Count ( ) == 7,
+           "Session ordered Go To frame count mismatch");
+  const auto* ordered_first = session.Step ( );
+  require (ordered_first != nullptr,
+           "Session ordered Go To first frame missing");
+  require_point_near (
+    *ordered_first, unknown,
+    "Session ordered Go To did not start at the current pose");
+  const robot_model::Robot_Trajectory_Session::Joint_Point* ordered_last =
+    ordered_first;
+  while( const auto* frame = session.Step ( ) )
+    ordered_last = frame;
+  require_point_near (
+    *ordered_last, p2,
+    "Session ordered Go To did not finish at the target");
 }
 
 void test_trajectory_csv_io ( )

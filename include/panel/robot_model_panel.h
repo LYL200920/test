@@ -81,10 +81,11 @@ private:
   void On_Insert_Teach_Point(bool before);
   void On_Clear_Trajectory_Points(wxCommandEvent &event);
   void On_Go_To_Trajectory_Point(wxCommandEvent &event);
-  void On_Step_To_Next_Teach_Point();
-  bool Start_Go_To_Teach_Point(
+  void On_Step_Teach_Point(int direction);
+  bool Start_Direct_Go_To_Teach_Point(
     std::size_t selection,
     bool apply_bindings);
+  bool Start_Ordered_Go_To_Teach_Point(std::size_t target_index);
   void On_Delete_Trajectory_Point(wxCommandEvent &event);
   void On_Save_Trajectory(wxCommandEvent &event);
   void On_Load_Trajectory(wxCommandEvent &event);
@@ -177,6 +178,7 @@ private:
   {
     std::size_t frame_index = 0;
     std::size_t point_index = 0;
+    bool require_point_cloud = false;
   };
 
   wxStaticText *m_model_name_text = nullptr;
@@ -245,6 +247,7 @@ private:
   std::string m_teach_pose_coordinate_id;
   bool m_speed_zero_paused_playback = false;
   std::vector<std::size_t> m_playback_waypoint_frame_indices;
+  std::vector<std::size_t> m_playback_waypoint_point_indices;
   std::size_t m_next_playback_waypoint_index = 0;
   std::vector<Playback_Cloud_Switch> m_playback_cloud_switches;
   std::size_t m_next_playback_cloud_switch = 0;

@@ -25,6 +25,7 @@ public:
     std::function<void()> save;
     std::function<void()> load;
     std::function<void()> complete;
+    std::function<void()> step_back;
     std::function<void()> step_next;
   };
 
@@ -37,6 +38,7 @@ public:
     bool enabled,
     std::size_t selected_count,
     std::size_t point_count,
+    bool can_step_back,
     bool can_step_next);
 
 private:
@@ -55,6 +57,7 @@ private:
   wxButton* m_save_button = nullptr;
   wxButton* m_load_button = nullptr;
   wxButton* m_complete_button = nullptr;
+  wxButton* m_step_back_button = nullptr;
   wxButton* m_step_next_button = nullptr;
   wxChoice* m_type_choice = nullptr;
 };

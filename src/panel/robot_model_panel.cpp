@@ -1380,11 +1380,11 @@ void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
   {
     return;
   }
-  Start_Go_To_Teach_Point (
-    static_cast<std::size_t> (selection), true);
+  Start_Ordered_Go_To_Teach_Point (
+    static_cast<std::size_t> (selection));
 }
 
-bool Robot_Model_Panel::Start_Go_To_Teach_Point (
+bool Robot_Model_Panel::Start_Direct_Go_To_Teach_Point (
   std::size_t selection,
   bool apply_bindings)
 {
@@ -1427,7 +1427,137 @@ bool Robot_Model_Panel::Start_Go_To_Teach_Point (
   return true;
 }
 
-void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
+bool Robot_Model_Panel::Start_Ordered_Go_To_Teach_Point (
+  std::size_t target_index)
+{
+  if( Is_Trajectory_Active ( ) ||
+      Get_Trajectory_Speed_Mps ( ) <= 0.0 ||
+      target_index >= m_trajectory_session.Point_Count ( ) )
+  {
+    return false;
+  }
+
+  const auto current_angles = Read_Joint_Input_Angles ( );
+  const auto waypoint_indices =
+    robot_model::Build_Ordered_Go_To_Point_Indices (
+      m_trajectory_session.Points ( ),
+      current_angles,
+      target_index);
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( waypoint_indices.empty ( ) )
+  {
+    if( !Apply_Teach_Point_Bindings_Keeping_Display (target_index) )
+      return false;
+    if( m_teach_point_list_panel )
+    {
+      m_teach_point_list_panel->Set_Point_Selection (
+        static_cast<int> (target_index));
+      Update_Teach_Point_Details ( );
+    }
+    if( m_status_text )
+    {
+      m_status_text->SetLabel (wxString::Format (
+        wxString::FromUTF8 (u8"当前已位于 P[%zu]"),
+        points[target_index].id));
+    }
+    Update_Trajectory_Status ( );
+    return true;
+  }
+
+  const std::size_t initial_point_index =
+    waypoint_indices.front ( ) == 0
+      ? 0
+      : waypoint_indices.front ( ) - 1;
+  if( !Apply_Teach_Point_Bindings_Keeping_Display (
+        initial_point_index) )
+  {
+    return false;
+  }
+
+  std::array<double, 6> ignored_angles = { };
+  robot_model::XyzabcPose previous_pose = { };
+  bool has_previous_pose =
+    Read_Current_Teach_Point (&ignored_angles, &previous_pose);
+  std::vector<std::size_t> frame_counts;
+  frame_counts.reserve (waypoint_indices.size ( ));
+  for( const std::size_t point_index : waypoint_indices )
+  {
+    const auto& point = points[point_index];
+    frame_counts.push_back (
+      has_previous_pose && point.has_world_pose
+        ? frame_count_for_one_meter_per_second (
+            previous_pose, point.world_pose)
+        : static_cast<std::size_t> (TRAJECTORY_FRAME_COUNT));
+    if( point.has_world_pose )
+    {
+      previous_pose = point.world_pose;
+      has_previous_pose = true;
+    }
+    else
+    {
+      has_previous_pose = false;
+    }
+  }
+
+  if( !m_trajectory_session.Start_Go_To_Path (
+        current_angles, waypoint_indices, frame_counts) )
+  {
+    return false;
+  }
+
+  m_playback_waypoint_frame_indices.clear ( );
+  m_playback_waypoint_point_indices.clear ( );
+  m_playback_cloud_switches.clear ( );
+  std::size_t waypoint_frame_index = 0;
+  std::size_t previous_point_index = initial_point_index;
+  for( std::size_t path_index = 0;
+       path_index < waypoint_indices.size ( );
+       ++path_index )
+  {
+    const std::size_t point_index = waypoint_indices[path_index];
+    if( points[previous_point_index].point_cloud_path !=
+        points[point_index].point_cloud_path )
+    {
+      m_playback_cloud_switches.push_back ({
+        waypoint_frame_index + 1,
+        point_index,
+        false});
+    }
+    waypoint_frame_index +=
+      std::max<std::size_t> (frame_counts[path_index], 2) - 1;
+    m_playback_waypoint_frame_indices.push_back (
+      waypoint_frame_index);
+    m_playback_waypoint_point_indices.push_back (point_index);
+    previous_point_index = point_index;
+  }
+
+  m_next_playback_waypoint_index = 0;
+  m_next_playback_cloud_switch = 0;
+  m_waiting_for_playback_cloud = false;
+  m_playback_cloud_switch_blocked = false;
+  m_speed_zero_paused_playback = false;
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection (
+      static_cast<int> (initial_point_index));
+    Update_Teach_Point_Details ( );
+  }
+  Set_Joint_Controls_Enabled (false);
+  if( m_view && m_view->Collision_Rebuild_In_Progress ( ) )
+  {
+    m_trajectory_session.Pause ( );
+    m_waiting_for_playback_cloud = true;
+    m_trajectory_timer.Start (50);
+  }
+  else
+  {
+    m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
+  }
+  Update_Trajectory_Status ( );
+  return true;
+}
+
+void Robot_Model_Panel::On_Step_Teach_Point (int direction)
 {
   if( Is_Trajectory_Active ( ) ) return;
 
@@ -1441,15 +1571,20 @@ void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
     return;
   }
 
-  const auto next_index =
-    static_cast<std::size_t> (current_selection) + 1;
-  if( next_index >= points.size ( ) )
+  const int target_selection = current_selection + direction;
+  if( target_selection < 0 ||
+      static_cast<std::size_t> (target_selection) >= points.size ( ) )
   {
     if( m_status_text )
       m_status_text->SetLabel (
-        wxString::FromUTF8 (u8"当前已是最后一个示教点"));
+        wxString::FromUTF8 (
+          direction < 0
+            ? u8"当前已是第一个示教点"
+            : u8"当前已是最后一个示教点"));
     return;
   }
+  const auto target_index =
+    static_cast<std::size_t> (target_selection);
 
   const bool hardware_connected =
     m_kuka_service && m_kuka_service->Is_Connected ( );
@@ -1462,13 +1597,13 @@ void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
     return;
   }
 
-  if( !Apply_Teach_Point_Bindings_Keeping_Display (next_index) )
+  if( !Apply_Teach_Point_Bindings_Keeping_Display (target_index) )
     return;
 
   if( m_teach_point_list_panel )
   {
     m_teach_point_list_panel->Set_Point_Selection (
-      static_cast<int> (next_index));
+      static_cast<int> (target_index));
     Update_Teach_Point_Details ( );
   }
   Update_Trajectory_Status ( );
@@ -1487,13 +1622,13 @@ void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
           ? m_kuka_acceleration_slider->GetValue ( )
           : 20);
       const auto sequence = m_kuka_service->Move_Joint (
-        points[next_index].joint_angles_deg, options);
+        points[target_index].joint_angles_deg, options);
       if( m_status_text )
       {
         m_status_text->SetLabel (wxString::Format (
           wxString::FromUTF8 (
             u8"步进至 P[%zu]：KUKA MOVEJ 已发送，sequence=%u"),
-          points[next_index].id,
+          points[target_index].id,
           sequence));
       }
     }
@@ -1509,7 +1644,7 @@ void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
     return;
   }
 
-  Start_Go_To_Teach_Point (next_index, false);
+  Start_Direct_Go_To_Teach_Point (target_index, false);
 }
 
 void Robot_Model_Panel::On_Delete_Trajectory_Point (wxCommandEvent&)
@@ -1837,8 +1972,10 @@ void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
         : static_cast<std::size_t> (TRAJECTORY_FRAME_COUNT));
   }
   m_playback_waypoint_frame_indices.clear ( );
+  m_playback_waypoint_point_indices.clear ( );
   m_playback_cloud_switches.clear ( );
   m_playback_waypoint_frame_indices.push_back (0);
+  m_playback_waypoint_point_indices.push_back (0);
   std::size_t waypoint_frame_index = 0;
   for( std::size_t index = 0; index < frame_counts.size ( ); ++index )
   {
@@ -1847,12 +1984,14 @@ void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
     {
       m_playback_cloud_switches.push_back ({
         waypoint_frame_index + 1,
-        index + 1});
+        index + 1,
+        true});
     }
     waypoint_frame_index +=
       std::max<std::size_t> (frame_counts[index], 2) - 1;
     m_playback_waypoint_frame_indices.push_back (
       waypoint_frame_index);
+    m_playback_waypoint_point_indices.push_back (index + 1);
   }
   if( !m_trajectory_session.Start_Playback (frame_counts) )
   {
@@ -2005,8 +2144,9 @@ void Robot_Model_Panel::On_Trajectory_Timer (wxTimerEvent&)
     {
       m_trajectory_session.Pause ( );
       m_trajectory_timer.Stop ( );
-      if( !Apply_Teach_Point_Bindings (
-            cloud_switch.point_index, true) )
+      if( !Apply_Teach_Point_Bindings_Keeping_Display (
+            cloud_switch.point_index,
+            cloud_switch.require_point_cloud) )
       {
         m_playback_cloud_switch_blocked = true;
         Set_Joint_Controls_Enabled (true);
@@ -2063,7 +2203,9 @@ void Robot_Model_Panel::On_Trajectory_Timer (wxTimerEvent&)
       if( m_teach_point_list_panel )
       {
         m_teach_point_list_panel->Set_Point_Selection (
-          static_cast<int> (m_next_playback_waypoint_index));
+          static_cast<int> (
+            m_playback_waypoint_point_indices[
+              m_next_playback_waypoint_index]));
         Update_Teach_Point_Details ( );
       }
       ++m_next_playback_waypoint_index;
@@ -2438,8 +2580,10 @@ wxPanel* Robot_Model_Panel::Build_Teach_Tool_Page (wxWindow* parent)
     [this] { wxCommandEvent event; On_Load_Trajectory (event); };
   edit_callbacks.complete =
     [this] { On_Complete_Progress ( ); };
+  edit_callbacks.step_back =
+    [this] { On_Step_Teach_Point (-1); };
   edit_callbacks.step_next =
-    [this] { On_Step_To_Next_Teach_Point ( ); };
+    [this] { On_Step_Teach_Point (1); };
   m_teach_point_command_panel->Set_Callbacks (
     std::move (edit_callbacks));
 
@@ -2736,6 +2880,7 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
       enabled && !m_current_model_id.empty ( ),
       Selected_Teach_Point_Indices ( ).size ( ),
       point_count,
+      selection > 0,
       selection != wxNOT_FOUND && selection >= 0 &&
         static_cast<std::size_t> (selection) + 1 < point_count);
   }
@@ -2758,6 +2903,7 @@ void Robot_Model_Panel::Update_Trajectory_Status ( )
       !active && !m_current_model_id.empty ( ),
       selections.size ( ),
       point_count,
+      selection > 0,
       selection != wxNOT_FOUND && selection >= 0 &&
         static_cast<std::size_t> (selection) + 1 < point_count);
   }
@@ -3376,6 +3522,7 @@ void Robot_Model_Panel::Stop_Trajectory_Playback ( )
   m_trajectory_session.Stop ( );
   m_speed_zero_paused_playback = false;
   m_playback_waypoint_frame_indices.clear ( );
+  m_playback_waypoint_point_indices.clear ( );
   m_next_playback_waypoint_index = 0;
   m_playback_cloud_switches.clear ( );
   m_next_playback_cloud_switch = 0;

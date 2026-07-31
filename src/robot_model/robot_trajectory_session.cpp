@@ -83,6 +83,39 @@ namespace robot_model
     return true;
   }
 
+  bool Robot_Trajectory_Session::Start_Go_To_Path(
+      const Joint_Point &current_angles,
+      const std::vector<size_t> &waypoint_indices,
+      const std::vector<size_t> &frame_counts_per_segment)
+  {
+    if (waypoint_indices.empty() ||
+        waypoint_indices.size() != frame_counts_per_segment.size())
+    {
+      return false;
+    }
+
+    Robot_Joint_Trajectory path;
+    path.reserve(waypoint_indices.size() + 1);
+    path.push_back(current_angles);
+    for (const size_t point_index : waypoint_indices)
+    {
+      if (point_index >= m_points.size())
+      {
+        return false;
+      }
+      path.push_back(m_points[point_index]);
+    }
+
+    auto frames = Build_Multi_Point_Joint_Ptp_Trajectory(
+      path, frame_counts_per_segment);
+    if (frames.empty())
+    {
+      return false;
+    }
+    m_player.Start(std::move(frames));
+    return true;
+  }
+
   bool Robot_Trajectory_Session::Start_Playback(
       const std::vector<size_t> &frame_counts_per_segment)
   {

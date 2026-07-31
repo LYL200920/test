@@ -1,6 +1,7 @@
 #include "robot_trajectory_planner.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace robot_model
 {
@@ -85,6 +86,56 @@ namespace robot_model
         segment_frames.end());
     }
     return frames;
+  }
+
+  std::vector<size_t> Build_Ordered_Go_To_Point_Indices(
+    const Robot_Joint_Trajectory &points,
+    const Robot_Joint_Trajectory_Point &current_angles_deg,
+    size_t target_index,
+    double joint_tolerance_deg)
+  {
+    std::vector<size_t> indices;
+    if (target_index >= points.size() ||
+        !std::isfinite(joint_tolerance_deg) ||
+        joint_tolerance_deg < 0.0)
+    {
+      return indices;
+    }
+
+    size_t current_index = points.size();
+    for (size_t point_index = 0; point_index < points.size(); ++point_index)
+    {
+      bool matches = true;
+      for (size_t joint_index = 0;
+           joint_index < current_angles_deg.size();
+           ++joint_index)
+      {
+        if (!std::isfinite(current_angles_deg[joint_index]) ||
+            !std::isfinite(points[point_index][joint_index]) ||
+            std::abs(current_angles_deg[joint_index] -
+                     points[point_index][joint_index]) >
+              joint_tolerance_deg)
+        {
+          matches = false;
+          break;
+        }
+      }
+      if (matches)
+      {
+        current_index = point_index;
+        break;
+      }
+    }
+
+    const size_t first_index =
+      current_index <= target_index ? current_index + 1 : 0;
+    for (size_t point_index = first_index;
+         point_index <= target_index;
+         ++point_index)
+    {
+      indices.push_back(point_index);
+    }
+    return indices;
   }
 
 } // namespace robot_model
