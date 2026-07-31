@@ -2,7 +2,9 @@
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/stattext.h>
 
 #include <algorithm>
@@ -34,7 +36,51 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_ct_value->SetFont(ct_font);
 
   m_save_images = new wxCheckBox(
-    this, wxID_ANY, wxString::FromUTF8(u8"保存每个到位点的 2D 图片"));
+    this, wxID_ANY, wxString::FromUTF8(u8"保存每个运动点的 2D 图片"));
+
+  auto *motion_row = new wxBoxSizer(wxHORIZONTAL);
+  motion_row->Add(
+    new wxStaticText(this, wxID_ANY, wxString::FromUTF8(u8"运动方式")),
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+  m_motion_mode = new wxChoice(this, wxID_ANY);
+  m_motion_mode->Append("PTP");
+  m_motion_mode->Append("LIN");
+  m_motion_mode->SetSelection(0);
+  motion_row->Add(m_motion_mode, 1, wxEXPAND);
+
+  auto *speed_row = new wxBoxSizer(wxHORIZONTAL);
+  speed_row->Add(
+    new wxStaticText(this, wxID_ANY, wxString::FromUTF8(u8"运行速度")),
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+  m_motion_speed = new wxSlider(
+    this, wxID_ANY, m_ptp_speed_percent, 1, 100);
+  speed_row->Add(m_motion_speed, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+  m_motion_speed_label = new wxStaticText(this, wxID_ANY, "100%");
+  m_motion_speed_label->SetMinSize(wxSize(82, -1));
+  speed_row->Add(m_motion_speed_label, 0, wxALIGN_CENTER_VERTICAL);
+  m_motion_mode->Bind(
+    wxEVT_CHOICE,
+    [this](wxCommandEvent &)
+    {
+      if (m_motion_speed)
+      {
+        if (m_motion_mode->GetSelection() == 1)
+          m_ptp_speed_percent = m_motion_speed->GetValue();
+        else
+          m_linear_speed_mm_s = m_motion_speed->GetValue();
+      }
+      Refresh_Motion_Controls();
+    });
+  m_motion_speed->Bind(
+    wxEVT_SLIDER,
+    [this](wxCommandEvent &)
+    {
+      if (Selected_Motion_Mode() == Motion_Mode::Linear)
+        m_linear_speed_mm_s = m_motion_speed->GetValue();
+      else
+        m_ptp_speed_percent = m_motion_speed->GetValue();
+      Refresh_Motion_Controls();
+    });
 
   m_run_button = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"请先复位"));
@@ -63,10 +109,13 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(ct_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
   sizer->Add(m_ct_value, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 14);
   sizer->Add(m_save_images, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(motion_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_run_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_status, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->AddStretchSpacer(1);
   SetSizer(sizer);
+  Refresh_Motion_Controls();
   Refresh_Run_Button();
 }
 
@@ -78,6 +127,21 @@ void Run_Progress_Panel::Set_Callbacks(Callbacks callbacks)
 bool Run_Progress_Panel::Save_Images() const
 {
   return m_save_images && m_save_images->GetValue();
+}
+
+Run_Progress_Panel::Motion_Mode
+Run_Progress_Panel::Selected_Motion_Mode() const
+{
+  return m_motion_mode && m_motion_mode->GetSelection() == 1
+    ? Motion_Mode::Linear
+    : Motion_Mode::Ptp;
+}
+
+int Run_Progress_Panel::Motion_Speed() const
+{
+  return Selected_Motion_Mode() == Motion_Mode::Linear
+    ? m_linear_speed_mm_s
+    : m_ptp_speed_percent;
 }
 
 void Run_Progress_Panel::Set_Progress_Ready(bool ready)
@@ -101,7 +165,31 @@ void Run_Progress_Panel::Set_Running(bool running, bool stopping)
   m_stopping = running && stopping;
   if (m_save_images)
     m_save_images->Enable(!running);
+  if (m_motion_mode)
+    m_motion_mode->Enable(!running);
+  if (m_motion_speed)
+    m_motion_speed->Enable(!running);
   Refresh_Run_Button();
+}
+
+void Run_Progress_Panel::Refresh_Motion_Controls()
+{
+  if (!m_motion_speed || !m_motion_speed_label)
+    return;
+  if (Selected_Motion_Mode() == Motion_Mode::Linear)
+  {
+    m_motion_speed->SetRange(1, 2000);
+    m_motion_speed->SetValue(m_linear_speed_mm_s);
+    m_motion_speed_label->SetLabel(
+      wxString::Format("%d mm/s", m_linear_speed_mm_s));
+  }
+  else
+  {
+    m_motion_speed->SetRange(1, 100);
+    m_motion_speed->SetValue(m_ptp_speed_percent);
+    m_motion_speed_label->SetLabel(
+      wxString::Format("%d%%", m_ptp_speed_percent));
+  }
 }
 
 void Run_Progress_Panel::Set_Elapsed(std::chrono::milliseconds elapsed)
@@ -157,5 +245,8 @@ void Run_Progress_Panel::Refresh_Run_Button()
   else if (!m_robot_ready && !m_robot_reason.empty())
     Set_Status(m_robot_reason, true);
   else if (ready)
-    Set_Status("机械臂已在复位位置，可以运行");
+    Set_Status(
+      m_robot_reason.empty()
+        ? "机械臂已在复位位置，可以运行"
+        : m_robot_reason);
 }

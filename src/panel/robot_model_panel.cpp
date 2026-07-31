@@ -2134,6 +2134,16 @@ void Robot_Model_Panel::Refresh_Run_Readiness()
     return;
   std::string reason;
   const bool ready = Is_Robot_At_Home(&reason);
+  if( ready )
+  {
+    std::ostringstream message;
+    message << std::fixed << std::setprecision(0)
+            << "机械臂已在复位位置，可以运行；控制器 Override="
+            << m_kuka_latest_state.override_percent << "%";
+    if( m_kuka_latest_state.override_percent < 99.5 )
+      message << "（该值会继续限制实际速度）";
+    reason = message.str();
+  }
   m_run_progress_panel->Set_Robot_Ready(ready, reason);
 }
 
@@ -2182,6 +2192,10 @@ void Robot_Model_Panel::Start_Progress_Run()
   }
 
   m_run_save_images = m_run_progress_panel->Save_Images();
+  m_run_linear_motion =
+    m_run_progress_panel->Selected_Motion_Mode() ==
+    Run_Progress_Panel::Motion_Mode::Linear;
+  m_run_motion_speed = m_run_progress_panel->Motion_Speed();
   if( m_run_save_images )
   {
     if( !m_camera_2d_service || !m_camera_2d_service->Is_Grabbing() )
@@ -2223,7 +2237,11 @@ void Robot_Model_Panel::Start_Progress_Run()
   m_run_started_at = std::chrono::steady_clock::now();
   m_run_progress_panel->Set_Elapsed(std::chrono::milliseconds(0));
   m_run_progress_panel->Set_Running(true);
-  m_run_progress_panel->Set_Status("运行中：准备执行 P[1]");
+  m_run_progress_panel->Set_Status(
+    std::string("运行中：") +
+    (m_run_linear_motion ? "LIN " : "PTP ") +
+    "速度=" + std::to_string(m_run_motion_speed) +
+    (m_run_linear_motion ? " mm/s" : "%"));
   Set_Run_Safety_Lock(true);
   m_run_timer.Start(RUN_TIMER_INTERVAL_MS);
   Dispatch_Next_Run_Point();
@@ -2254,21 +2272,25 @@ void Robot_Model_Panel::Dispatch_Next_Run_Point()
 
   try
   {
-    kuka::Joint_Motion_Options options;
-    options.velocity_percent = static_cast<double>(
-      m_kuka_ptp_velocity_slider
-        ? m_kuka_ptp_velocity_slider->GetValue()
-        : 20);
+    kuka::Cartesian_Motion_Options options;
+    options.velocity = static_cast<double>(m_run_motion_speed);
     options.acceleration_percent = static_cast<double>(
       m_kuka_acceleration_slider
         ? m_kuka_acceleration_slider->GetValue()
         : 50);
+    options.blend_mm = 0.0;
     m_run_waiting_for_motion = true;
-    const auto sequence = m_kuka_service->Move_Joint(
-      points[m_run_point_index].joint_angles_deg, options);
+    const auto sequence = m_run_linear_motion
+      ? m_kuka_service->Move_Linear(
+          points[m_run_point_index].world_pose, options)
+      : m_kuka_service->Move_Pose_Ptp(
+          points[m_run_point_index].world_pose,
+          points[m_run_point_index].joint_angles_deg,
+          options);
     m_run_progress_panel->Set_Status(
       "运行中：正在执行 " +
       robot_model::Format_Teach_Point_Name(points[m_run_point_index].id) +
+      (m_run_linear_motion ? "（LIN）" : "（PTP）") +
       "，sequence=" + std::to_string(sequence));
   }
   catch( const std::exception& error )
@@ -2283,7 +2305,12 @@ void Robot_Model_Panel::Capture_Run_Point_Image()
 {
   if( !m_run_active || m_run_stop_requested )
     return;
-  if( !m_run_save_images )
+  const auto& points = m_teach_point_store.Points(m_current_model_id);
+  const bool is_motion_point =
+    m_run_point_index < points.size() &&
+    points[m_run_point_index].type ==
+      robot_model::Robot_Teach_Point_Type::Motion;
+  if( !m_run_save_images || !is_motion_point )
   {
     ++m_run_point_index;
     Dispatch_Next_Run_Point();

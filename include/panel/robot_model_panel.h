@@ -277,6 +277,8 @@ private:
   bool m_run_waiting_for_motion = false;
   bool m_run_waiting_for_image = false;
   bool m_run_save_images = false;
+  bool m_run_linear_motion = false;
+  int m_run_motion_speed = 100;
   std::size_t m_run_point_index = 0;
   unsigned long long m_run_previous_frame_number = 0;
   bool m_run_had_previous_frame = false;

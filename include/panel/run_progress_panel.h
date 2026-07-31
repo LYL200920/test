@@ -9,11 +9,19 @@
 
 class wxButton;
 class wxCheckBox;
+class wxChoice;
+class wxSlider;
 class wxStaticText;
 
 class Run_Progress_Panel : public wxPanel
 {
 public:
+  enum class Motion_Mode
+  {
+    Ptp,
+    Linear
+  };
+
   struct Callbacks
   {
     std::function<void()> start;
@@ -24,6 +32,8 @@ public:
 
   void Set_Callbacks(Callbacks callbacks);
   bool Save_Images() const;
+  Motion_Mode Selected_Motion_Mode() const;
+  int Motion_Speed() const;
   void Set_Progress_Ready(bool ready);
   void Set_Robot_Ready(bool ready, const std::string &reason);
   void Set_Running(bool running, bool stopping = false);
@@ -32,17 +42,23 @@ public:
 
 private:
   void Refresh_Run_Button();
+  void Refresh_Motion_Controls();
 
 private:
   Callbacks m_callbacks;
   wxStaticText *m_ct_value = nullptr;
   wxCheckBox *m_save_images = nullptr;
+  wxChoice *m_motion_mode = nullptr;
+  wxSlider *m_motion_speed = nullptr;
+  wxStaticText *m_motion_speed_label = nullptr;
   wxButton *m_run_button = nullptr;
   wxStaticText *m_status = nullptr;
   bool m_progress_ready = false;
   bool m_robot_ready = false;
   bool m_running = false;
   bool m_stopping = false;
+  int m_ptp_speed_percent = 100;
+  int m_linear_speed_mm_s = 500;
   std::string m_robot_reason;
 };
 
