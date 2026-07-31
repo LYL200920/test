@@ -13,7 +13,9 @@
 #include "tool_coordinate_repository.h"
 #include "right_tool_panel.h"
 #include "net_panel.h"
-#include "flow_panel.h"
+#include "run_progress_panel.h"
+#include "camera_2d_image_converter.h"
+#include "camera_params.h"
 #include "point_cloud_view.h"
 #include "point_cloud_overlay_toolbar.h"
 #include "teach_point_command_panel.h"
@@ -25,8 +27,10 @@
 #include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/choicdlg.h>
+#include <wx/datetime.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
+#include <wx/image.h>
 #include <wx/grid.h>
 #include <wx/msgdlg.h>
 #include <wx/scrolwin.h>
@@ -34,6 +38,7 @@
 #include <wx/simplebook.h>
 #include <wx/slider.h>
 #include <wx/splitter.h>
+#include <wx/stdpaths.h>
 #include <wx/tglbtn.h>
 #include <wx/utils.h>
 
@@ -41,6 +46,9 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <cstring>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 #include <utility>
 
@@ -61,6 +69,10 @@ constexpr int TEACH_POINT_COLLAPSED_WIDTH = 38;
 constexpr int TEACH_POINT_DEFAULT_EXPANDED_WIDTH = 240;
 constexpr int WORKSPACE_MINIMUM_WIDTH = 500;
 constexpr const char* DEFAULT_ROBOT_MODEL_ID = "KR10_R1100_2";
+constexpr double RUN_HOME_POSITION_TOLERANCE_MM = 2.0;
+constexpr double RUN_HOME_ANGLE_TOLERANCE_DEG = 1.0;
+constexpr int RUN_TIMER_INTERVAL_MS = 40;
+constexpr int RUN_IMAGE_TIMEOUT_MS = 3000;
 
 std::size_t frame_count_for_one_meter_per_second (
   const robot_model::XyzabcPose& start,
@@ -238,6 +250,7 @@ Robot_Model_Panel::Robot_Model_Panel (
   wxWindowID id)
   : wxPanel (parent, id)
 {
+  m_camera_2d_service = &camera_2d_service;
   m_kuka_service = std::make_shared<kuka::Robot_Service> ( );
   Bind (
     wxEVT_KUKA_MODEL_STATE,
@@ -517,8 +530,13 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_tcp_panel = new Net_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Tcp),
     m_kuka_service);
-  m_flow_panel = new Flow_Panel (
-    m_right_tool_panel->Page_Parent (Right_Tool_Page::Flow));
+  m_run_progress_panel = new Run_Progress_Panel (
+    m_right_tool_panel->Page_Parent (Right_Tool_Page::Run));
+  Run_Progress_Panel::Callbacks run_callbacks;
+  run_callbacks.start = [this] { Start_Progress_Run ( ); };
+  run_callbacks.emergency_stop =
+    [this] { Request_Progress_Emergency_Stop ( ); };
+  m_run_progress_panel->Set_Callbacks (std::move (run_callbacks));
   m_camera_control_panel = new Camera_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
     camera_service);
@@ -645,7 +663,8 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Teach, teach_tool_page);
   m_right_tool_panel->Add_Page (Right_Tool_Page::Tcp, m_tcp_panel);
-  m_right_tool_panel->Add_Page (Right_Tool_Page::Flow, m_flow_panel);
+  m_right_tool_panel->Add_Page (
+    Right_Tool_Page::Run, m_run_progress_panel);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Camera, m_camera_control_panel);
   m_right_tool_panel->Add_Page (
@@ -684,6 +703,9 @@ Robot_Model_Panel::Robot_Model_Panel (
   m_trajectory_timer.SetOwner (this);
   Bind (wxEVT_TIMER, &Robot_Model_Panel::On_Trajectory_Timer, this,
         m_trajectory_timer.GetId ( ));
+  m_run_timer.SetOwner (this);
+  Bind (wxEVT_TIMER, &Robot_Model_Panel::On_Run_Timer, this,
+        m_run_timer.GetId ( ));
 
   auto* toolbar_sizer = new wxBoxSizer (wxHORIZONTAL);
   toolbar_sizer->Add (title, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
@@ -752,6 +774,8 @@ Robot_Model_Panel::Robot_Model_Panel (
 
 Robot_Model_Panel::~Robot_Model_Panel()
 {
+  if( m_run_timer.IsRunning() )
+    m_run_timer.Stop();
   if( m_kuka_service )
   {
     m_kuka_service->Unsubscribe (m_kuka_observer_token);
@@ -767,6 +791,11 @@ Robot_Model_Panel::~Robot_Model_Panel()
     wxEVT_KUKA_SERVICE_STATUS,
     &Robot_Model_Panel::On_Kuka_Service_Status,
     this);
+  Unbind (
+    wxEVT_TIMER,
+    &Robot_Model_Panel::On_Run_Timer,
+    this,
+    m_run_timer.GetId());
 }
 
 void Robot_Model_Panel::On_Kuka_Model_State(wxThreadEvent &event)
@@ -808,12 +837,42 @@ void Robot_Model_Panel::Apply_Kuka_Actual_State(
       state.axis[0], state.axis[1], state.axis[2],
       state.axis[3], state.axis[4], state.axis[5]));
   }
+  Refresh_Run_Readiness();
 }
 
 void Robot_Model_Panel::Refresh_Kuka_Command_Controls(
   const kuka::Service_Status &status)
 {
   m_kuka_service_status = status;
+  if( m_run_active )
+  {
+    if( m_run_stop_requested &&
+        ( status.state == kuka::Control_State::Ready ||
+          status.state == kuka::Control_State::Fault ||
+          status.state == kuka::Control_State::Disconnected ) )
+    {
+      Finish_Progress_Run(false, "Progress 已紧急停止");
+      return;
+    }
+    if( !m_run_stop_requested &&
+        ( status.state == kuka::Control_State::Fault ||
+          status.state == kuka::Control_State::Disconnected ) )
+    {
+      Finish_Progress_Run(
+        false,
+        status.state == kuka::Control_State::Disconnected
+          ? "机械臂连接断开，Progress 已中止"
+          : "机械臂故障，Progress 已中止：" + status.detail);
+      return;
+    }
+    if( !m_run_stop_requested &&
+        m_run_waiting_for_motion &&
+        status.state == kuka::Control_State::Ready )
+    {
+      m_run_waiting_for_motion = false;
+      Capture_Run_Point_Image();
+    }
+  }
   const bool finish_hardware_preview =
     m_hardware_step_preview_active &&
     ( status.state == kuka::Control_State::Ready ||
@@ -839,26 +898,35 @@ void Robot_Model_Panel::Refresh_Kuka_Command_Controls(
     status.state == kuka::Control_State::Running ||
     status.state == kuka::Control_State::Completed;
 
-  if( m_kuka_move_joint_button ) m_kuka_move_joint_button->Enable (ready);
-  if( m_kuka_move_ptp_button ) m_kuka_move_ptp_button->Enable (ready);
-  if( m_kuka_move_linear_button ) m_kuka_move_linear_button->Enable (ready);
-  if( m_kuka_sync_button ) m_kuka_sync_button->Enable (connected && !busy);
-  if( m_kuka_stop_button ) m_kuka_stop_button->Enable (connected);
+  const bool safe_controls = !m_run_active;
+  if( m_kuka_move_joint_button )
+    m_kuka_move_joint_button->Enable (safe_controls && ready);
+  if( m_kuka_move_ptp_button )
+    m_kuka_move_ptp_button->Enable (safe_controls && ready);
+  if( m_kuka_move_linear_button )
+    m_kuka_move_linear_button->Enable (safe_controls && ready);
+  if( m_kuka_sync_button )
+    m_kuka_sync_button->Enable (safe_controls && connected && !busy);
+  if( m_kuka_stop_button )
+    m_kuka_stop_button->Enable (safe_controls && connected);
   if( m_kuka_ptp_velocity_slider )
-    m_kuka_ptp_velocity_slider->Enable (!busy);
+    m_kuka_ptp_velocity_slider->Enable (safe_controls && !busy);
   if( m_kuka_linear_velocity_slider )
-    m_kuka_linear_velocity_slider->Enable (!busy);
+    m_kuka_linear_velocity_slider->Enable (safe_controls && !busy);
   if( m_kuka_acceleration_slider )
-    m_kuka_acceleration_slider->Enable (!busy);
+    m_kuka_acceleration_slider->Enable (safe_controls && !busy);
   if( m_kuka_connect_button )
   {
     m_kuka_connect_button->SetLabel (
       connected ? "Disconnect" : (m_kuka_connecting ? "Connecting..." : "Connect"));
-    m_kuka_connect_button->Enable (!m_kuka_connecting || connected);
+    m_kuka_connect_button->Enable (
+      safe_controls && (!m_kuka_connecting || connected));
   }
-  if( m_joint_panel ) m_joint_panel->Set_Joint_Controls_Enabled (!busy);
+  if( m_joint_panel )
+    m_joint_panel->Set_Joint_Controls_Enabled (safe_controls && !busy);
   if( m_cartesian_pose_panel )
-    m_cartesian_pose_panel->Set_Pose_Controls_Enabled (!busy);
+    m_cartesian_pose_panel->Set_Pose_Controls_Enabled (
+      safe_controls && !busy);
 
   if( m_kuka_status_text )
   {
@@ -871,6 +939,7 @@ void Robot_Model_Panel::Refresh_Kuka_Command_Controls(
     m_kuka_status_text->SetLabel (label);
   }
   Refresh_Kuka_Status_Table ( );
+  Refresh_Run_Readiness();
 }
 
 void Robot_Model_Panel::Refresh_Kuka_Status_Table ( )
@@ -1897,7 +1966,7 @@ void Robot_Model_Panel::On_Load_Trajectory (wxCommandEvent&)
 void Robot_Model_Panel::On_Complete_Progress ( )
 {
   const auto& points = m_teach_point_store.Points (m_current_model_id);
-  if( points.empty ( ) || !m_flow_panel || !m_right_tool_panel )
+  if( points.empty ( ) || !m_run_progress_panel || !m_right_tool_panel )
   {
     return;
   }
@@ -1991,16 +2060,389 @@ void Robot_Model_Panel::On_Complete_Progress ( )
     }
   }
 
-  m_flow_panel->Set_Progress_Points (points);
-  m_right_tool_panel->Set_Flow_Tool_Enabled (true);
   m_progress_completed = true;
+  m_run_progress_panel->Set_Progress_Ready (true);
+  m_right_tool_panel->Set_Run_Tool_Enabled (true);
+  Refresh_Run_Readiness ( );
   if( m_status_text )
   {
     m_status_text->SetLabel (wxString::Format (
       wxString::FromUTF8 (
-        u8"Progress 检查完成：%zu 个点，流程选项卡已使能"),
+        u8"Progress 检查完成：%zu 个点，运行选项卡已使能"),
       points.size ( )));
   }
+}
+
+bool Robot_Model_Panel::Is_Robot_At_Home(std::string *reason) const
+{
+  auto fail = [reason](const std::string &message)
+  {
+    if( reason ) *reason = message;
+    return false;
+  };
+  if( !m_kuka_service || !m_kuka_service->Is_Connected ( ) )
+    return fail("机械臂未连接，请先连接并复位");
+  if( m_kuka_service_status.state != kuka::Control_State::Ready )
+    return fail("机械臂尚未就绪，请等待状态同步完成");
+  if( !m_kuka_has_latest_state )
+    return fail("尚未收到机械臂实际位姿，请先同步状态");
+  if( !m_view || !m_view->Has_Current_Model ( ) )
+    return fail("机械臂模型未加载");
+
+  const auto& params = m_view->Kinematic_Params ( );
+  if( !params.has_home_pose )
+    return fail("当前模型没有配置复位位姿");
+
+  const auto angular_error = [](double actual, double target)
+  {
+    return std::abs(std::remainder(actual - target, 360.0));
+  };
+  double position_error = 0.0;
+  double angle_error = 0.0;
+  for( std::size_t index = 0; index < 3; ++index )
+  {
+    const double delta =
+      m_kuka_latest_state.pose[index] - params.home_pose_xyzabc[index];
+    position_error += delta * delta;
+  }
+  position_error = std::sqrt(position_error);
+  for( std::size_t index = 3; index < 6; ++index )
+  {
+    angle_error = std::max(
+      angle_error,
+      angular_error(
+        m_kuka_latest_state.pose[index],
+        params.home_pose_xyzabc[index]));
+  }
+  if( position_error > RUN_HOME_POSITION_TOLERANCE_MM ||
+      angle_error > RUN_HOME_ANGLE_TOLERANCE_DEG )
+  {
+    std::ostringstream message;
+    message << std::fixed << std::setprecision(2)
+            << "机械臂不在复位位置（位置偏差 "
+            << position_error << " mm，角度偏差 "
+            << angle_error << "°），请先复位";
+    return fail(message.str());
+  }
+  if( reason ) reason->clear();
+  return true;
+}
+
+void Robot_Model_Panel::Refresh_Run_Readiness()
+{
+  if( !m_run_progress_panel || m_run_active )
+    return;
+  std::string reason;
+  const bool ready = Is_Robot_At_Home(&reason);
+  m_run_progress_panel->Set_Robot_Ready(ready, reason);
+}
+
+void Robot_Model_Panel::Set_Run_Safety_Lock(bool locked)
+{
+  if( m_right_tool_panel )
+    m_right_tool_panel->Set_Run_Locked(locked);
+  if( m_robot_display_button ) m_robot_display_button->Enable(!locked);
+  if( m_camera_display_button ) m_camera_display_button->Enable(!locked);
+  if( m_camera_2d_display_button ) m_camera_2d_display_button->Enable(!locked);
+  if( m_point_cloud_display_button ) m_point_cloud_display_button->Enable(!locked);
+  if( m_reset_robot_button )
+    m_reset_robot_button->Enable(
+      !locked && m_view && m_view->Has_Current_Model());
+  if( m_flange_frame_button ) m_flange_frame_button->Enable(!locked);
+  if( m_flange_free_drag_button ) m_flange_free_drag_button->Enable(!locked);
+  if( m_flange_6d_button ) m_flange_6d_button->Enable(!locked);
+  if( m_interaction_coordinate_choice )
+    m_interaction_coordinate_choice->Enable(!locked);
+  if( m_trajectory_panel ) m_trajectory_panel->Enable(!locked);
+  if( m_teach_point_command_panel )
+    m_teach_point_command_panel->Enable(!locked);
+  Update_Trajectory_Status();
+  Set_Joint_Controls_Enabled(!locked);
+}
+
+void Robot_Model_Panel::Start_Progress_Run()
+{
+  if( m_run_active || !m_progress_completed ||
+      !m_run_progress_panel || !m_kuka_service )
+    return;
+
+  std::string reason;
+  if( !Is_Robot_At_Home(&reason) )
+  {
+    m_run_progress_panel->Set_Status(reason, true);
+    Refresh_Run_Readiness();
+    return;
+  }
+
+  const auto& points = m_teach_point_store.Points(m_current_model_id);
+  if( points.empty() )
+  {
+    m_run_progress_panel->Set_Status("Progress 中没有可运行的点", true);
+    return;
+  }
+
+  m_run_save_images = m_run_progress_panel->Save_Images();
+  if( m_run_save_images )
+  {
+    if( !m_camera_2d_service || !m_camera_2d_service->Is_Grabbing() )
+    {
+      m_run_progress_panel->Set_Status(
+        "保存图片前请打开 2D 相机并开始采集", true);
+      return;
+    }
+    if( m_camera_2d_service->Status().trigger_mode !=
+        jutze_camera::camera_trigger_mode::soft_trigger )
+    {
+      m_run_progress_panel->Set_Status(
+        "保存图片需要将 2D 相机设置为软触发模式", true);
+      return;
+    }
+
+    const wxString exe_dir =
+      wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
+    m_run_image_directory =
+      std::filesystem::path(std::wstring(exe_dir.wc_str())) /
+      "RunImages" /
+      std::string(wxDateTime::Now().Format("%Y%m%d_%H%M%S").utf8_str());
+    std::error_code directory_error;
+    std::filesystem::create_directories(
+      m_run_image_directory, directory_error);
+    if( directory_error )
+    {
+      m_run_progress_panel->Set_Status(
+        "创建图片目录失败：" + directory_error.message(), true);
+      return;
+    }
+  }
+
+  m_run_active = true;
+  m_run_stop_requested = false;
+  m_run_waiting_for_motion = false;
+  m_run_waiting_for_image = false;
+  m_run_point_index = 0;
+  m_run_started_at = std::chrono::steady_clock::now();
+  m_run_progress_panel->Set_Elapsed(std::chrono::milliseconds(0));
+  m_run_progress_panel->Set_Running(true);
+  m_run_progress_panel->Set_Status("运行中：准备执行 P[1]");
+  Set_Run_Safety_Lock(true);
+  m_run_timer.Start(RUN_TIMER_INTERVAL_MS);
+  Dispatch_Next_Run_Point();
+}
+
+void Robot_Model_Panel::Dispatch_Next_Run_Point()
+{
+  if( !m_run_active || m_run_stop_requested )
+    return;
+  const auto& points = m_teach_point_store.Points(m_current_model_id);
+  if( m_run_point_index >= points.size() )
+  {
+    Finish_Progress_Run(true, "Progress 运行完成");
+    return;
+  }
+  if( !m_kuka_service || !m_kuka_service->Can_Move() )
+  {
+    Finish_Progress_Run(false, "机械臂未就绪，Progress 已中止");
+    return;
+  }
+
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection(
+      static_cast<int>(m_run_point_index));
+    Update_Teach_Point_Details();
+  }
+
+  try
+  {
+    kuka::Joint_Motion_Options options;
+    options.velocity_percent = static_cast<double>(
+      m_kuka_ptp_velocity_slider
+        ? m_kuka_ptp_velocity_slider->GetValue()
+        : 20);
+    options.acceleration_percent = static_cast<double>(
+      m_kuka_acceleration_slider
+        ? m_kuka_acceleration_slider->GetValue()
+        : 50);
+    m_run_waiting_for_motion = true;
+    const auto sequence = m_kuka_service->Move_Joint(
+      points[m_run_point_index].joint_angles_deg, options);
+    m_run_progress_panel->Set_Status(
+      "运行中：正在执行 " +
+      robot_model::Format_Teach_Point_Name(points[m_run_point_index].id) +
+      "，sequence=" + std::to_string(sequence));
+  }
+  catch( const std::exception& error )
+  {
+    m_run_waiting_for_motion = false;
+    Finish_Progress_Run(
+      false, std::string("下发机械臂位姿失败：") + error.what());
+  }
+}
+
+void Robot_Model_Panel::Capture_Run_Point_Image()
+{
+  if( !m_run_active || m_run_stop_requested )
+    return;
+  if( !m_run_save_images )
+  {
+    ++m_run_point_index;
+    Dispatch_Next_Run_Point();
+    return;
+  }
+
+  const auto previous =
+    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+  m_run_had_previous_frame = static_cast<bool>(previous);
+  m_run_previous_frame_number = previous ? previous->m_frame_num : 0;
+  std::string error;
+  if( !m_camera_2d_service ||
+      !m_camera_2d_service->Software_Trigger(&error) )
+  {
+    Finish_Progress_Run(
+      false, "2D 相机触发失败：" + error);
+    return;
+  }
+  m_run_waiting_for_image = true;
+  m_run_image_deadline =
+    std::chrono::steady_clock::now() +
+    std::chrono::milliseconds(RUN_IMAGE_TIMEOUT_MS);
+  m_run_progress_panel->Set_Status(
+    "机械臂已到位，正在获取并保存 2D 图片...");
+}
+
+bool Robot_Model_Panel::Save_Run_Camera_Frame(
+  std::string *error_message)
+{
+  const auto frame =
+    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+  if( !frame )
+  {
+    if( error_message ) *error_message = "未收到 2D 相机图像";
+    return false;
+  }
+  Camera_2D_Display_Image converted;
+  if( !Convert_Camera_2D_Frame(*frame, &converted, error_message) )
+    return false;
+
+  wxImage image(
+    static_cast<int>(converted.width),
+    static_cast<int>(converted.height));
+  if( !image.IsOk() || !image.GetData() )
+  {
+    if( error_message ) *error_message = "创建待保存图像失败";
+    return false;
+  }
+  std::memcpy(
+    image.GetData(), converted.rgb.data(), converted.rgb.size());
+
+  const auto& points = m_teach_point_store.Points(m_current_model_id);
+  const std::size_t point_id =
+    m_run_point_index < points.size()
+      ? points[m_run_point_index].id
+      : m_run_point_index + 1;
+  std::ostringstream name;
+  name << "P" << std::setw(3) << std::setfill('0') << point_id
+       << "_frame_" << frame->m_frame_num << ".png";
+  const auto path = m_run_image_directory / name.str();
+  if( !image.SaveFile(wxString(path.wstring()), wxBITMAP_TYPE_PNG) )
+  {
+    if( error_message )
+      *error_message = "保存图片失败：" + path.string();
+    return false;
+  }
+  if( error_message ) error_message->clear();
+  return true;
+}
+
+void Robot_Model_Panel::On_Run_Timer(wxTimerEvent &)
+{
+  if( !m_run_active )
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  if( m_run_progress_panel )
+  {
+    m_run_progress_panel->Set_Elapsed(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - m_run_started_at));
+  }
+  if( !m_run_waiting_for_image )
+    return;
+
+  const auto frame =
+    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+  const bool has_new_frame =
+    frame && (!m_run_had_previous_frame ||
+              frame->m_frame_num != m_run_previous_frame_number);
+  if( has_new_frame )
+  {
+    std::string error;
+    if( !Save_Run_Camera_Frame(&error) )
+    {
+      Finish_Progress_Run(false, error);
+      return;
+    }
+    m_run_waiting_for_image = false;
+    ++m_run_point_index;
+    Dispatch_Next_Run_Point();
+    return;
+  }
+  if( now >= m_run_image_deadline )
+    Finish_Progress_Run(false, "等待 2D 相机新图像超时，Progress 已中止");
+}
+
+void Robot_Model_Panel::Request_Progress_Emergency_Stop()
+{
+  if( !m_run_active || m_run_stop_requested )
+    return;
+  m_run_stop_requested = true;
+  m_run_waiting_for_image = false;
+  if( m_run_progress_panel )
+  {
+    m_run_progress_panel->Set_Running(true, true);
+    m_run_progress_panel->Set_Status(
+      "急停命令已发送，正在等待机械臂确认停止", true);
+  }
+  try
+  {
+    if( !m_kuka_service )
+      throw std::runtime_error("KUKA service is unavailable.");
+    m_kuka_service->Request_Stop();
+  }
+  catch( const std::exception& error )
+  {
+    Finish_Progress_Run(
+      false, std::string("急停命令发送失败：") + error.what());
+  }
+}
+
+void Robot_Model_Panel::Finish_Progress_Run(
+  bool success,
+  const std::string &message)
+{
+  if( !m_run_active )
+    return;
+  if( m_run_timer.IsRunning() )
+    m_run_timer.Stop();
+  const auto elapsed =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - m_run_started_at);
+  m_run_active = false;
+  m_run_stop_requested = false;
+  m_run_waiting_for_motion = false;
+  m_run_waiting_for_image = false;
+  std::string final_message = message;
+  if( success && m_run_save_images )
+    final_message += "；图片目录：" + m_run_image_directory.string();
+  if( m_run_progress_panel )
+  {
+    m_run_progress_panel->Set_Elapsed(elapsed);
+    m_run_progress_panel->Set_Running(false);
+  }
+  Set_Run_Safety_Lock(false);
+  Refresh_Run_Readiness();
+  Refresh_Kuka_Command_Controls(m_kuka_service_status);
+  if( m_run_progress_panel )
+    m_run_progress_panel->Set_Status(final_message, !success);
 }
 
 void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)
@@ -3542,14 +3984,13 @@ void Robot_Model_Panel::Set_Progress_Dirty (bool dirty)
 void Robot_Model_Panel::Invalidate_Completed_Progress ( )
 {
   if( !m_progress_completed ) return;
+  if( m_run_active ) return;
   m_progress_completed = false;
-  if( m_flow_panel )
-  {
-    m_flow_panel->Clear_Progress_Points ( );
-  }
+  if( m_run_progress_panel )
+    m_run_progress_panel->Set_Progress_Ready (false);
   if( m_right_tool_panel )
   {
-    m_right_tool_panel->Set_Flow_Tool_Enabled (false);
+    m_right_tool_panel->Set_Run_Tool_Enabled (false);
   }
 }
 
@@ -3785,10 +4226,6 @@ void Robot_Model_Panel::Apply_Active_Tool ( )
   if( m_tool_panel )
   {
     m_tool_panel->Set_Tool_Coordinates (m_tool_configuration);
-  }
-  if( m_flow_panel )
-  {
-    m_flow_panel->Set_Tool_Coordinates (m_tool_configuration);
   }
   Apply_Tool_Visualization ( );
 }

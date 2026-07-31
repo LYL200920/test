@@ -31,8 +31,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     wxDefaultPosition, wxSize (68, 40));
   m_tcp_button = new wxButton (
     rail_panel, wxID_ANY, "TCP", wxDefaultPosition, wxSize (68, 40));
-  m_flow_button = new wxButton (
-    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"流程"),
+  m_run_button = new wxButton (
+    rail_panel, wxID_ANY, wxString::FromUTF8 (u8"运行"),
     wxDefaultPosition, wxSize (68, 40));
   m_camera_button = new wxButton (
     rail_panel, wxID_ANY, wxString::FromUTF8 (u8"相机"),
@@ -58,8 +58,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_robot_button->Enable (false);
   m_robot_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在设置中加载机械臂模型"));
-  m_flow_button->Enable (false);
-  m_flow_button->SetToolTip (
+  m_run_button->Enable (false);
+  m_run_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在 Teach 中完成 Progress 检查"));
 
   m_robot_button->Bind (
@@ -68,8 +68,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
     wxEVT_BUTTON, &Right_Tool_Panel::On_Teach_Click, this);
   m_tcp_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Tcp_Click, this);
-  m_flow_button->Bind (
-    wxEVT_BUTTON, &Right_Tool_Panel::On_Flow_Click, this);
+  m_run_button->Bind (
+    wxEVT_BUTTON, &Right_Tool_Panel::On_Run_Click, this);
   m_camera_button->Bind (
     wxEVT_BUTTON, &Right_Tool_Panel::On_Camera_Click, this);
   m_camera_2d_button->Bind (
@@ -85,7 +85,7 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   rail_sizer->Add (m_robot_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_teach_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_tcp_button, 0, wxEXPAND | wxBOTTOM, 4);
-  rail_sizer->Add (m_flow_button, 0, wxEXPAND | wxBOTTOM, 4);
+  rail_sizer->Add (m_run_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_camera_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_template_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
@@ -150,7 +150,7 @@ void Right_Tool_Panel::Set_Robot_Tool_Enabled (bool enabled)
   m_robot_tool_enabled = enabled;
   if( m_robot_button )
   {
-    m_robot_button->Enable (enabled);
+    m_robot_button->Enable (enabled && !m_run_locked);
     m_robot_button->SetToolTip (
       enabled ? wxString ( ) :
         wxString::FromUTF8 (u8"请先在设置中加载机械臂模型"));
@@ -167,7 +167,7 @@ void Right_Tool_Panel::Set_Camera_Tool_Enabled (bool enabled)
   m_camera_tool_enabled = enabled;
   if( m_camera_button )
   {
-    m_camera_button->Enable (enabled);
+    m_camera_button->Enable (enabled && !m_run_locked);
     m_camera_button->SetToolTip (
       enabled ? wxString ( ) :
         wxString::FromUTF8 (u8"请先在设置中选择并打开3D相机"));
@@ -185,7 +185,7 @@ void Right_Tool_Panel::Set_Template_2D_Tool_Enabled (bool enabled)
   m_template_2d_tool_enabled = enabled;
   if( m_template_2d_button )
   {
-    m_template_2d_button->Enable (enabled);
+    m_template_2d_button->Enable (enabled && !m_run_locked);
     m_template_2d_button->SetToolTip (
       enabled ? wxString ( ) :
         wxString::FromUTF8 (u8"请先在2D相机页连接相机"));
@@ -197,21 +197,43 @@ void Right_Tool_Panel::Set_Template_2D_Tool_Enabled (bool enabled)
   }
 }
 
-void Right_Tool_Panel::Set_Flow_Tool_Enabled (bool enabled)
+void Right_Tool_Panel::Set_Run_Tool_Enabled (bool enabled)
 {
-  m_flow_tool_enabled = enabled;
-  if( m_flow_button )
+  m_run_tool_enabled = enabled;
+  if( m_run_button )
   {
-    m_flow_button->Enable (enabled);
-    m_flow_button->SetToolTip (
+    m_run_button->Enable (enabled);
+    m_run_button->SetToolTip (
       enabled ? wxString ( ) :
         wxString::FromUTF8 (u8"请先在 Teach 中完成 Progress 检查"));
   }
   if( !enabled && m_right_expanded &&
-      m_active_page == Right_Tool_Page::Flow )
+      m_active_page == Right_Tool_Page::Run )
   {
     Set_Right_Expanded (false);
   }
+}
+
+void Right_Tool_Panel::Set_Run_Locked (bool locked)
+{
+  m_run_locked = locked;
+  if( locked )
+  {
+    m_active_page = Right_Tool_Page::Run;
+    if( m_right_page_book )
+      m_right_page_book->SetSelection (Page_Index (Right_Tool_Page::Run));
+    Set_Right_Expanded (true);
+  }
+  if( m_robot_button ) m_robot_button->Enable (!locked && m_robot_tool_enabled);
+  if( m_teach_button ) m_teach_button->Enable (!locked);
+  if( m_tcp_button ) m_tcp_button->Enable (!locked);
+  if( m_run_button ) m_run_button->Enable (!locked && m_run_tool_enabled);
+  if( m_camera_button ) m_camera_button->Enable (!locked && m_camera_tool_enabled);
+  if( m_camera_2d_button ) m_camera_2d_button->Enable (!locked);
+  if( m_template_2d_button )
+    m_template_2d_button->Enable (!locked && m_template_2d_tool_enabled);
+  if( m_point_cloud_button ) m_point_cloud_button->Enable (!locked);
+  if( m_tool_button ) m_tool_button->Enable (!locked);
 }
 
 void Right_Tool_Panel::Set_On_Width_Changed (
@@ -225,10 +247,11 @@ void Right_Tool_Panel::On_Tcp_Click (wxCommandEvent&)
   Toggle_Right_Page (Right_Tool_Page::Tcp);
 }
 
-void Right_Tool_Panel::On_Flow_Click (wxCommandEvent&)
+void Right_Tool_Panel::On_Run_Click (wxCommandEvent&)
 {
-  if( !m_flow_tool_enabled ) return;
-  Toggle_Right_Page (Right_Tool_Page::Flow);
+  if( m_run_locked ) return;
+  if( !m_run_tool_enabled ) return;
+  Toggle_Right_Page (Right_Tool_Page::Run);
 }
 
 void Right_Tool_Panel::On_Camera_Click (wxCommandEvent&)
@@ -351,12 +374,12 @@ void Right_Tool_Panel::Update_Button_Labels ( )
         ? "TCP >"
         : "TCP");
   }
-  if( m_flow_button )
+  if( m_run_button )
   {
-    m_flow_button->SetLabel (
-      m_right_expanded && m_active_page == Right_Tool_Page::Flow
-        ? wxString::FromUTF8 (u8"流程 >")
-        : wxString::FromUTF8 (u8"流程"));
+    m_run_button->SetLabel (
+      m_right_expanded && m_active_page == Right_Tool_Page::Run
+        ? wxString::FromUTF8 (u8"运行 >")
+        : wxString::FromUTF8 (u8"运行"));
   }
   if( m_robot_button )
   {

@@ -23,6 +23,8 @@
 #include <wx/timer.h>
 
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
@@ -36,7 +38,7 @@ class Camera_2D_Control_Panel;
 class Camera_2D_Image_View;
 class Camera_2D_Template_Panel;
 class Camera_Service;
-class Flow_Panel;
+class Run_Progress_Panel;
 class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class Teach_Point_Command_Panel;
@@ -96,6 +98,16 @@ private:
   void On_Stop_Trajectory(wxCommandEvent &event);
   void On_Trajectory_Speed_Changed(wxCommandEvent &event);
   void On_Trajectory_Timer(wxTimerEvent &event);
+  void On_Run_Timer(wxTimerEvent &event);
+  void Start_Progress_Run();
+  void Request_Progress_Emergency_Stop();
+  void Dispatch_Next_Run_Point();
+  void Capture_Run_Point_Image();
+  bool Save_Run_Camera_Frame(std::string *error_message);
+  void Finish_Progress_Run(bool success, const std::string &message);
+  void Set_Run_Safety_Lock(bool locked);
+  void Refresh_Run_Readiness();
+  bool Is_Robot_At_Home(std::string *reason = nullptr) const;
   void On_Robot_Display(wxCommandEvent &event);
   void On_Camera_Image_Display(wxCommandEvent &event);
   void On_Camera_2D_Image_Display(wxCommandEvent &event);
@@ -230,13 +242,15 @@ private:
   Camera_Control_Panel *m_camera_control_panel = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;
-  Flow_Panel *m_flow_panel = nullptr;
+  Camera_2D_Service *m_camera_2d_service = nullptr;
+  Run_Progress_Panel *m_run_progress_panel = nullptr;
   Joint_Control_Panel *m_joint_panel = nullptr;
   Cartesian_Pose_Panel *m_cartesian_pose_panel = nullptr;
   Teach_Point_Command_Panel *m_teach_point_command_panel = nullptr;
   Teach_Point_List_Panel *m_teach_point_list_panel = nullptr;
   Trajectory_Control_Panel *m_trajectory_panel = nullptr;
   wxTimer m_trajectory_timer;
+  wxTimer m_run_timer;
   std::vector<robot_model::Robot_Model_Info> m_models;
   robot_model::Robot_Trajectory_Session m_trajectory_session;
   robot_model::Robot_Teach_Point_Store m_teach_point_store;
@@ -258,6 +272,17 @@ private:
   bool m_waiting_for_playback_cloud = false;
   bool m_playback_cloud_switch_blocked = false;
   bool m_progress_completed = false;
+  bool m_run_active = false;
+  bool m_run_stop_requested = false;
+  bool m_run_waiting_for_motion = false;
+  bool m_run_waiting_for_image = false;
+  bool m_run_save_images = false;
+  std::size_t m_run_point_index = 0;
+  unsigned long long m_run_previous_frame_number = 0;
+  bool m_run_had_previous_frame = false;
+  std::chrono::steady_clock::time_point m_run_started_at;
+  std::chrono::steady_clock::time_point m_run_image_deadline;
+  std::filesystem::path m_run_image_directory;
   int m_expanded_teach_point_width = 240;
 };
 

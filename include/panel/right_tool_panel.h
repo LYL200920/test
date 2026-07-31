@@ -13,7 +13,7 @@ enum class Right_Tool_Page
   Robot = 0,
   Teach = 1,
   Tcp = 2,
-  Flow = 3,
+  Run = 3,
   Camera = 4,
   Camera2D = 5,
   Template2D = 6,
@@ -30,7 +30,8 @@ public:
   void Add_Page (Right_Tool_Page page, wxWindow* window);
   void Set_Camera_Tool_Enabled (bool enabled);
   void Set_Template_2D_Tool_Enabled (bool enabled);
-  void Set_Flow_Tool_Enabled (bool enabled);
+  void Set_Run_Tool_Enabled (bool enabled);
+  void Set_Run_Locked (bool locked);
   void Set_Robot_Tool_Enabled (bool enabled);
   void Set_On_Width_Changed (
     std::function<void (int)> callback);
@@ -38,7 +39,7 @@ public:
 private:
   void On_Tcp_Click (wxCommandEvent& event);
   void On_Teach_Click (wxCommandEvent& event);
-  void On_Flow_Click (wxCommandEvent& event);
+  void On_Run_Click (wxCommandEvent& event);
   void On_Camera_Click (wxCommandEvent& event);
   void On_Camera_2D_Click (wxCommandEvent& event);
   void On_Template_2D_Click (wxCommandEvent& event);
@@ -55,7 +56,7 @@ private:
 private:
   wxButton* m_tcp_button = nullptr;
   wxButton* m_teach_button = nullptr;
-  wxButton* m_flow_button = nullptr;
+  wxButton* m_run_button = nullptr;
   wxButton* m_camera_button = nullptr;
   wxButton* m_camera_2d_button = nullptr;
   wxButton* m_template_2d_button = nullptr;
@@ -69,7 +70,8 @@ private:
   bool m_right_expanded = false;
   bool m_camera_tool_enabled = false;
   bool m_template_2d_tool_enabled = false;
-  bool m_flow_tool_enabled = false;
+  bool m_run_tool_enabled = false;
+  bool m_run_locked = false;
   bool m_robot_tool_enabled = false;
   std::function<void (int)> m_on_width_changed;
 };
