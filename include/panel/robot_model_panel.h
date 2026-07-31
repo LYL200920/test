@@ -23,11 +23,13 @@
 #include <wx/timer.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 class Right_Tool_Panel;
@@ -51,6 +53,7 @@ class wxSlider;
 class wxSimplebook;
 class wxSplitterWindow;
 class wxToggleButton;
+namespace jutze_camera { struct camera_frame; }
 
 wxDECLARE_EVENT(wxEVT_KUKA_MODEL_STATE, wxThreadEvent);
 wxDECLARE_EVENT(wxEVT_KUKA_SERVICE_STATUS, wxThreadEvent);
@@ -103,7 +106,8 @@ private:
   void Request_Progress_Emergency_Stop();
   void Dispatch_Next_Run_Point();
   void Capture_Run_Point_Image();
-  bool Save_Run_Camera_Frame(std::string *error_message);
+  void Start_Run_Image_Processing();
+  void On_Run_Image_Processing_Result(wxThreadEvent &event);
   void Finish_Progress_Run(bool success, const std::string &message);
   void Set_Run_Safety_Lock(bool locked);
   void Refresh_Run_Readiness();
@@ -188,6 +192,12 @@ private:
   void Apply_Tool_Visualization();
 
 private:
+  struct Run_Captured_Frame
+  {
+    std::shared_ptr<const jutze_camera::camera_frame> frame;
+    robot_model::Robot_Teach_Point point;
+  };
+
   struct Playback_Cloud_Switch
   {
     std::size_t frame_index = 0;
@@ -285,6 +295,9 @@ private:
   std::chrono::steady_clock::time_point m_run_started_at;
   std::chrono::steady_clock::time_point m_run_image_deadline;
   std::filesystem::path m_run_image_directory;
+  std::vector<Run_Captured_Frame> m_run_captured_frames;
+  std::thread m_run_image_processing_thread;
+  std::atomic<bool> m_run_image_processing{false};
   int m_expanded_teach_point_width = 240;
 };
 

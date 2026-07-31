@@ -48,12 +48,14 @@
 #include <filesystem>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
 
 wxDEFINE_EVENT(wxEVT_KUKA_MODEL_STATE, wxThreadEvent);
 wxDEFINE_EVENT(wxEVT_KUKA_SERVICE_STATUS, wxThreadEvent);
+wxDEFINE_EVENT(wxEVT_RUN_IMAGE_PROCESSING_RESULT, wxThreadEvent);
 
 namespace
 {
@@ -73,6 +75,387 @@ constexpr double RUN_HOME_POSITION_TOLERANCE_MM = 2.0;
 constexpr double RUN_HOME_ANGLE_TOLERANCE_DEG = 1.0;
 constexpr int RUN_TIMER_INTERVAL_MS = 40;
 constexpr int RUN_IMAGE_TIMEOUT_MS = 3000;
+constexpr int RUN_MOSAIC_MAX_DIMENSION = 6000;
+constexpr std::size_t RUN_MOSAIC_MAX_PIXELS = 20000000;
+
+struct Run_Image_Processing_Result
+{
+  bool success = false;
+  std::string message;
+  Camera_2D_Display_Image mosaic;
+};
+
+struct Mosaic_Placed_Image
+{
+  Camera_2D_Display_Image image;
+  double center_u = 0.0;
+  double center_v = 0.0;
+  double horizontal_u = 0.0;
+  double horizontal_v = 0.0;
+  double vertical_u = 0.0;
+  double vertical_v = 0.0;
+};
+
+double dot3(
+  const std::array<double, 3>& lhs,
+  const std::array<double, 3>& rhs)
+{
+  return lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2];
+}
+
+double norm3(const std::array<double, 3>& value)
+{
+  return std::sqrt(dot3(value, value));
+}
+
+std::array<double, 3> normalized3(
+  const std::array<double, 3>& value)
+{
+  const double length = norm3(value);
+  if( length <= 1.0e-12 ) return {0.0, 0.0, 0.0};
+  return {
+    value[0] / length,
+    value[1] / length,
+    value[2] / length};
+}
+
+std::array<double, 3> matrix_axis(
+  const robot_model::Matrix4& matrix,
+  std::size_t axis,
+  double length)
+{
+  return {
+    matrix[0][axis] * length,
+    matrix[1][axis] * length,
+    matrix[2][axis] * length};
+}
+
+bool save_rgb_image(
+  const Camera_2D_Display_Image& image_data,
+  const std::filesystem::path& path,
+  std::string* error_message)
+{
+  wxImage image(
+    static_cast<int>(image_data.width),
+    static_cast<int>(image_data.height));
+  if( !image.IsOk() || !image.GetData() ||
+      image_data.rgb.size() !=
+        static_cast<std::size_t>(image_data.width) *
+        image_data.height * 3 )
+  {
+    if( error_message ) *error_message = "创建待保存图像失败";
+    return false;
+  }
+  std::memcpy(
+    image.GetData(), image_data.rgb.data(), image_data.rgb.size());
+  if( !image.SaveFile(wxString(path.wstring()), wxBITMAP_TYPE_PNG) )
+  {
+    if( error_message )
+      *error_message = "保存图片失败：" + path.string();
+    return false;
+  }
+  return true;
+}
+
+Camera_2D_Display_Image make_image_preview(
+  const Camera_2D_Display_Image& source,
+  unsigned int maximum_width,
+  unsigned int maximum_height)
+{
+  if( source.width == 0 || source.height == 0 ||
+      source.rgb.empty() )
+    return {};
+  const double scale = std::min(
+    1.0,
+    std::min(
+      static_cast<double>(maximum_width) / source.width,
+      static_cast<double>(maximum_height) / source.height));
+  Camera_2D_Display_Image preview;
+  preview.width = std::max(
+    1U, static_cast<unsigned int>(std::lround(source.width * scale)));
+  preview.height = std::max(
+    1U, static_cast<unsigned int>(std::lround(source.height * scale)));
+  preview.rgb.resize(
+    static_cast<std::size_t>(preview.width) * preview.height * 3);
+  for( unsigned int y = 0; y < preview.height; ++y )
+  {
+    const unsigned int source_y = std::min(
+      source.height - 1,
+      static_cast<unsigned int>(
+        static_cast<std::uint64_t>(y) * source.height /
+        preview.height));
+    for( unsigned int x = 0; x < preview.width; ++x )
+    {
+      const unsigned int source_x = std::min(
+        source.width - 1,
+        static_cast<unsigned int>(
+          static_cast<std::uint64_t>(x) * source.width /
+          preview.width));
+      const std::size_t source_index =
+        (static_cast<std::size_t>(source_y) * source.width +
+         source_x) * 3;
+      const std::size_t target_index =
+        (static_cast<std::size_t>(y) * preview.width + x) * 3;
+      preview.rgb[target_index] = source.rgb[source_index];
+      preview.rgb[target_index + 1] = source.rgb[source_index + 1];
+      preview.rgb[target_index + 2] = source.rgb[source_index + 2];
+    }
+  }
+  return preview;
+}
+
+bool build_pose_mosaic(
+  std::vector<std::pair<
+    Camera_2D_Display_Image,
+    robot_model::Robot_Teach_Point>> captures,
+  const robot_model::Fov_Visualization_Configuration& fov_configuration,
+  Camera_2D_Display_Image* output,
+  std::string* error_message)
+{
+  if( !output || captures.empty() )
+  {
+    if( error_message ) *error_message = "没有可用于拼图的运动点图像";
+    return false;
+  }
+  auto fov = fov_configuration;
+  robot_model::Tool_Visualization_Configuration wrapper;
+  wrapper.fov = fov;
+  robot_model::Normalize_Tool_Visualization_Configuration(&wrapper);
+  fov = wrapper.fov;
+
+  struct World_Image
+  {
+    Camera_2D_Display_Image image;
+    std::array<double, 3> center;
+    std::array<double, 3> horizontal;
+    std::array<double, 3> vertical;
+  };
+  std::vector<World_Image> world_images;
+  world_images.reserve(captures.size());
+  for( auto& capture : captures )
+  {
+    auto& image = capture.first;
+    const auto& point = capture.second;
+    if( image.width == 0 || image.height == 0 || !point.has_world_pose )
+      continue;
+    const auto world_from_camera = robot_model::Multiply_Matrices(
+      robot_model::Build_Zyx_Pose_Matrix(point.world_pose),
+      robot_model::Build_Zyx_Pose_Matrix(
+        point.flange_from_coordinate_pose));
+    const double image_aspect =
+      static_cast<double>(image.width) / image.height;
+    const double width_length_aspect =
+      fov.width_mm / fov.length_mm;
+    const double length_width_aspect =
+      fov.length_mm / fov.width_mm;
+    const bool horizontal_is_length =
+      std::abs(std::log(image_aspect / length_width_aspect)) <
+      std::abs(std::log(image_aspect / width_length_aspect));
+    const auto horizontal_axis = robot_model::Coordinate_Axis_Index(
+      horizontal_is_length ? fov.length_axis : fov.width_axis);
+    const auto vertical_axis = robot_model::Coordinate_Axis_Index(
+      horizontal_is_length ? fov.width_axis : fov.length_axis);
+    const double horizontal_span =
+      horizontal_is_length ? fov.length_mm : fov.width_mm;
+    const double vertical_span =
+      horizontal_is_length ? fov.width_mm : fov.length_mm;
+    world_images.push_back({
+      std::move(image),
+      {
+        world_from_camera[0][3],
+        world_from_camera[1][3],
+        world_from_camera[2][3]},
+      matrix_axis(world_from_camera, horizontal_axis, horizontal_span),
+      matrix_axis(world_from_camera, vertical_axis, vertical_span)});
+  }
+  if( world_images.empty() )
+  {
+    if( error_message ) *error_message = "运动点图像或位姿数据无效";
+    return false;
+  }
+
+  const auto origin = world_images.front().center;
+  const auto basis_u = normalized3(world_images.front().horizontal);
+  const auto basis_v = normalized3(world_images.front().vertical);
+  if( norm3(basis_u) <= 0.0 || norm3(basis_v) <= 0.0 )
+  {
+    if( error_message ) *error_message = "相机图像平面轴向无效";
+    return false;
+  }
+
+  std::vector<Mosaic_Placed_Image> placed;
+  placed.reserve(world_images.size());
+  double minimum_u = std::numeric_limits<double>::max();
+  double maximum_u = std::numeric_limits<double>::lowest();
+  double minimum_v = std::numeric_limits<double>::max();
+  double maximum_v = std::numeric_limits<double>::lowest();
+  double native_pixels_per_mm = std::numeric_limits<double>::max();
+  for( auto& item : world_images )
+  {
+    const std::array<double, 3> relative = {
+      item.center[0] - origin[0],
+      item.center[1] - origin[1],
+      item.center[2] - origin[2]};
+    Mosaic_Placed_Image projected;
+    projected.image = std::move(item.image);
+    projected.center_u = dot3(relative, basis_u);
+    projected.center_v = dot3(relative, basis_v);
+    projected.horizontal_u = dot3(item.horizontal, basis_u);
+    projected.horizontal_v = dot3(item.horizontal, basis_v);
+    projected.vertical_u = dot3(item.vertical, basis_u);
+    projected.vertical_v = dot3(item.vertical, basis_v);
+    native_pixels_per_mm = std::min(
+      native_pixels_per_mm,
+      std::min(
+        static_cast<double>(projected.image.width) /
+          std::max(norm3(item.horizontal), 1.0e-9),
+        static_cast<double>(projected.image.height) /
+          std::max(norm3(item.vertical), 1.0e-9)));
+    for( const double sx : {-0.5, 0.5} )
+    {
+      for( const double sy : {-0.5, 0.5} )
+      {
+        const double u = projected.center_u +
+          sx * projected.horizontal_u + sy * projected.vertical_u;
+        const double v = projected.center_v +
+          sx * projected.horizontal_v + sy * projected.vertical_v;
+        minimum_u = std::min(minimum_u, u);
+        maximum_u = std::max(maximum_u, u);
+        minimum_v = std::min(minimum_v, v);
+        maximum_v = std::max(maximum_v, v);
+      }
+    }
+    placed.push_back(std::move(projected));
+  }
+
+  const double span_u = std::max(maximum_u - minimum_u, 1.0e-6);
+  const double span_v = std::max(maximum_v - minimum_v, 1.0e-6);
+  double pixels_per_mm = native_pixels_per_mm;
+  pixels_per_mm = std::min(
+    pixels_per_mm,
+    static_cast<double>(RUN_MOSAIC_MAX_DIMENSION) /
+      std::max(span_u, span_v));
+  pixels_per_mm = std::min(
+    pixels_per_mm,
+    std::sqrt(
+      static_cast<double>(RUN_MOSAIC_MAX_PIXELS) /
+      (span_u * span_v)));
+  if( !std::isfinite(pixels_per_mm) || pixels_per_mm <= 0.0 )
+  {
+    if( error_message ) *error_message = "计算拼图分辨率失败";
+    return false;
+  }
+  const unsigned int output_width = static_cast<unsigned int>(
+    std::max(1.0, std::ceil(span_u * pixels_per_mm)));
+  const unsigned int output_height = static_cast<unsigned int>(
+    std::max(1.0, std::ceil(span_v * pixels_per_mm)));
+  Camera_2D_Display_Image mosaic;
+  mosaic.width = output_width;
+  mosaic.height = output_height;
+  mosaic.rgb.assign(
+    static_cast<std::size_t>(output_width) * output_height * 3, 0);
+  std::vector<std::uint16_t> weights(
+    static_cast<std::size_t>(output_width) * output_height, 0);
+
+  for( const auto& item : placed )
+  {
+    const double determinant =
+      item.horizontal_u * item.vertical_v -
+      item.horizontal_v * item.vertical_u;
+    if( std::abs(determinant) <= 1.0e-9 )
+      continue;
+    double image_min_u = std::numeric_limits<double>::max();
+    double image_max_u = std::numeric_limits<double>::lowest();
+    double image_min_v = std::numeric_limits<double>::max();
+    double image_max_v = std::numeric_limits<double>::lowest();
+    for( const double sx : {-0.5, 0.5} )
+    {
+      for( const double sy : {-0.5, 0.5} )
+      {
+        const double u = item.center_u +
+          sx * item.horizontal_u + sy * item.vertical_u;
+        const double v = item.center_v +
+          sx * item.horizontal_v + sy * item.vertical_v;
+        image_min_u = std::min(image_min_u, u);
+        image_max_u = std::max(image_max_u, u);
+        image_min_v = std::min(image_min_v, v);
+        image_max_v = std::max(image_max_v, v);
+      }
+    }
+    const int x0 = std::max(
+      0, static_cast<int>(std::floor(
+        (image_min_u - minimum_u) * pixels_per_mm)));
+    const int x1 = std::min(
+      static_cast<int>(output_width) - 1,
+      static_cast<int>(std::ceil(
+        (image_max_u - minimum_u) * pixels_per_mm)));
+    const int y0 = std::max(
+      0, static_cast<int>(std::floor(
+        (image_min_v - minimum_v) * pixels_per_mm)));
+    const int y1 = std::min(
+      static_cast<int>(output_height) - 1,
+      static_cast<int>(std::ceil(
+        (image_max_v - minimum_v) * pixels_per_mm)));
+    for( int y = y0; y <= y1; ++y )
+    {
+      const double plane_v =
+        minimum_v + (static_cast<double>(y) + 0.5) / pixels_per_mm;
+      for( int x = x0; x <= x1; ++x )
+      {
+        const double plane_u =
+          minimum_u + (static_cast<double>(x) + 0.5) / pixels_per_mm;
+        const double du = plane_u - item.center_u;
+        const double dv = plane_v - item.center_v;
+        const double sx =
+          (du * item.vertical_v - dv * item.vertical_u) / determinant;
+        const double sy =
+          (item.horizontal_u * dv - item.horizontal_v * du) / determinant;
+        if( sx < -0.5 || sx > 0.5 || sy < -0.5 || sy > 0.5 )
+          continue;
+        const auto source_x = static_cast<unsigned int>(std::clamp(
+          (sx + 0.5) * static_cast<double>(item.image.width - 1),
+          0.0,
+          static_cast<double>(item.image.width - 1)));
+        const auto source_y = static_cast<unsigned int>(std::clamp(
+          (sy + 0.5) * static_cast<double>(item.image.height - 1),
+          0.0,
+          static_cast<double>(item.image.height - 1)));
+        const std::size_t source_index =
+          (static_cast<std::size_t>(source_y) * item.image.width +
+           source_x) * 3;
+        const std::size_t target_pixel =
+          static_cast<std::size_t>(y) * output_width +
+          static_cast<std::size_t>(x);
+        const std::size_t target_index = target_pixel * 3;
+        const double edge_distance = std::min(
+          0.5 - std::abs(sx), 0.5 - std::abs(sy));
+        const std::uint16_t new_weight = static_cast<std::uint16_t>(
+          std::clamp(
+            1.0 + edge_distance * 256.0,
+            1.0,
+            64.0));
+        const std::uint16_t old_weight = weights[target_pixel];
+        const unsigned int total_weight =
+          static_cast<unsigned int>(old_weight) + new_weight;
+        for( std::size_t channel = 0; channel < 3; ++channel )
+        {
+          mosaic.rgb[target_index + channel] =
+            static_cast<std::uint8_t>(
+              (static_cast<unsigned int>(
+                 mosaic.rgb[target_index + channel]) * old_weight +
+               static_cast<unsigned int>(
+                 item.image.rgb[source_index + channel]) * new_weight) /
+              total_weight);
+        }
+        weights[target_pixel] = static_cast<std::uint16_t>(
+          std::min<unsigned int>(total_weight, 65535));
+      }
+    }
+  }
+  *output = std::move(mosaic);
+  if( error_message ) error_message->clear();
+  return true;
+}
 
 std::size_t frame_count_for_one_meter_per_second (
   const robot_model::XyzabcPose& start,
@@ -259,6 +642,10 @@ Robot_Model_Panel::Robot_Model_Panel (
   Bind (
     wxEVT_KUKA_SERVICE_STATUS,
     &Robot_Model_Panel::On_Kuka_Service_Status,
+    this);
+  Bind (
+    wxEVT_RUN_IMAGE_PROCESSING_RESULT,
+    &Robot_Model_Panel::On_Run_Image_Processing_Result,
     this);
 
   kuka::Service_Observer kuka_observer;
@@ -776,6 +1163,8 @@ Robot_Model_Panel::~Robot_Model_Panel()
 {
   if( m_run_timer.IsRunning() )
     m_run_timer.Stop();
+  if( m_run_image_processing_thread.joinable() )
+    m_run_image_processing_thread.join();
   if( m_kuka_service )
   {
     m_kuka_service->Unsubscribe (m_kuka_observer_token);
@@ -790,6 +1179,10 @@ Robot_Model_Panel::~Robot_Model_Panel()
   Unbind (
     wxEVT_KUKA_SERVICE_STATUS,
     &Robot_Model_Panel::On_Kuka_Service_Status,
+    this);
+  Unbind (
+    wxEVT_RUN_IMAGE_PROCESSING_RESULT,
+    &Robot_Model_Panel::On_Run_Image_Processing_Result,
     this);
   Unbind (
     wxEVT_TIMER,
@@ -2175,6 +2568,16 @@ void Robot_Model_Panel::Start_Progress_Run()
   if( m_run_active || !m_progress_completed ||
       !m_run_progress_panel || !m_kuka_service )
     return;
+  if( m_run_image_processing.load() )
+  {
+    m_run_progress_panel->Set_Status(
+      "上一轮图片与拼图仍在后台处理中，请稍候", true);
+    return;
+  }
+  if( m_run_image_processing_thread.joinable() )
+    m_run_image_processing_thread.join();
+  m_run_captured_frames.clear();
+  m_run_progress_panel->Clear_Mosaic();
 
   std::string reason;
   if( !Is_Robot_At_Home(&reason) )
@@ -2196,7 +2599,13 @@ void Robot_Model_Panel::Start_Progress_Run()
     m_run_progress_panel->Selected_Motion_Mode() ==
     Run_Progress_Panel::Motion_Mode::Linear;
   m_run_motion_speed = m_run_progress_panel->Motion_Speed();
-  if( m_run_save_images )
+  const bool has_motion_point = std::any_of(
+    points.begin(), points.end(),
+    [](const robot_model::Robot_Teach_Point& point)
+    {
+      return point.type == robot_model::Robot_Teach_Point_Type::Motion;
+    });
+  if( has_motion_point )
   {
     if( !m_camera_2d_service || !m_camera_2d_service->Is_Grabbing() )
     {
@@ -2310,7 +2719,7 @@ void Robot_Model_Panel::Capture_Run_Point_Image()
     m_run_point_index < points.size() &&
     points[m_run_point_index].type ==
       robot_model::Robot_Teach_Point_Type::Motion;
-  if( !m_run_save_images || !is_motion_point )
+  if( !is_motion_point )
   {
     ++m_run_point_index;
     Dispatch_Next_Run_Point();
@@ -2334,51 +2743,7 @@ void Robot_Model_Panel::Capture_Run_Point_Image()
     std::chrono::steady_clock::now() +
     std::chrono::milliseconds(RUN_IMAGE_TIMEOUT_MS);
   m_run_progress_panel->Set_Status(
-    "机械臂已到位，正在获取并保存 2D 图片...");
-}
-
-bool Robot_Model_Panel::Save_Run_Camera_Frame(
-  std::string *error_message)
-{
-  const auto frame =
-    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
-  if( !frame )
-  {
-    if( error_message ) *error_message = "未收到 2D 相机图像";
-    return false;
-  }
-  Camera_2D_Display_Image converted;
-  if( !Convert_Camera_2D_Frame(*frame, &converted, error_message) )
-    return false;
-
-  wxImage image(
-    static_cast<int>(converted.width),
-    static_cast<int>(converted.height));
-  if( !image.IsOk() || !image.GetData() )
-  {
-    if( error_message ) *error_message = "创建待保存图像失败";
-    return false;
-  }
-  std::memcpy(
-    image.GetData(), converted.rgb.data(), converted.rgb.size());
-
-  const auto& points = m_teach_point_store.Points(m_current_model_id);
-  const std::size_t point_id =
-    m_run_point_index < points.size()
-      ? points[m_run_point_index].id
-      : m_run_point_index + 1;
-  std::ostringstream name;
-  name << "P" << std::setw(3) << std::setfill('0') << point_id
-       << "_frame_" << frame->m_frame_num << ".png";
-  const auto path = m_run_image_directory / name.str();
-  if( !image.SaveFile(wxString(path.wstring()), wxBITMAP_TYPE_PNG) )
-  {
-    if( error_message )
-      *error_message = "保存图片失败：" + path.string();
-    return false;
-  }
-  if( error_message ) error_message->clear();
-  return true;
+    "机械臂已到位，正在获取 2D 图片...");
 }
 
 void Robot_Model_Panel::On_Run_Timer(wxTimerEvent &)
@@ -2402,12 +2767,16 @@ void Robot_Model_Panel::On_Run_Timer(wxTimerEvent &)
               frame->m_frame_num != m_run_previous_frame_number);
   if( has_new_frame )
   {
-    std::string error;
-    if( !Save_Run_Camera_Frame(&error) )
+    const auto& points = m_teach_point_store.Points(m_current_model_id);
+    if( m_run_point_index >= points.size() )
     {
-      Finish_Progress_Run(false, error);
+      Finish_Progress_Run(false, "运动点索引无效，Progress 已中止");
       return;
     }
+    // Keep the SDK-owned frame alive and continue robot motion immediately.
+    // Conversion, PNG compression, disk I/O and mosaic construction run only
+    // after robot motion completes, on a worker thread.
+    m_run_captured_frames.push_back({frame, points[m_run_point_index]});
     m_run_waiting_for_image = false;
     ++m_run_point_index;
     Dispatch_Next_Run_Point();
@@ -2442,6 +2811,146 @@ void Robot_Model_Panel::Request_Progress_Emergency_Stop()
   }
 }
 
+void Robot_Model_Panel::Start_Run_Image_Processing()
+{
+  if( m_run_captured_frames.empty() || m_run_image_processing.load() )
+    return;
+  if( m_run_image_processing_thread.joinable() )
+    m_run_image_processing_thread.join();
+
+  auto captures = std::move(m_run_captured_frames);
+  m_run_captured_frames.clear();
+  const auto image_directory = m_run_image_directory;
+  const bool save_original_images = m_run_save_images;
+  const auto fov_configuration =
+    m_tool_visualization_configuration.fov;
+  m_run_image_processing.store(true);
+  if( m_run_progress_panel )
+  {
+    m_run_progress_panel->Set_Status(
+      "机械臂运动已完成，正在后台保存图片并生成拼图...");
+  }
+  m_run_image_processing_thread = std::thread(
+    [this,
+     captures = std::move(captures),
+     image_directory,
+     save_original_images,
+     fov_configuration]() mutable
+    {
+      Run_Image_Processing_Result result;
+      try
+      {
+        std::vector<std::pair<
+          Camera_2D_Display_Image,
+          robot_model::Robot_Teach_Point>> converted;
+        converted.reserve(captures.size());
+        std::string error;
+        for( auto& capture : captures )
+        {
+          if( !capture.frame )
+          {
+            result.message = "后台处理失败：运动点图像为空";
+            break;
+          }
+          Camera_2D_Display_Image image;
+          if( !Convert_Camera_2D_Frame(*capture.frame, &image, &error) )
+          {
+            result.message = "后台图像转换失败：" + error;
+            break;
+          }
+          if( save_original_images )
+          {
+            std::ostringstream name;
+            name << "P" << std::setw(3) << std::setfill('0')
+                 << capture.point.id
+                 << "_frame_" << capture.frame->m_frame_num << ".png";
+            if( !save_rgb_image(
+                  image, image_directory / name.str(), &error) )
+            {
+              result.message = "后台" + error;
+              break;
+            }
+          }
+          converted.emplace_back(
+            std::move(image), std::move(capture.point));
+          capture.frame.reset();
+        }
+
+        if( result.message.empty() )
+        {
+          const std::size_t converted_count = converted.size();
+          if( !build_pose_mosaic(
+                std::move(converted),
+                fov_configuration,
+                &result.mosaic,
+                &error) )
+          {
+            result.message = "拼图失败：" + error;
+          }
+          else if( !save_rgb_image(
+                     result.mosaic,
+                     image_directory / "mosaic.png",
+                     &error) )
+          {
+            result.message = "拼图" + error;
+          }
+          else
+          {
+            result.success = true;
+            result.message =
+              "图片与拼图处理完成，共 " +
+              std::to_string(converted_count) +
+              " 个运动点；目录：" + image_directory.string();
+            result.mosaic =
+              make_image_preview(result.mosaic, 360, 260);
+          }
+        }
+      }
+      catch( const std::exception& error )
+      {
+        result.success = false;
+        result.message =
+          std::string("后台图片/拼图处理异常：") + error.what();
+      }
+
+      auto* event =
+        new wxThreadEvent(wxEVT_RUN_IMAGE_PROCESSING_RESULT);
+      event->SetPayload(std::move(result));
+      wxQueueEvent(this, event);
+    });
+}
+
+void Robot_Model_Panel::On_Run_Image_Processing_Result(
+  wxThreadEvent& event)
+{
+  auto result =
+    event.GetPayload<Run_Image_Processing_Result>();
+  if( m_run_image_processing_thread.joinable() )
+    m_run_image_processing_thread.join();
+  m_run_image_processing.store(false);
+  if( m_run_progress_panel )
+  {
+    m_run_progress_panel->Set_Status(
+      result.message, !result.success);
+    if( result.success && result.mosaic.width > 0 &&
+        result.mosaic.height > 0 )
+    {
+      wxImage image(
+        static_cast<int>(result.mosaic.width),
+        static_cast<int>(result.mosaic.height));
+      if( image.IsOk() && image.GetData() )
+      {
+        std::memcpy(
+          image.GetData(),
+          result.mosaic.rgb.data(),
+          result.mosaic.rgb.size());
+        m_run_progress_panel->Set_Mosaic_Image(image);
+      }
+    }
+  }
+  Refresh_Run_Readiness();
+}
+
 void Robot_Model_Panel::Finish_Progress_Run(
   bool success,
   const std::string &message)
@@ -2458,8 +2967,14 @@ void Robot_Model_Panel::Finish_Progress_Run(
   m_run_waiting_for_motion = false;
   m_run_waiting_for_image = false;
   std::string final_message = message;
-  if( success && m_run_save_images )
-    final_message += "；图片目录：" + m_run_image_directory.string();
+  if( success )
+  {
+    final_message += m_run_captured_frames.empty()
+      ? "；没有运动点图片可处理"
+      : (m_run_save_images
+          ? "；原图将在后台保存并生成拼图"
+          : "；将在后台生成拼图");
+  }
   if( m_run_progress_panel )
   {
     m_run_progress_panel->Set_Elapsed(elapsed);
@@ -2470,6 +2985,14 @@ void Robot_Model_Panel::Finish_Progress_Run(
   Refresh_Kuka_Command_Controls(m_kuka_service_status);
   if( m_run_progress_panel )
     m_run_progress_panel->Set_Status(final_message, !success);
+  if( success && !m_run_captured_frames.empty() )
+  {
+    Start_Run_Image_Processing();
+  }
+  else if( !success )
+  {
+    m_run_captured_frames.clear();
+  }
 }
 
 void Robot_Model_Panel::On_Play_Trajectory (wxCommandEvent&)

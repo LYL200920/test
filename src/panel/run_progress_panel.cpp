@@ -3,12 +3,15 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/image.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
+#include <wx/statbmp.h>
 #include <wx/stattext.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <cmath>
 #include <utility>
 
 namespace
@@ -36,7 +39,7 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_ct_value->SetFont(ct_font);
 
   m_save_images = new wxCheckBox(
-    this, wxID_ANY, wxString::FromUTF8(u8"保存每个运动点的 2D 图片"));
+    this, wxID_ANY, wxString::FromUTF8(u8"保存运动点原图"));
 
   auto *motion_row = new wxBoxSizer(wxHORIZONTAL);
   motion_row->Add(
@@ -103,6 +106,12 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_status = new wxStaticText(
     this, wxID_ANY, wxString::FromUTF8(u8"请先在 Teach 中完成 Progress"));
   m_status->Wrap(360);
+  m_mosaic_title = new wxStaticText(
+    this, wxID_ANY, wxString::FromUTF8(u8"拼图预览"));
+  m_mosaic_title->Hide();
+  m_mosaic_bitmap = new wxStaticBitmap(
+    this, wxID_ANY, wxNullBitmap);
+  m_mosaic_bitmap->Hide();
 
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 10);
@@ -113,10 +122,48 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_run_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_status, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(
+    m_mosaic_title, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
+  sizer->Add(
+    m_mosaic_bitmap, 0,
+    wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->AddStretchSpacer(1);
   SetSizer(sizer);
   Refresh_Motion_Controls();
   Refresh_Run_Button();
+}
+
+void Run_Progress_Panel::Clear_Mosaic()
+{
+  if (m_mosaic_bitmap)
+  {
+    m_mosaic_bitmap->SetBitmap(wxNullBitmap);
+    m_mosaic_bitmap->Hide();
+  }
+  if (m_mosaic_title)
+    m_mosaic_title->Hide();
+  Layout();
+}
+
+void Run_Progress_Panel::Set_Mosaic_Image(const wxImage &image)
+{
+  if (!m_mosaic_bitmap || !image.IsOk())
+    return;
+  const double scale = std::min(
+    1.0,
+    std::min(
+      360.0 / static_cast<double>(image.GetWidth()),
+      260.0 / static_cast<double>(image.GetHeight())));
+  const int width = std::max(
+    1, static_cast<int>(std::lround(image.GetWidth() * scale)));
+  const int height = std::max(
+    1, static_cast<int>(std::lround(image.GetHeight() * scale)));
+  m_mosaic_bitmap->SetBitmap(
+    wxBitmap(image.Scale(width, height, wxIMAGE_QUALITY_HIGH)));
+  m_mosaic_bitmap->Show();
+  if (m_mosaic_title)
+    m_mosaic_title->Show();
+  Layout();
 }
 
 void Run_Progress_Panel::Set_Callbacks(Callbacks callbacks)
