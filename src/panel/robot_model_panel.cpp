@@ -356,8 +356,13 @@ bool build_pose_mosaic(
   mosaic.height = output_height;
   mosaic.rgb.assign(
     static_cast<std::size_t>(output_width) * output_height * 3, 0);
-  std::vector<std::uint16_t> weights(
-    static_cast<std::size_t>(output_width) * output_height, 0);
+  // Keep a sharp seam in overlap regions. Averaging two slightly misaligned
+  // robot-positioned images creates a wide double edge; selecting the source
+  // whose pixel is farther from its image border confines any residual pose
+  // error to one seam and preserves the original camera detail.
+  std::vector<float> best_source_scores(
+    static_cast<std::size_t>(output_width) * output_height,
+    -std::numeric_limits<float>::infinity());
 
   for( const auto& item : placed )
   {
@@ -429,28 +434,16 @@ bool build_pose_mosaic(
           static_cast<std::size_t>(y) * output_width +
           static_cast<std::size_t>(x);
         const std::size_t target_index = target_pixel * 3;
-        const double edge_distance = std::min(
-          0.5 - std::abs(sx), 0.5 - std::abs(sy));
-        const std::uint16_t new_weight = static_cast<std::uint16_t>(
-          std::clamp(
-            1.0 + edge_distance * 256.0,
-            1.0,
-            64.0));
-        const std::uint16_t old_weight = weights[target_pixel];
-        const unsigned int total_weight =
-          static_cast<unsigned int>(old_weight) + new_weight;
+        const float source_score = static_cast<float>(std::min(
+          0.5 - std::abs(sx), 0.5 - std::abs(sy)));
+        if( source_score <= best_source_scores[target_pixel] )
+          continue;
         for( std::size_t channel = 0; channel < 3; ++channel )
         {
           mosaic.rgb[target_index + channel] =
-            static_cast<std::uint8_t>(
-              (static_cast<unsigned int>(
-                 mosaic.rgb[target_index + channel]) * old_weight +
-               static_cast<unsigned int>(
-                 item.image.rgb[source_index + channel]) * new_weight) /
-              total_weight);
+            item.image.rgb[source_index + channel];
         }
-        weights[target_pixel] = static_cast<std::uint16_t>(
-          std::min<unsigned int>(total_weight, 65535));
+        best_source_scores[target_pixel] = source_score;
       }
     }
   }
