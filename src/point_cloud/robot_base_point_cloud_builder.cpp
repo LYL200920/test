@@ -4,11 +4,56 @@
 #include "pose_transform.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
 namespace point_cloud
 {
+  namespace
+  {
+    double Resolve_Coordinate_To_Mm(
+      const Camera_Point_Cloud &cloud,
+      double configured_coordinate_to_mm,
+      double minimum_depth_mm,
+      double maximum_depth_mm)
+    {
+      std::vector<double> positive_depths;
+      positive_depths.reserve(cloud.Point_Count());
+      for (std::size_t index = 0; index < cloud.Point_Count(); ++index)
+      {
+        const double depth = cloud.xyz[index * 3 + 2];
+        if (std::isfinite(depth) && depth > 0.0)
+          positive_depths.push_back(depth);
+      }
+      if (positive_depths.empty())
+        return configured_coordinate_to_mm;
+
+      const auto middle =
+        positive_depths.begin() + positive_depths.size() / 2;
+      std::nth_element(
+        positive_depths.begin(), middle, positive_depths.end());
+      const double raw_median_depth = *middle;
+
+      // MV3D streams observed in production do not always use the same XYZ
+      // unit: plain point clouds may be millimetres while textured point
+      // clouds are micrometres. Prefer the configured unit when plausible,
+      // otherwise try the common SDK units.
+      const std::array<double, 4> candidates = {
+        configured_coordinate_to_mm, 1.0, 0.001, 1000.0};
+      for (const double candidate : candidates)
+      {
+        const double median_depth_mm = raw_median_depth * candidate;
+        if (std::isfinite(median_depth_mm) &&
+            median_depth_mm >= minimum_depth_mm &&
+            median_depth_mm <= maximum_depth_mm)
+        {
+          return candidate;
+        }
+      }
+      return configured_coordinate_to_mm;
+    }
+  }
 
   bool Calculate_Point_Cloud_Bounds(const Point_Cloud_Data &cloud,
                                     std::array<double, 6> *bounds,
@@ -103,7 +148,11 @@ namespace point_cloud
     }
 
     Camera_Point_Cloud_Filter_Options filter_options;
-    filter_options.coordinate_to_mm = calibration.point_cloud_unit_to_mm;
+    filter_options.coordinate_to_mm = Resolve_Coordinate_To_Mm(
+      camera_cloud,
+      calibration.point_cloud_unit_to_mm,
+      filter_options.minimum_depth_mm,
+      filter_options.maximum_depth_mm);
     Camera_Point_Cloud_Filter_Stats filter_stats;
     if (!Prepare_Camera_Point_Cloud_For_Overlay(&camera_cloud, filter_options, &filter_stats, error_message))
     {

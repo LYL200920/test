@@ -6,5 +6,6 @@ TranMat_cam2robot = [1225.5965333023571 198.01430682455043 1177.1407695305254]
 
 # 1-Depth optical coordinates, 2-RGB optical coordinates.
 CameraCoordinateType = [1]
-# MV3D RGBD point-cloud coordinates are expressed in micrometers.
-PointCloudUnitToMm = [0.001]
+# Default XYZ unit is millimeters; the overlay also handles MV3D streams that
+# report textured point-cloud coordinates in micrometers.
+PointCloudUnitToMm = [1.0]

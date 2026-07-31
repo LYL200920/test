@@ -919,8 +919,18 @@ bool Robot_Model_Panel::Reset_Robot_To_Home ( )
   if( !m_view || !m_view->Has_Current_Model ( ) ) return false;
   if( Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
 
+  const auto& params = m_view->Kinematic_Params ( );
+  if( params.has_home_pose )
+  {
+    // Seed pose IK with the configured reset joint solution so reset remains
+    // deterministic and converges to the precise Cartesian target.
+    Apply_Joint_Input_Angles_To_Sliders (
+      configured_home_input_angles (params));
+    return Apply_Cartesian_Pose_Target (params.home_pose_xyzabc);
+  }
+
   Apply_Joint_Input_Angles_To_Sliders (
-    configured_home_input_angles (m_view->Kinematic_Params ( )));
+    configured_home_input_angles (params));
   Select_Display_Page (Main_Display_Page::Robot);
   return true;
 }
@@ -1363,12 +1373,6 @@ void Robot_Model_Panel::On_Clear_Trajectory_Points (wxCommandEvent&)
 
 void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
 {
-  if( Is_Trajectory_Active ( ) ||
-      Get_Trajectory_Speed_Mps ( ) <= 0.0 )
-  {
-    return;
-  }
-
   const int selection = Selected_Teach_Point_Index ( );
   if( selection == wxNOT_FOUND ||
       selection < 0 ||
@@ -1376,33 +1380,136 @@ void Robot_Model_Panel::On_Go_To_Trajectory_Point (wxCommandEvent&)
   {
     return;
   }
+  Start_Go_To_Teach_Point (
+    static_cast<std::size_t> (selection), true);
+}
 
-  Apply_Teach_Point_Bindings (
-    static_cast<std::size_t> (selection));
+bool Robot_Model_Panel::Start_Go_To_Teach_Point (
+  std::size_t selection,
+  bool apply_bindings)
+{
+  if( Is_Trajectory_Active ( ) ||
+      Get_Trajectory_Speed_Mps ( ) <= 0.0 ||
+      selection >= m_trajectory_session.Point_Count ( ) )
+  {
+    return false;
+  }
+
+  if( apply_bindings &&
+      !Apply_Teach_Point_Bindings_Keeping_Display (selection) )
+  {
+    return false;
+  }
   const auto start_angles = Read_Joint_Input_Angles ( );
   std::array<double, 6> ignored_angles = { };
   robot_model::XyzabcPose start_pose = { };
   std::size_t frame_count = TRAJECTORY_FRAME_COUNT;
   const auto& points = m_teach_point_store.Points (m_current_model_id);
   if( Read_Current_Teach_Point (&ignored_angles, &start_pose) &&
-      static_cast<std::size_t> (selection) < points.size ( ) &&
-      points[static_cast<std::size_t> (selection)].has_world_pose )
+      selection < points.size ( ) &&
+      points[selection].has_world_pose )
   {
     frame_count = frame_count_for_one_meter_per_second (
       start_pose,
-      points[static_cast<std::size_t> (selection)].world_pose);
+      points[selection].world_pose);
   }
   if( !m_trajectory_session.Start_Go_To (
         start_angles,
-        static_cast<size_t> (selection),
+        selection,
         frame_count) )
   {
-    return;
+    return false;
   }
 
   Set_Joint_Controls_Enabled (false);
   m_trajectory_timer.Start (Get_Trajectory_Timer_Interval_Ms ( ));
   Update_Trajectory_Status ( );
+  return true;
+}
+
+void Robot_Model_Panel::On_Step_To_Next_Teach_Point ( )
+{
+  if( Is_Trajectory_Active ( ) ) return;
+
+  const int current_selection = Selected_Teach_Point_Index ( );
+  const auto& points = m_teach_point_store.Points (m_current_model_id);
+  if( current_selection == wxNOT_FOUND || current_selection < 0 )
+  {
+    if( m_status_text )
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (u8"请先选择一个示教点"));
+    return;
+  }
+
+  const auto next_index =
+    static_cast<std::size_t> (current_selection) + 1;
+  if( next_index >= points.size ( ) )
+  {
+    if( m_status_text )
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (u8"当前已是最后一个示教点"));
+    return;
+  }
+
+  const bool hardware_connected =
+    m_kuka_service && m_kuka_service->Is_Connected ( );
+  if( hardware_connected && !m_kuka_service->Can_Move ( ) )
+  {
+    if( m_status_text )
+      m_status_text->SetLabel (
+        wxString::FromUTF8 (
+          u8"KUKA 当前未就绪，请等待当前指令完成或先同步状态"));
+    return;
+  }
+
+  if( !Apply_Teach_Point_Bindings_Keeping_Display (next_index) )
+    return;
+
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection (
+      static_cast<int> (next_index));
+    Update_Teach_Point_Details ( );
+  }
+  Update_Trajectory_Status ( );
+
+  if( hardware_connected )
+  {
+    try
+    {
+      kuka::Joint_Motion_Options options;
+      options.velocity_percent = static_cast<double> (
+        m_kuka_ptp_velocity_slider
+          ? m_kuka_ptp_velocity_slider->GetValue ( )
+          : 20);
+      options.acceleration_percent = static_cast<double> (
+        m_kuka_acceleration_slider
+          ? m_kuka_acceleration_slider->GetValue ( )
+          : 20);
+      const auto sequence = m_kuka_service->Move_Joint (
+        points[next_index].joint_angles_deg, options);
+      if( m_status_text )
+      {
+        m_status_text->SetLabel (wxString::Format (
+          wxString::FromUTF8 (
+            u8"步进至 P[%zu]：KUKA MOVEJ 已发送，sequence=%u"),
+          points[next_index].id,
+          sequence));
+      }
+    }
+    catch( const std::exception& error )
+    {
+      if( m_status_text )
+      {
+        m_status_text->SetLabel (
+          wxString::FromUTF8 (u8"步进指令发送失败：") +
+          wxString::FromUTF8 (error.what ( )));
+      }
+    }
+    return;
+  }
+
+  Start_Go_To_Teach_Point (next_index, false);
 }
 
 void Robot_Model_Panel::On_Delete_Trajectory_Point (wxCommandEvent&)
@@ -2331,6 +2438,8 @@ wxPanel* Robot_Model_Panel::Build_Teach_Tool_Page (wxWindow* parent)
     [this] { wxCommandEvent event; On_Load_Trajectory (event); };
   edit_callbacks.complete =
     [this] { On_Complete_Progress ( ); };
+  edit_callbacks.step_next =
+    [this] { On_Step_To_Next_Teach_Point ( ); };
   m_teach_point_command_panel->Set_Callbacks (
     std::move (edit_callbacks));
 
@@ -2470,10 +2579,10 @@ void Robot_Model_Panel::Update_Cartesian_Pose ( )
   }
 }
 
-void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
+bool Robot_Model_Panel::Apply_Cartesian_Pose_Target (
   const robot_model::XyzabcPose& target_pose)
 {
-  if( !m_view || !m_view->Has_Current_Model ( ) ) return;
+  if( !m_view || !m_view->Has_Current_Model ( ) ) return false;
   if( Is_Trajectory_Active ( ) ) Stop_Trajectory_Playback ( );
 
   Select_Display_Page (Main_Display_Page::Robot);
@@ -2492,7 +2601,7 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
   {
     m_status_text->SetLabel (wxString::FromUTF8 (
       u8"世界坐标位姿控制失败：模型无效"));
-    return;
+    return false;
   }
 
   Sync_Joint_Controls_From_State ( );
@@ -2503,7 +2612,7 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
     m_status_text->SetLabel (
       wxString::FromUTF8 (u8"世界坐标运动已阻止：") +
       collision_summary (apply_result.collision));
-    return;
+    return false;
   }
   m_status_text->SetLabel (wxString::Format (
     result.Converged ( )
@@ -2513,6 +2622,7 @@ void Robot_Model_Panel::Apply_Cartesian_Pose_Target (
           u8"世界坐标目标受限：位置误差 %.2f mm，姿态误差 %.2f°"),
     result.position_error_mm,
     result.orientation_error_deg));
+  return result.Converged ( );
 }
 
 void Robot_Model_Panel::Apply_Flange_Drag_Result (
@@ -2619,10 +2729,15 @@ void Robot_Model_Panel::Set_Joint_Controls_Enabled (bool enabled)
   }
   if( m_teach_point_command_panel )
   {
+    const int selection = Selected_Teach_Point_Index ( );
+    const auto point_count =
+      m_teach_point_store.Point_Count (m_current_model_id);
     m_teach_point_command_panel->Refresh_Command_State (
       enabled && !m_current_model_id.empty ( ),
       Selected_Teach_Point_Indices ( ).size ( ),
-      m_teach_point_store.Point_Count (m_current_model_id));
+      point_count,
+      selection != wxNOT_FOUND && selection >= 0 &&
+        static_cast<std::size_t> (selection) + 1 < point_count);
   }
   if( m_teach_point_list_panel )
   {
@@ -2636,10 +2751,15 @@ void Robot_Model_Panel::Update_Trajectory_Status ( )
   const auto selections = Selected_Teach_Point_Indices ( );
   if( m_teach_point_command_panel )
   {
+    const int selection = Selected_Teach_Point_Index ( );
+    const auto point_count =
+      m_teach_point_store.Point_Count (m_current_model_id);
     m_teach_point_command_panel->Refresh_Command_State (
       !active && !m_current_model_id.empty ( ),
       selections.size ( ),
-      m_teach_point_store.Point_Count (m_current_model_id));
+      point_count,
+      selection != wxNOT_FOUND && selection >= 0 &&
+        static_cast<std::size_t> (selection) + 1 < point_count);
   }
   if( m_trajectory_panel == nullptr )
   {
@@ -2843,7 +2963,7 @@ void Robot_Model_Panel::On_Teach_Point_Selection_Changed ( )
   if( selection != wxNOT_FOUND && selection >= 0 &&
       !Is_Trajectory_Active ( ) )
   {
-    Apply_Teach_Point_Bindings (
+    Apply_Teach_Point_Bindings_Keeping_Display (
       static_cast<std::size_t> (selection));
   }
 }
@@ -3079,6 +3199,18 @@ bool Robot_Model_Panel::Apply_Teach_Point_Bindings (
     }
   }
   return true;
+}
+
+bool Robot_Model_Panel::Apply_Teach_Point_Bindings_Keeping_Display (
+  std::size_t index,
+  bool require_point_cloud)
+{
+  const auto display_page = m_display_page;
+  const bool applied =
+    Apply_Teach_Point_Bindings (index, require_point_cloud);
+  if( m_display_page != display_page )
+    Select_Display_Page (display_page);
+  return applied;
 }
 
 void Robot_Model_Panel::Sync_Trajectory_From_Teach_Points ( )

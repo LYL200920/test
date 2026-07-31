@@ -59,6 +59,10 @@ struct Robot_Kinematic_Params
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0
   };
   bool has_home_input_angles = false;
+  std::array<double, 6> home_pose_xyzabc = {
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+  };
+  bool has_home_pose = false;
   std::array<Robot_Joint_Frame_Config, 6> joint_frames;
   std::array<double, 6> neutral_flange_pose = {
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0

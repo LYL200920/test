@@ -14,6 +14,7 @@
 #include "robot_trajectory_planner.h"
 #include "robot_trajectory_session.h"
 #include "robot_teach_point_store.h"
+#include "tool_coordinate.h"
 #include "flange_drag_update_coordinator.h"
 #include "flange_drag_motion_executor.h"
 #include "robot_drag_performance_collector.h"
@@ -583,10 +584,19 @@ void test_kr10_r1100_2_resource_config ( )
   require (params.has_home_input_angles,
            "KR10_R1100_2 home input angles were not parsed");
   const std::array<double, 6> expected_home = {
-    0.0, -90.0, 90.0, 0.0, 90.0, 0.0
+    1.44, -103.44, 110.06000000000003,
+    0.0, 83.38000000000002, 181.44
   };
   require (params.home_input_angles_deg == expected_home,
            "KR10_R1100_2 home input angles mismatch");
+  require (params.has_home_pose,
+           "KR10_R1100_2 Cartesian home pose was not parsed");
+  const std::array<double, 6> expected_home_pose = {
+    409.049097, -10.282183, 820.128479,
+    -0.000250, -0.000032, -179.999946
+  };
+  require (params.home_pose_xyzabc == expected_home_pose,
+           "KR10_R1100_2 Cartesian home pose mismatch");
   require (params.joint_frames[0].has_pivot &&
              params.joint_frames[0].has_axis,
            "KR10_R1100_2 A1 frame was not parsed");
@@ -685,6 +695,29 @@ void test_kr10_r1100_2_resource_config ( )
 
   const auto forward_model = robot_model::Build_Forward_Kinematics_Model (
     7, calibration, params);
+  const auto home_state = robot_model::Build_Joint_State_From_Input_Angles (
+    params, params.home_input_angles_deg);
+  robot_model::Tool_Coordinate_Profile camera_tool;
+  camera_tool.flange_from_tool_pose = {
+    162.14, 0.43, 185.32, 0.0, 0.0, 0.0
+  };
+  robot_model::Robot_Pose_IK_Options home_pose_options;
+  home_pose_options.position_tolerance_mm = 0.001;
+  home_pose_options.orientation_tolerance_deg = 0.001;
+  home_pose_options.damping_mm = 1.0;
+  home_pose_options.max_iterations = 100;
+  home_pose_options.time_budget_ms = 0.0;
+  const auto home_pose_result = robot_model::Solve_Flange_Pose_IK (
+    forward_model,
+    params,
+    home_state,
+    robot_model::Build_World_From_Flange_Target (
+      robot_model::Build_Zyx_Pose_Matrix (params.home_pose_xyzabc),
+      camera_tool),
+    home_pose_options);
+  require (home_pose_result.Converged ( ),
+           "KR10_R1100_2 Cartesian home pose IK did not converge");
+
   const std::array<double, 6> neutral_input = {
     0.0, -90.0, 90.0, 0.0, 0.0, 0.0
   };

@@ -25,6 +25,7 @@ public:
     std::function<void()> save;
     std::function<void()> load;
     std::function<void()> complete;
+    std::function<void()> step_next;
   };
 
   explicit Teach_Point_Command_Panel (wxWindow* parent);
@@ -35,7 +36,8 @@ public:
   void Refresh_Command_State(
     bool enabled,
     std::size_t selected_count,
-    std::size_t point_count);
+    std::size_t point_count,
+    bool can_step_next);
 
 private:
   void Bind_Button(
@@ -53,6 +55,7 @@ private:
   wxButton* m_save_button = nullptr;
   wxButton* m_load_button = nullptr;
   wxButton* m_complete_button = nullptr;
+  wxButton* m_step_next_button = nullptr;
   wxChoice* m_type_choice = nullptr;
 };
 

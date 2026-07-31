@@ -79,12 +79,20 @@
         <Item keyname="JointOffset_6" name="A6零位偏置" valuetype="float" value="0" />
 
         <!-- Safe application reset pose, expressed as controller input angles. -->
-        <Item keyname="HomeAngle_1" name="A1复位角" valuetype="float" value="0" />
-        <Item keyname="HomeAngle_2" name="A2复位角" valuetype="float" value="-90" />
-        <Item keyname="HomeAngle_3" name="A3复位角" valuetype="float" value="90" />
+        <Item keyname="HomeAngle_1" name="A1复位角" valuetype="float" value="1.44" />
+        <Item keyname="HomeAngle_2" name="A2复位角" valuetype="float" value="-103.44" />
+        <Item keyname="HomeAngle_3" name="A3复位角" valuetype="float" value="110.06000000000003" />
         <Item keyname="HomeAngle_4" name="A4复位角" valuetype="float" value="0" />
-        <Item keyname="HomeAngle_5" name="A5复位角" valuetype="float" value="90" />
-        <Item keyname="HomeAngle_6" name="A6复位角" valuetype="float" value="0" />
+        <Item keyname="HomeAngle_5" name="A5复位角" valuetype="float" value="83.38000000000002" />
+        <Item keyname="HomeAngle_6" name="A6复位角" valuetype="float" value="181.44" />
+
+        <!-- Preferred application reset pose in base-coordinate X/Y/Z/A/B/C. -->
+        <Item keyname="HomePose_X" name="复位位姿X" valuetype="float" value="409.049097" />
+        <Item keyname="HomePose_Y" name="复位位姿Y" valuetype="float" value="-10.282183" />
+        <Item keyname="HomePose_Z" name="复位位姿Z" valuetype="float" value="820.128479" />
+        <Item keyname="HomePose_A" name="复位位姿A" valuetype="float" value="-0.000250" />
+        <Item keyname="HomePose_B" name="复位位姿B" valuetype="float" value="-0.000032" />
+        <Item keyname="HomePose_C" name="复位位姿C" valuetype="float" value="-179.999946" />
 
         <!-- Direction is paired with the axes below to match the verified
              KUKA transform chain while retaining this project's convention. -->

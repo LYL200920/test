@@ -81,6 +81,10 @@ private:
   void On_Insert_Teach_Point(bool before);
   void On_Clear_Trajectory_Points(wxCommandEvent &event);
   void On_Go_To_Trajectory_Point(wxCommandEvent &event);
+  void On_Step_To_Next_Teach_Point();
+  bool Start_Go_To_Teach_Point(
+    std::size_t selection,
+    bool apply_bindings);
   void On_Delete_Trajectory_Point(wxCommandEvent &event);
   void On_Save_Trajectory(wxCommandEvent &event);
   void On_Load_Trajectory(wxCommandEvent &event);
@@ -115,7 +119,7 @@ private:
   void Apply_Joint_Limits(const robot_model::Robot_Kinematic_Params &params);
   void Update_Joint_State_From_Sliders();
   void Update_Cartesian_Pose();
-  void Apply_Cartesian_Pose_Target(const robot_model::XyzabcPose &target_pose);
+  bool Apply_Cartesian_Pose_Target(const robot_model::XyzabcPose &target_pose);
   void Apply_Flange_Drag_Result(const robot_model::Robot_Position_IK_Result &result);
   void Apply_Flange_Pose_Drag_Result(const robot_model::Robot_Pose_IK_Result &result);
   void Sync_Joint_Controls_From_State();
@@ -133,6 +137,9 @@ private:
   void Bind_Template_To_Teach_Point_Cloud(std::size_t point_index);
   void Unbind_Template_From_Teach_Point_Cloud(std::size_t point_index);
   bool Apply_Teach_Point_Bindings(
+    std::size_t index,
+    bool require_point_cloud = false);
+  bool Apply_Teach_Point_Bindings_Keeping_Display(
     std::size_t index,
     bool require_point_cloud = false);
   void Sync_Trajectory_From_Teach_Points();

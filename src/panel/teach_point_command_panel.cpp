@@ -30,6 +30,8 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
     this, wxID_ANY, wxString::FromUTF8 (u8"加载 Progress"));
   m_complete_button = new wxButton (
     this, wxID_ANY, wxString::FromUTF8 (u8"Progress 完成"));
+  m_step_next_button = new wxButton (
+    this, wxID_ANY, wxString::FromUTF8 (u8"步进到下一点"));
 
   auto* type_label = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"类型"));
@@ -46,6 +48,7 @@ Teach_Point_Command_Panel::Teach_Point_Command_Panel (wxWindow* parent)
     type_label, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
   type_sizer->Add (m_type_choice, 1, wxEXPAND);
   root->Add (type_sizer, 0, wxEXPAND | wxBOTTOM, 6);
+  root->Add (m_step_next_button, 0, wxEXPAND | wxBOTTOM, 12);
   root->Add (m_add_button, 0, wxEXPAND);
   root->Add (m_update_button, 0, wxEXPAND | wxTOP, 6);
   auto* insert_sizer = new wxBoxSizer (wxHORIZONTAL);
@@ -101,12 +104,14 @@ void Teach_Point_Command_Panel::Set_Callbacks (Callbacks callbacks)
   Bind_Button (m_save_button, m_callbacks.save);
   Bind_Button (m_load_button, m_callbacks.load);
   Bind_Button (m_complete_button, m_callbacks.complete);
+  Bind_Button (m_step_next_button, m_callbacks.step_next);
 }
 
 void Teach_Point_Command_Panel::Refresh_Command_State (
   bool enabled,
   std::size_t selected_count,
-  std::size_t point_count)
+  std::size_t point_count,
+  bool can_step_next)
 {
   const bool single_selection = selected_count == 1;
   if( m_type_choice ) m_type_choice->Enable (enabled);
@@ -126,6 +131,9 @@ void Teach_Point_Command_Panel::Refresh_Command_State (
   if( m_load_button ) m_load_button->Enable (enabled);
   if( m_complete_button )
     m_complete_button->Enable (enabled && point_count > 0);
+  if( m_step_next_button )
+    m_step_next_button->Enable (
+      enabled && single_selection && can_step_next);
 }
 
 void Teach_Point_Command_Panel::Bind_Button (

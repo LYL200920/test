@@ -4,6 +4,8 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <array>
 #include <sstream>
 
 namespace robot_model
@@ -198,6 +200,22 @@ namespace robot_model
         break;
       }
       params.home_input_angles_deg[static_cast<size_t>(i - 1)] = item_value_as_double(root, key.c_str(), 0.0);
+    }
+
+    constexpr std::array<const char *, 6> home_pose_keys = {
+      "HomePose_X", "HomePose_Y", "HomePose_Z",
+      "HomePose_A", "HomePose_B", "HomePose_C"
+    };
+    params.has_home_pose = std::all_of(
+      home_pose_keys.begin(), home_pose_keys.end(),
+      [&root](const char *key) { return item_exists(root, key); });
+    if (params.has_home_pose)
+    {
+      for (std::size_t index = 0; index < home_pose_keys.size(); ++index)
+      {
+        params.home_pose_xyzabc[index] =
+          item_value_as_double(root, home_pose_keys[index], 0.0);
+      }
     }
 
     params.has_neutral_flange_pose = item_exists(root, "FlangePose_X") &&
