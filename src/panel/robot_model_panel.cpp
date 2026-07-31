@@ -270,48 +270,11 @@ bool build_pose_mosaic(
   }
 
   const auto origin = world_images.front().center;
-  // Orient the mosaic by the actual Progress scan direction. This guarantees
-  // that increasing motion-point coordinates run left-to-right instead of
-  // being reversed by a camera-axis sign.
-  std::array<double, 3> scan_direction = {0.0, 0.0, 0.0};
-  for( std::size_t index = 1; index < world_images.size(); ++index )
-  {
-    scan_direction = {
-      world_images[index].center[0] - origin[0],
-      world_images[index].center[1] - origin[1],
-      world_images[index].center[2] - origin[2]};
-    if( norm3(scan_direction) > 1.0e-6 )
-      break;
-  }
-  if( world_images.size() > 1 )
-  {
-    const std::array<double, 3> full_scan = {
-      world_images.back().center[0] - origin[0],
-      world_images.back().center[1] - origin[1],
-      world_images.back().center[2] - origin[2]};
-    if( norm3(full_scan) > norm3(scan_direction) )
-      scan_direction = full_scan;
-  }
-  auto basis_u = normalized3(scan_direction);
-  if( norm3(basis_u) <= 0.0 )
-    basis_u = normalized3(world_images.front().horizontal);
-
-  const auto horizontal_direction =
-    normalized3(world_images.front().horizontal);
-  const auto vertical_direction =
-    normalized3(world_images.front().vertical);
-  const auto secondary =
-    std::abs(dot3(horizontal_direction, basis_u)) <
-      std::abs(dot3(vertical_direction, basis_u))
-      ? horizontal_direction
-      : vertical_direction;
-  const double secondary_parallel = dot3(secondary, basis_u);
-  auto basis_v = normalized3({
-    secondary[0] - secondary_parallel * basis_u[0],
-    secondary[1] - secondary_parallel * basis_u[1],
-    secondary[2] - secondary_parallel * basis_u[2]});
-  if( norm3(basis_v) <= 0.0 )
-    basis_v = normalized3(world_images.front().vertical);
+  // Keep the canvas axes identical to the camera pixel axes. Robot poses only
+  // determine the image-centre offsets; they must never rotate every source
+  // image merely to make the Progress scan direction run left-to-right.
+  const auto basis_u = normalized3(world_images.front().horizontal);
+  const auto basis_v = normalized3(world_images.front().vertical);
   if( norm3(basis_u) <= 0.0 || norm3(basis_v) <= 0.0 )
   {
     if( error_message ) *error_message = "相机图像平面轴向无效";
