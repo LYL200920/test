@@ -3,4 +3,5 @@
   <Binding pointCloud="F:/LYL/Github/test/Resource/PointCloud/test_0.ply" pointCloudName="test_0" templateId="template_1" />
   <Binding pointCloud="F:/software/test/test/Resource/PointCloud/test_0.ply" pointCloudName="test_0" templateId="template_1" />
   <Binding pointCloud="F:/LYL/Github/test/Resource/PointCloud/test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" />
+  <Binding pointCloud="F:/software/test/test/Resource/PointCloud/test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" />
 </PointCloudTemplateBindings>
