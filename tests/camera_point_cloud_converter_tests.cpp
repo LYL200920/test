@@ -1,6 +1,5 @@
 #include "camera_point_cloud_converter.h"
-
-#include "Mv3dRgbdDefine.h"
+#include "camera_formats.h"
 
 #include <cmath>
 #include <cstdint>
@@ -37,11 +36,11 @@ void Test_Xyz_Filters_Invalid_Points ( )
 {
   Camera_Frame frame;
   Camera_Image_Frame image;
-  image.image_type = static_cast<std::uint32_t> (ImageType_PointCloud);
+  image.image_type = camera_formats::Point_Cloud;
   image.width = 3;
   image.height = 1;
   image.frame_number = 42;
-  image.coordinate_type = static_cast<std::uint32_t> (CoordinateType_Depth);
+  image.coordinate_type = camera_formats::Depth_Coordinates;
   Append_Xyz (&image.data, 1.0f, 2.0f, 3.0f);
   Append_Xyz (&image.data, 0.0f, 0.0f, 0.0f);
   Append_Xyz (&image.data, 4.0f, 5.0f, 6.0f);
@@ -57,7 +56,7 @@ void Test_Xyz_Filters_Invalid_Points ( )
   Require (!cloud.Has_Color ( ), "Plain XYZ cloud unexpectedly has color");
   Require (cloud.source_frame_number == 42, "Frame metadata was not copied");
   Require (cloud.source_coordinate_type ==
-             static_cast<std::uint32_t> (CoordinateType_Depth),
+             camera_formats::Depth_Coordinates,
            "Point-cloud coordinate type was not copied");
 }
 
@@ -65,16 +64,16 @@ void Test_Textured_Cloud_Is_Preferred ( )
 {
   Camera_Frame frame;
   Camera_Image_Frame plain;
-  plain.image_type = static_cast<std::uint32_t> (ImageType_PointCloud);
+  plain.image_type = camera_formats::Point_Cloud;
   plain.width = plain.height = 1;
   Append_Xyz (&plain.data, 9.0f, 9.0f, 9.0f);
   frame.images.push_back (std::move (plain));
 
   Camera_Image_Frame textured;
   textured.image_type =
-    static_cast<std::uint32_t> (ImageType_TexturedPointCloud);
+    camera_formats::Textured_Point_Cloud;
   textured.width = textured.height = 1;
-  textured.coordinate_type = static_cast<std::uint32_t> (CoordinateType_RGB);
+  textured.coordinate_type = camera_formats::Rgb_Coordinates;
   Append_Xyz (&textured.data, 1.0f, 2.0f, 3.0f);
   textured.data.insert (textured.data.end ( ), { 10, 20, 30, 255 });
   frame.images.push_back (std::move (textured));
@@ -87,7 +86,7 @@ void Test_Textured_Cloud_Is_Preferred ( )
   Require (cloud.xyz[0] == 1.0f, "Textured cloud was not preferred");
   Require (cloud.Has_Color ( ), "Textured cloud color is missing");
   Require (cloud.source_coordinate_type ==
-             static_cast<std::uint32_t> (CoordinateType_RGB),
+             camera_formats::Rgb_Coordinates,
            "Preferred point-cloud coordinate type was not copied");
   Require (cloud.rgb == std::vector<std::uint8_t> ({ 10, 20, 30 }),
            "Textured cloud color was decoded incorrectly");
@@ -97,7 +96,7 @@ void Test_Point_Limit_Downsamples ( )
 {
   Camera_Frame frame;
   Camera_Image_Frame image;
-  image.image_type = static_cast<std::uint32_t> (ImageType_PointCloud);
+  image.image_type = camera_formats::Point_Cloud;
   image.width = 5;
   image.height = 1;
   for( int i = 1; i <= 5; ++i )
@@ -119,17 +118,17 @@ void Test_Required_Depth_Coordinate_Is_Selected ( )
 {
   Camera_Frame frame;
   Camera_Image_Frame depth;
-  depth.image_type = static_cast<std::uint32_t> (ImageType_PointCloud);
+  depth.image_type = camera_formats::Point_Cloud;
   depth.coordinate_type =
-    static_cast<std::uint32_t> (CoordinateType_Depth);
+    camera_formats::Depth_Coordinates;
   depth.width = depth.height = 1;
   Append_Xyz (&depth.data, 100.0f, 200.0f, 1000.0f);
   frame.images.push_back (std::move (depth));
 
   Camera_Image_Frame rgb;
   rgb.image_type =
-    static_cast<std::uint32_t> (ImageType_TexturedPointCloud);
-  rgb.coordinate_type = static_cast<std::uint32_t> (CoordinateType_RGB);
+    camera_formats::Textured_Point_Cloud;
+  rgb.coordinate_type = camera_formats::Rgb_Coordinates;
   rgb.width = rgb.height = 1;
   Append_Xyz (&rgb.data, 9.0f, 9.0f, 9.0f);
   rgb.data.insert (rgb.data.end ( ), { 10, 20, 30, 255 });
@@ -139,10 +138,10 @@ void Test_Required_Depth_Coordinate_Is_Selected ( )
   Require (
     Convert_Camera_Frame_To_Point_Cloud (
       frame, &cloud, nullptr, 500000,
-      static_cast<std::uint32_t> (CoordinateType_Depth)),
+      camera_formats::Depth_Coordinates),
     "Required Depth point cloud was not selected");
   Require (cloud.source_coordinate_type ==
-             static_cast<std::uint32_t> (CoordinateType_Depth),
+             camera_formats::Depth_Coordinates,
            "Required Depth coordinate type mismatch");
   Require (cloud.xyz[2] == 1000.0f,
            "RGB point cloud was selected instead of Depth point cloud");

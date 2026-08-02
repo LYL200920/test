@@ -1,4 +1,5 @@
 /build/
+/build_core_no_hardware/
 /vtk_build/
 /.vs/
 *.exe

@@ -1,6 +1,5 @@
 #include "camera_image_converter.h"
-
-#include "Mv3dRgbdDefine.h"
+#include "camera_formats.h"
 
 #include <cstdint>
 #include <iostream>
@@ -17,12 +16,12 @@ void Require (bool condition, const char* message)
 }
 
 Camera_Image_Frame Make_Image (
-  Mv3dRgbdImageType type,
+  std::uint32_t type,
   std::uint32_t width,
   std::uint32_t height)
 {
   Camera_Image_Frame image;
-  image.image_type = static_cast<std::uint32_t> (type);
+  image.image_type = type;
   image.width = width;
   image.height = height;
   return image;
@@ -31,7 +30,7 @@ Camera_Image_Frame Make_Image (
 void Test_Rgb_Planar ( )
 {
   Camera_Frame frame;
-  auto image = Make_Image (ImageType_RGB8_Planar, 2, 1);
+  auto image = Make_Image (camera_formats::Rgb8_Planar, 2, 1);
   image.data = { 10, 20, 30, 40, 50, 60 };
   frame.images.push_back (std::move (image));
 
@@ -48,7 +47,7 @@ void Test_Rgb_Planar ( )
 void Test_Yuyv ( )
 {
   Camera_Frame frame;
-  auto image = Make_Image (ImageType_YUV422, 2, 1);
+  auto image = Make_Image (camera_formats::Yuv422, 2, 1);
   image.data = { 40, 128, 200, 128 };
   frame.images.push_back (std::move (image));
 
@@ -68,7 +67,7 @@ void Test_Yuyv ( )
 void Test_Nv12 ( )
 {
   Camera_Frame frame;
-  auto image = Make_Image (ImageType_YUV420SP_NV12, 2, 2);
+  auto image = Make_Image (camera_formats::Nv12, 2, 2);
   image.data = { 10, 20, 30, 40, 128, 128 };
   frame.images.push_back (std::move (image));
 
@@ -85,10 +84,10 @@ void Test_Nv12 ( )
 void Test_Automatic_Prefers_Color ( )
 {
   Camera_Frame frame;
-  auto depth = Make_Image (ImageType_Depth, 1, 1);
+  auto depth = Make_Image (camera_formats::Depth, 1, 1);
   depth.data = { 100, 0 };
   frame.images.push_back (std::move (depth));
-  auto color = Make_Image (ImageType_RGB8_Planar, 1, 1);
+  auto color = Make_Image (camera_formats::Rgb8_Planar, 1, 1);
   color.data = { 1, 2, 3 };
   frame.images.push_back (std::move (color));
 
@@ -99,7 +98,7 @@ void Test_Automatic_Prefers_Color ( )
     "Automatic conversion failed");
   Require (
     output.source_image_type ==
-      static_cast<std::uint32_t> (ImageType_RGB8_Planar),
+      camera_formats::Rgb8_Planar,
     "Automatic mode did not prefer color");
 }
 } // namespace

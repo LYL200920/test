@@ -1,5 +1,6 @@
 #include "robot_model_repository.h"
 
+#include "app_paths.h"
 #include "pugixml.hpp"
 
 #include <algorithm>
@@ -190,7 +191,7 @@ namespace robot_model
 
   std::filesystem::path Find_Robot_Root()
   {
-    const std::filesystem::path root(ROBOT_RESOURCE_ROOT);
+    const auto root = application::Get_App_Paths().robot_model_root;
     if (contains_loadable_robot_model(root))
     {
       return root;

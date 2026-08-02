@@ -1,7 +1,7 @@
 #include "template_configuration_repository.h"
 
+#include "app_paths.h"
 #include "pugixml.hpp"
-#include "robot_model_repository.h"
 
 #include <filesystem>
 
@@ -22,14 +22,8 @@ void Set_Error(std::string *error_message, const std::string &message)
 
 std::filesystem::path Template_Configuration_Path()
 {
-  const std::filesystem::path robot_root = Find_Robot_Root();
-  if (!robot_root.empty())
-  {
-    return robot_root.parent_path() / "Config" /
-      "template_profiles.xml";
-  }
-  return std::filesystem::current_path() /
-    "Resource" / "Config" / "template_profiles.xml";
+  return application::Get_App_Paths().config_root /
+         "template_profiles.xml";
 }
 
 bool Load_Template_Configuration(

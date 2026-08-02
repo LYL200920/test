@@ -3,7 +3,7 @@
 
 #include "robot_model_data.h"
 #include "tool_coordinate.h"
-#include "kuka_connection_config.h"
+#include "robot_connection_controller.h"
 
 #include <wx/dialog.h>
 
@@ -30,7 +30,7 @@ public:
     const std::vector<robot_model::Robot_Model_Info> &models,
     const std::string &current_model_id,
     const robot_model::Tool_Coordinate_Configuration &tool_configuration,
-    const kuka::Connection_Config &connection_configuration);
+    const application::Robot_Connection_Config &connection_configuration);
 
   std::size_t Selected_Model_Index() const;
   bool Model_Load_Requested() const;
@@ -38,7 +38,7 @@ public:
   bool Connection_Save_Requested() const;
   const robot_model::Tool_Coordinate_Configuration &
     Tool_Configuration() const;
-  const kuka::Connection_Config &Connection_Configuration() const;
+  const application::Robot_Connection_Config &Connection_Configuration() const;
 
 private:
   enum class Result_Action
@@ -63,7 +63,7 @@ private:
 private:
   const std::vector<robot_model::Robot_Model_Info> &m_models;
   robot_model::Tool_Coordinate_Configuration m_tool_configuration;
-  kuka::Connection_Config m_connection_configuration;
+  application::Robot_Connection_Config m_connection_configuration;
   wxNotebook *m_notebook = nullptr;
   wxListBox *m_model_list = nullptr;
   wxStaticText *m_model_status_text = nullptr;

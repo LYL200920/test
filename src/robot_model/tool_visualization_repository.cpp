@@ -1,7 +1,7 @@
 #include "tool_visualization_repository.h"
 
+#include "app_paths.h"
 #include "pugixml.hpp"
-#include "robot_model_repository.h"
 
 #include <filesystem>
 
@@ -10,16 +10,7 @@ namespace robot_model
 
 std::filesystem::path Tool_Visualization_Config_Path()
 {
-  const std::filesystem::path robot_root = Find_Robot_Root();
-  if (!robot_root.empty())
-  {
-    return robot_root.parent_path() /
-           "Config" /
-           "tool_visualizations.xml";
-  }
-  return std::filesystem::current_path() /
-         "Resource" /
-         "Config" /
+  return application::Get_App_Paths().config_root /
          "tool_visualizations.xml";
 }
 

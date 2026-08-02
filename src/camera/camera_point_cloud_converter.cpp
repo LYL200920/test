@@ -1,6 +1,6 @@
 #include "camera_point_cloud_converter.h"
 
-#include "Mv3dRgbdDefine.h"
+#include "camera_formats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,24 +24,24 @@ namespace
       return false;
     }
 
-    if (image_type == static_cast<std::uint32_t>(ImageType_PointCloud))
+    if (image_type == camera_formats::Point_Cloud)
     {
-      *format = {sizeof(MV3D_RGBD_POINT_3D_F32), false};
+      *format = {camera_formats::Xyz_Record_Size, false};
       return true;
     }
-    if (image_type == static_cast<std::uint32_t>(ImageType_PointCloudWithNormals))
+    if (image_type == camera_formats::Point_Cloud_With_Normals)
     {
-      *format = {sizeof(MV3D_RGBD_POINT_XYZ_NORMALS), false};
+      *format = {camera_formats::Xyz_Normals_Record_Size, false};
       return true;
     }
-    if (image_type == static_cast<std::uint32_t>(ImageType_TexturedPointCloud))
+    if (image_type == camera_formats::Textured_Point_Cloud)
     {
-      *format = {sizeof(MV3D_RGBD_POINT_XYZ_RGB), true};
+      *format = {camera_formats::Xyz_Rgba_Record_Size, true};
       return true;
     }
-    if (image_type == static_cast<std::uint32_t>(ImageType_TexturedPointCloudWithNormals))
+    if (image_type == camera_formats::Textured_Point_Cloud_With_Normals)
     {
-      *format = {sizeof(MV3D_RGBD_POINT_XYZ_RGB_NORMALS), true};
+      *format = {camera_formats::Xyz_Rgba_Normals_Record_Size, true};
       return true;
     }
     return false;

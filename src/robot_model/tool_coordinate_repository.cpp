@@ -1,6 +1,6 @@
 #include "tool_coordinate_repository.h"
 
-#include "robot_model_repository.h"
+#include "app_paths.h"
 #include "pugixml.hpp"
 
 #include <filesystem>
@@ -10,13 +10,8 @@ namespace robot_model
 
 std::filesystem::path Tool_Coordinate_Config_Path()
 {
-  const std::filesystem::path robot_root = Find_Robot_Root();
-  if (!robot_root.empty())
-  {
-    return robot_root.parent_path() / "Config" / "tool_coordinates.xml";
-  }
-  return std::filesystem::current_path() /
-         "Resource" / "Config" / "tool_coordinates.xml";
+  return application::Get_App_Paths().config_root /
+         "tool_coordinates.xml";
 }
 
 bool Load_Tool_Coordinate_Configuration(

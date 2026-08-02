@@ -1,4 +1,5 @@
 #include "camera_2d_cross_template.h"
+#include "app_paths.h"
 
 #include <pugixml.hpp>
 
@@ -20,11 +21,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 std::filesystem::path Template_Root()
 {
-#ifdef CAMERA_2D_RESOURCE_ROOT
-  return std::filesystem::path(CAMERA_2D_RESOURCE_ROOT);
-#else
-  return std::filesystem::path("Resource") / "Camera2D";
-#endif
+  return application::Get_App_Paths().camera_2d_root;
 }
 
 std::filesystem::path Configuration_Path()

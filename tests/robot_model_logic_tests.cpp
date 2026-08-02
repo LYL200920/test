@@ -1,3 +1,4 @@
+#include "app_paths.h"
 #include "robot_joint_state_builder.h"
 #include "robot_joint_sweep.h"
 #include "robot_part_transform.h"
@@ -588,9 +589,12 @@ void test_robot_resources_use_source_directory ( )
   const auto actual_root = std::filesystem::weakly_canonical (
     robot_model::Find_Robot_Root ( ));
   const auto expected_root = std::filesystem::weakly_canonical (
-    std::filesystem::path (EXPECTED_ROBOT_RESOURCE_ROOT));
+    application::Get_App_Paths().robot_model_root);
 
-  require (!actual_root.empty ( ), "Robot resource root was not found");
+  require (
+    !actual_root.empty ( ),
+    "Robot resource root was not found; configured path: " +
+      application::Get_App_Paths().robot_model_root.string());
   require (actual_root == expected_root,
            "Robot resources are not loaded from source Resource/Robot");
   require (std::filesystem::is_regular_file (actual_root / "point.txt"),

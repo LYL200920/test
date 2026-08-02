@@ -1,4 +1,5 @@
 #include "point_cloud_file_repository.h"
+#include "app_paths.h"
 
 #include <chrono>
 #include <cctype>
@@ -40,7 +41,7 @@ namespace point_cloud
 
   std::filesystem::path Point_Cloud_Resource_Root()
   {
-    return std::filesystem::path(POINT_CLOUD_RESOURCE_ROOT);
+    return application::Get_App_Paths().point_cloud_root;
   }
 
   Point_Cloud_File_Save_Result Save_Robot_Base_Point_Cloud_To_File(const std::filesystem::path &path,

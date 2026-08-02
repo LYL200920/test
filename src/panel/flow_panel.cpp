@@ -1,4 +1,5 @@
 #include "flow_panel.h"
+#include "app_paths.h"
 
 #include <wx/button.h>
 #include <wx/choice.h>
@@ -9,7 +10,6 @@
 #include <wx/filename.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
-#include <wx/stdpaths.h>
 
 #include "progress_flow_transform.h"
 
@@ -244,9 +244,8 @@ void Flow_Panel::Set_Tool_Coordinates(
 
 void Flow_Panel::Build_Ui()
 {
-  const wxString exe_dir =
-    wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
-  m_config_path = exe_dir + "/vtk_flow_config.ini";
+  m_config_path = wxString::FromUTF8(
+    application::Get_App_Paths().flow_config_file.u8string());
   const wxString last_msg = Load_Config();
 
   auto* sizer = new wxBoxSizer(wxVERTICAL);

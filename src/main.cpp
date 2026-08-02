@@ -1,12 +1,18 @@
 #include <wx/wx.h>
+#include <wx/stdpaths.h>
 
+#include "app_paths.h"
 #include "camera_config_dialog.h"
+#include "camera_2d_cross_template.h"
+#include "camera_2d_service.h"
 #include "camera_service.h"
 #include "robot_model_panel.h"
+#include "robot_connection_controller.h"
 #include "template_configuration_repository.h"
 #include "template_settings_dialog.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace
@@ -31,7 +37,8 @@ public:
       this,
       m_camera_service,
       m_camera_2d_service,
-      m_camera_2d_template_service);
+      m_camera_2d_template_service,
+      m_robot_connection);
 
     auto *sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(m_model_panel, 1, wxEXPAND | wxALL, 4);
@@ -129,6 +136,9 @@ private:
   Camera_Service m_camera_service;
   Camera_2D_Service m_camera_2d_service;
   Camera_2D_Cross_Template_Service m_camera_2d_template_service;
+  std::shared_ptr<application::Robot_Connection_Controller>
+    m_robot_connection =
+      std::make_shared<application::Robot_Connection_Controller>();
   Robot_Model_Panel *m_model_panel = nullptr;
 };
 
@@ -138,6 +148,9 @@ public:
   bool OnInit() override
   {
     wxInitAllImageHandlers();
+    const wxString executable = wxStandardPaths::Get().GetExecutablePath();
+    application::Configure_App_Paths(application::Discover_App_Paths(
+      std::filesystem::path(std::wstring(executable.wc_str()))));
     auto *frame = new Test_Frame();
     frame->Show();
     return true;

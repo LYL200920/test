@@ -33,7 +33,7 @@ Robot_Model_Config_Dialog::Robot_Model_Config_Dialog(
   const std::vector<robot_model::Robot_Model_Info> &models,
   const std::string &current_model_id,
   const robot_model::Tool_Coordinate_Configuration &tool_configuration,
-  const kuka::Connection_Config &connection_configuration)
+  const application::Robot_Connection_Config &connection_configuration)
   : wxDialog(
       parent,
       wxID_ANY,
@@ -300,7 +300,7 @@ Robot_Model_Config_Dialog::Tool_Configuration() const
   return m_tool_configuration;
 }
 
-const kuka::Connection_Config &
+const application::Robot_Connection_Config &
 Robot_Model_Config_Dialog::Connection_Configuration() const
 {
   return m_connection_configuration;

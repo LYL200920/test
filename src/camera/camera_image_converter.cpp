@@ -1,6 +1,6 @@
 #include "camera_image_converter.h"
 
-#include "camera_stream_config.h"
+#include "camera_formats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -67,17 +67,17 @@ namespace
 
   bool Is_Color_Type(std::uint32_t image_type)
   {
-    return image_type == static_cast<std::uint32_t>(ImageType_RGB8_Planar) ||
-           image_type == static_cast<std::uint32_t>(ImageType_YUV422) ||
-           image_type == static_cast<std::uint32_t>(ImageType_YUV420SP_NV12) ||
-           image_type == static_cast<std::uint32_t>(ImageType_YUV420SP_NV21);
+    return image_type == camera_formats::Rgb8_Planar ||
+           image_type == camera_formats::Yuv422 ||
+           image_type == camera_formats::Nv12 ||
+           image_type == camera_formats::Nv21;
   }
 
   bool Is_Depth_Type(std::uint32_t image_type)
   {
-    return image_type == static_cast<std::uint32_t>(ImageType_Depth) ||
-           image_type == static_cast<std::uint32_t>(ImageType_Mono16) ||
-           image_type == static_cast<std::uint32_t>(ImageType_Mono8);
+    return image_type == camera_formats::Depth ||
+           image_type == camera_formats::Mono16 ||
+           image_type == camera_formats::Mono8;
   }
 
   const Camera_Image_Frame *Select_Image(const Camera_Frame &frame,
@@ -274,18 +274,18 @@ bool Convert_Camera_Frame_To_Display_Image(const Camera_Frame &frame,
   destination->source_image_type = image->image_type;
   destination->source_frame_number = image->frame_number;
 
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_RGB8_Planar))
+  if (image->image_type == camera_formats::Rgb8_Planar)
     return Convert_Rgb_Planar(*image, pixel_count, destination, error);
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_YUV422))
+  if (image->image_type == camera_formats::Yuv422)
     return Convert_Yuyv(*image, pixel_count, destination, error);
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_YUV420SP_NV12))
+  if (image->image_type == camera_formats::Nv12)
     return Convert_Nv(*image, pixel_count, false, destination, error);
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_YUV420SP_NV21))
+  if (image->image_type == camera_formats::Nv21)
     return Convert_Nv(*image, pixel_count, true, destination, error);
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_Mono8))
+  if (image->image_type == camera_formats::Mono8)
     return Convert_Mono8(*image, pixel_count, destination, error);
-  if (image->image_type == static_cast<std::uint32_t>(ImageType_Depth) ||
-      image->image_type == static_cast<std::uint32_t>(ImageType_Mono16))
+  if (image->image_type == camera_formats::Depth ||
+      image->image_type == camera_formats::Mono16)
     return Convert_Depth16(*image, pixel_count, destination, error);
 
   return Return_Error("Image type is not supported by the preview converter", error);

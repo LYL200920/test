@@ -1,6 +1,5 @@
 #include "robot_base_point_cloud_builder.h"
-
-#include "Mv3dRgbdDefine.h"
+#include "camera_formats.h"
 
 #include <cmath>
 #include <cstring>
@@ -27,8 +26,8 @@ void test_complete_camera_to_robot_base_pipeline ( )
 {
   Camera_Frame frame;
   Camera_Image_Frame image;
-  image.image_type = static_cast<std::uint32_t> (ImageType_PointCloud);
-  image.coordinate_type = static_cast<std::uint32_t> (CoordinateType_Depth);
+  image.image_type = camera_formats::Point_Cloud;
+  image.coordinate_type = camera_formats::Depth_Coordinates;
   image.width = image.height = 1;
   image.frame_number = 42;
   append_float (&image.data, 100000.0f);
@@ -43,7 +42,7 @@ void test_complete_camera_to_robot_base_pipeline ( )
   calibration.camera_to_robot[1][3] = 20.0;
   calibration.camera_to_robot[2][3] = 30.0;
   calibration.camera_coordinate_type =
-    static_cast<std::uint32_t> (CoordinateType_Depth);
+    camera_formats::Depth_Coordinates;
   calibration.point_cloud_unit_to_mm = 0.001;
 
   point_cloud::Robot_Base_Point_Cloud output;
@@ -73,9 +72,9 @@ void test_micrometre_textured_cloud_unit_is_detected ( )
   Camera_Frame frame;
   Camera_Image_Frame image;
   image.image_type =
-    static_cast<std::uint32_t> (ImageType_TexturedPointCloud);
+    camera_formats::Textured_Point_Cloud;
   image.coordinate_type =
-    static_cast<std::uint32_t> (CoordinateType_Depth);
+    camera_formats::Depth_Coordinates;
   image.width = image.height = 1;
   append_float (&image.data, 100000.0f);
   append_float (&image.data, 200000.0f);
@@ -87,7 +86,7 @@ void test_micrometre_textured_cloud_unit_is_detected ( )
   for( int index = 0; index < 4; ++index )
     calibration.camera_to_robot[index][index] = 1.0;
   calibration.camera_coordinate_type =
-    static_cast<std::uint32_t> (CoordinateType_Depth);
+    camera_formats::Depth_Coordinates;
   calibration.point_cloud_unit_to_mm = 1.0;
 
   point_cloud::Robot_Base_Point_Cloud output;

@@ -1,7 +1,7 @@
 #include "point_cloud_template_binding_repository.h"
 
+#include "app_paths.h"
 #include "pugixml.hpp"
-#include "robot_model_repository.h"
 
 #include <filesystem>
 #include <unordered_set>
@@ -23,14 +23,8 @@ void Set_Error(std::string *error_message, const std::string &message)
 
 std::filesystem::path Point_Cloud_Template_Binding_Config_Path()
 {
-  const std::filesystem::path robot_root = Find_Robot_Root();
-  if (!robot_root.empty())
-  {
-    return robot_root.parent_path() / "Config" /
-      "point_cloud_template_bindings.xml";
-  }
-  return std::filesystem::current_path() /
-    "Resource" / "Config" / "point_cloud_template_bindings.xml";
+  return application::Get_App_Paths().config_root /
+         "point_cloud_template_bindings.xml";
 }
 
 bool Load_Point_Cloud_Template_Bindings(

@@ -1,4 +1,5 @@
 #include "kuka_connection_config.h"
+#include "app_paths.h"
 
 #include <fstream>
 #include <limits>
@@ -28,12 +29,8 @@ std::string Trim_Carriage_Return(std::string value)
 
 std::filesystem::path Connection_Config_Path()
 {
-#ifdef KUKA_CONFIG_ROOT
-  return std::filesystem::path(KUKA_CONFIG_ROOT) / "robot_connection.ini";
-#else
-  return std::filesystem::current_path() /
-         "Resource" / "Config" / "robot_connection.ini";
-#endif
+  return application::Get_App_Paths().config_root /
+         "robot_connection.ini";
 }
 
 bool Load_Connection_Config(
