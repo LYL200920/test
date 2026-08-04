@@ -79,6 +79,7 @@ public:
       wxWindowID id = wxID_ANY);
   ~Robot_Model_Panel_Controller() override;
 
+  void Initialize_After_Layout();
   void Show_Model_Configuration(wxWindow *parent = nullptr);
   void Refresh_Template_Configuration();
 
@@ -232,6 +233,7 @@ private:
   wxChoice *m_interaction_coordinate_choice = nullptr;
   wxButton *m_reset_robot_button = nullptr;
   Main_Display_Page m_display_page = Main_Display_Page::Robot;
+  bool m_initialization_completed = false;
   Right_Tool_Panel *m_right_tool_panel = nullptr;
   Net_Panel *m_tcp_panel = nullptr;
   std::shared_ptr<application::Robot_Connection_Controller>

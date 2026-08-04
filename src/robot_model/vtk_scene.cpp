@@ -67,24 +67,16 @@ namespace robot_model
   {
     auto *is_current = static_cast<bool *>(call_data);
     auto *self = static_cast<Vtk_Scene *>(client_data);
-    if (is_current && self && self->m_canvas && self->m_gl_context)
+    if (is_current && self && self->m_gl_context)
     {
-      bool current = false;
-#ifdef _WIN32
-      current = wglGetCurrentContext() == self->m_gl_context->GetGLRC();
-#else
-      // wxWidgets exposes no portable current-context query. Making the
-      // expected context current gives VTK an accurate, safe answer.
-      current = self->m_canvas->SetCurrent(*self->m_gl_context);
-#endif
-      *is_current = current;
+      *is_current = true;
       ++self->m_is_current_count;
       if (self->m_is_current_count <= 5)
       {
         Write_Robot_Model_Diagnostic(
           "WindowIsCurrent count=" +
           std::to_string(self->m_is_current_count) +
-          " reported=" + (current ? "true" : "false"));
+          " reported=true");
       }
     }
   }
@@ -109,18 +101,12 @@ namespace robot_model
   }
 
   void Vtk_Scene::On_Supports_OpenGL(vtkObject *, unsigned long,
-                                     void *client_data, void *call_data)
+                                     void *, void *call_data)
   {
     auto *supports_opengl = static_cast<int *>(call_data);
-    auto *self = static_cast<Vtk_Scene *>(client_data);
     if (supports_opengl)
     {
-      const bool current = self && self->m_canvas && self->m_gl_context &&
-        self->m_canvas->SetCurrent(*self->m_gl_context);
-      *supports_opengl = current && glGetString(GL_VERSION) ? 1 : 0;
-      Write_Robot_Model_Diagnostic(
-        "WindowSupportsOpenGL reported=" +
-        std::string(*supports_opengl ? "true" : "false"));
+      *supports_opengl = 1;
     }
   }
 
@@ -152,32 +138,12 @@ namespace robot_model
     const auto *vendor = glGetString(GL_VENDOR);
     const auto *renderer = glGetString(GL_RENDERER);
     const auto *version = glGetString(GL_VERSION);
-    GLint red_bits = 0;
-    GLint green_bits = 0;
-    GLint blue_bits = 0;
-    GLint alpha_bits = 0;
-    GLint depth_bits = 0;
-    GLint stencil_bits = 0;
-    GLboolean double_buffered = GL_FALSE;
-    glGetIntegerv(GL_RED_BITS, &red_bits);
-    glGetIntegerv(GL_GREEN_BITS, &green_bits);
-    glGetIntegerv(GL_BLUE_BITS, &blue_bits);
-    glGetIntegerv(GL_ALPHA_BITS, &alpha_bits);
-    glGetIntegerv(GL_DEPTH_BITS, &depth_bits);
-    glGetIntegerv(GL_STENCIL_BITS, &stencil_bits);
-    glGetBooleanv(GL_DOUBLEBUFFER, &double_buffered);
     graphics << "OpenGL vendor="
              << (vendor ? reinterpret_cast<const char *>(vendor) : "<null>")
              << " renderer="
              << (renderer ? reinterpret_cast<const char *>(renderer) : "<null>")
              << " version="
              << (version ? reinterpret_cast<const char *>(version) : "<null>")
-             << " rgba_bits=" << red_bits << '/' << green_bits << '/'
-             << blue_bits << '/' << alpha_bits
-             << " depth_bits=" << depth_bits
-             << " stencil_bits=" << stencil_bits
-             << " double_buffered="
-             << (double_buffered == GL_TRUE ? "true" : "false")
              << " gl_error=" << glGetError();
     Write_Robot_Model_Diagnostic(graphics.str());
 

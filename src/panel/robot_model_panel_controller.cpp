@@ -1150,7 +1150,6 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     if( m_status_text )
       m_status_text->SetLabel (wxString::FromUTF8 (connection_error.c_str ( )));
   }
-  Load_Default_Model ( );
   Refresh_Kuka_Status_Table ( );
 }
 
@@ -1184,6 +1183,25 @@ Robot_Model_Panel_Controller::~Robot_Model_Panel_Controller()
     &Robot_Model_Panel_Controller::On_Run_Timer,
     this,
     m_run_timer.GetId());
+}
+
+void Robot_Model_Panel_Controller::Initialize_After_Layout()
+{
+  if( m_initialization_completed ) return;
+
+  // The host invokes this from CallAfter, once the final parent hierarchy has
+  // been laid out and the top-level frame has been shown.  Creating VTK's
+  // native OpenGL resources in this controller's constructor is unreliable on
+  // Windows, especially with a wxGLCanvas nested inside a wxSimplebook.
+  Layout();
+  if( m_display_book ) m_display_book->Layout();
+  Load_Default_Model ( );
+  m_initialization_completed = true;
+  if( m_view )
+  {
+    m_view->Refresh(false);
+    m_view->Render_Scene ( );
+  }
 }
 
 void Robot_Model_Panel_Controller::On_Kuka_Model_State(wxThreadEvent &event)

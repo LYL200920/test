@@ -13,86 +13,15 @@
 #include <sstream>
 #include <utility>
 
-namespace
-{
-wxGLAttributes preferred_canvas_attributes()
-{
-  wxGLAttributes attributes;
-  attributes.PlatformDefaults()
-    .RGBA()
-    .DoubleBuffer()
-    .Depth(24)
-    .Stencil(8)
-    .EndList();
-  return attributes;
-}
-
-wxGLAttributes fallback_canvas_attributes()
-{
-  wxGLAttributes attributes;
-  attributes.PlatformDefaults().Defaults().EndList();
-  return attributes;
-}
-
-wxGLAttributes select_canvas_attributes()
-{
-  auto preferred = preferred_canvas_attributes();
-  if (wxGLCanvas::IsDisplaySupported(preferred)) return preferred;
-  return fallback_canvas_attributes();
-}
-
-wxGLContext *create_compatible_context(wxGLCanvas *canvas,
-                                       std::string *selected_profile)
-{
-  wxGLContextAttrs attributes;
-  attributes.PlatformDefaults().CoreProfile().OGLVersion(3, 2).EndList();
-  auto *context = new wxGLContext(canvas, nullptr, &attributes);
-  if (context->IsOK())
-  {
-    if (selected_profile) *selected_profile = "core-3.2";
-    return context;
-  }
-  delete context;
-
-  attributes.Reset();
-  attributes.PlatformDefaults()
-    .CompatibilityProfile()
-    .OGLVersion(3, 2)
-    .EndList();
-  context = new wxGLContext(canvas, nullptr, &attributes);
-  if (context->IsOK())
-  {
-    if (selected_profile) *selected_profile = "compatibility-3.2";
-    return context;
-  }
-  delete context;
-
-  context = new wxGLContext(canvas);
-  if (selected_profile)
-    *selected_profile = context->IsOK() ? "platform-default" : "unavailable";
-  return context;
-}
-} // namespace
-
 Robot_Model_View::Robot_Model_View(wxWindow *parent, wxWindowID id)
-    : wxGLCanvas(parent, select_canvas_attributes(), id,
-                 wxDefaultPosition, wxDefaultSize,
+    : wxGLCanvas(parent, id, nullptr, wxDefaultPosition, wxDefaultSize,
                  wxBORDER_SIMPLE | wxFULL_REPAINT_ON_RESIZE),
       m_drag_update_timer(this)
 {
   robot_model::Initialize_Robot_Model_Diagnostics();
   robot_model::Write_Robot_Model_Diagnostic("Robot_Model_View constructed");
   SetBackgroundStyle(wxBG_STYLE_PAINT);
-  std::string selected_profile;
-  m_gl_context = create_compatible_context(this, &selected_profile);
-  const bool preferred_attributes_supported =
-    wxGLCanvas::IsDisplaySupported(preferred_canvas_attributes());
-  robot_model::Write_Robot_Model_Diagnostic(
-    "GL canvas preferred_attributes_supported=" +
-    std::string(preferred_attributes_supported ? "true" : "false") +
-    " selected_context=" + selected_profile +
-    " context_ok=" +
-    ((m_gl_context && m_gl_context->IsOK()) ? "true" : "false"));
+  m_gl_context = new wxGLContext(this);
 
   Bind(wxEVT_SIZE, &Robot_Model_View::On_Size, this);
   Bind(wxEVT_PAINT, &Robot_Model_View::On_Paint, this);
@@ -507,18 +436,7 @@ void Robot_Model_View::Ensure_VTK()
     return;
   }
 
-  if (!m_gl_context || !m_gl_context->IsOK() ||
-      !SetCurrent(*m_gl_context))
-  {
-    if (!m_context_failure_logged)
-    {
-      robot_model::Write_Robot_Model_Diagnostic(
-        "Ensure_VTK failed: OpenGL context is unavailable or cannot be made current");
-      m_context_failure_logged = true;
-    }
-    return;
-  }
-  m_context_failure_logged = false;
+  SetCurrent(*m_gl_context);
   m_scene = std::make_unique<robot_model::Vtk_Scene>();
   m_scene->Init(this, m_gl_context);
   m_render_controller.Attach_Scene(m_scene.get());
@@ -602,18 +520,7 @@ void Robot_Model_View::Render()
   m_last_render_time_ms = 0.0;
   if (m_scene && m_scene->Is_Ready())
   {
-    if (!m_gl_context || !m_gl_context->IsOK() ||
-        !SetCurrent(*m_gl_context))
-    {
-      if (!m_context_failure_logged)
-      {
-        robot_model::Write_Robot_Model_Diagnostic(
-          "Render skipped: OpenGL context cannot be made current");
-        m_context_failure_logged = true;
-      }
-      return;
-    }
-    m_context_failure_logged = false;
+    SetCurrent(*m_gl_context);
     const auto size = GetClientSize();
     glViewport(0, 0, size.x, size.y);
     glClearColor(0.02f, 0.08f, 0.16f, 1.0f);

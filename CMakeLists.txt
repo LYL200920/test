@@ -370,7 +370,9 @@ if(BUILD_DESKTOP_APP)
   file(GLOB panel_sources CONFIGURE_DEPENDS "src/panel/*.cpp")
   file(GLOB panel_headers CONFIGURE_DEPENDS "include/panel/*.h" "include/panel/*.hpp")
   add_library(panel STATIC ${panel_sources} ${panel_headers})
-  target_include_directories(panel PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include/panel")
+  target_include_directories(panel PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/panel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/panel")
   target_link_libraries(panel PUBLIC
     application_core
     app_paths
@@ -476,7 +478,7 @@ if(BUILD_TESTING)
 
   add_project_test(robot_model_panel_boundary_tests
                    robot_model_panel_boundary_tests.cpp)
-  target_link_libraries(robot_model_panel_boundary_tests PRIVATE wx::core)
+  target_link_libraries(robot_model_panel_boundary_tests PRIVATE panel)
 
   add_project_test(robot_kinematics_core_tests robot_kinematics_core_tests.cpp)
   target_link_libraries(robot_kinematics_core_tests PRIVATE robot_model_domain)
