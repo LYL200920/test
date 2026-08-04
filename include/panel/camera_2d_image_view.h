@@ -29,6 +29,9 @@ class Camera_2D_Bitmap_Canvas : public wxPanel
 public:
   explicit Camera_2D_Bitmap_Canvas(wxWindow *parent);
   void Set_Bitmap(wxBitmap bitmap);
+  void Set_Frame(
+    wxBitmap bitmap,
+    std::vector<Camera_2D_Cross_Detection> detections);
   void Clear_Bitmap();
   void Set_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);

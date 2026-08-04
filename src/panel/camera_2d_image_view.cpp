@@ -29,6 +29,8 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
   : wxPanel(parent, wxID_ANY)
 {
   SetBackgroundStyle(wxBG_STYLE_PAINT);
+  SetBackgroundColour(wxColour(24, 24, 24));
+  SetDoubleBuffered(true);
   Bind(wxEVT_PAINT, &Camera_2D_Bitmap_Canvas::On_Paint, this);
   Bind(wxEVT_SIZE, &Camera_2D_Bitmap_Canvas::On_Size, this);
   Bind(wxEVT_LEFT_DOWN, &Camera_2D_Bitmap_Canvas::On_Left_Down, this);
@@ -54,8 +56,26 @@ void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
   Refresh(false);
 }
 
+void Camera_2D_Bitmap_Canvas::Set_Frame(
+  wxBitmap bitmap,
+  std::vector<Camera_2D_Cross_Detection> detections)
+{
+  if (!m_bitmap.IsOk() ||
+      m_bitmap.GetWidth() != bitmap.GetWidth() ||
+      m_bitmap.GetHeight() != bitmap.GetHeight())
+  {
+    m_pan_offset = wxPoint();
+  }
+  m_bitmap = std::move(bitmap);
+  m_detections = std::move(detections);
+  // The image and its overlays belong to the same camera frame. Updating them
+  // together avoids two back-to-back paints in continuous acquisition mode.
+  Refresh(false);
+}
+
 void Camera_2D_Bitmap_Canvas::Clear_Bitmap()
 {
+  if (!m_bitmap.IsOk() && m_detections.empty()) return;
   m_bitmap = wxBitmap();
   m_detections.clear();
   Refresh(false);
@@ -545,7 +565,8 @@ Camera_2D_Image_View::Camera_2D_Image_View(
   auto *zoom_sizer = new wxBoxSizer(wxHORIZONTAL);
   zoom_sizer->Add(fit, 0);
   m_status_text = new wxStaticText(
-    this, wxID_ANY, wxString::FromUTF8(u8"请先打开2D相机"));
+    this, wxID_ANY, wxString::FromUTF8(u8"请先打开2D相机"),
+    wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(zoom_sizer, 0, wxEXPAND | wxALL, 6);
   sizer->Add(m_canvas, 1, wxEXPAND);
@@ -635,8 +656,7 @@ void Camera_2D_Image_View::Show_Static_Image(
   if (!image.IsOk() || !image.GetData()) return;
   std::memcpy(
     image.GetData(), image_data.rgb.data(), image_data.rgb.size());
-  m_canvas->Set_Bitmap(wxBitmap(image));
-  m_canvas->Set_Detections(std::move(detections));
+  m_canvas->Set_Frame(wxBitmap(image), std::move(detections));
   m_status_text->SetLabel(wxString::Format(
     wxString::FromUTF8(u8"读取图片：%s  %u × %u"),
     wxString::FromUTF8(source_name.c_str()),
@@ -746,7 +766,8 @@ void Camera_2D_Image_View::Consume_Result()
   m_last_displayed_job_id = result->job_id;
   if (!result->success)
   {
-    m_canvas->Clear_Bitmap();
+    // A transient bad frame must not blank the last valid image. Otherwise a
+    // continuous stream visibly alternates between the image and background.
     m_status_text->SetLabel(
       wxString::FromUTF8(result->error.c_str()));
     return;
@@ -761,14 +782,22 @@ void Camera_2D_Image_View::Consume_Result()
       wxString::FromUTF8(u8"创建2D显示图像失败"));
     return;
   }
+  const std::size_t expected_rgb_size =
+    static_cast<std::size_t>(result->image.width) *
+    result->image.height * 3;
+  if (result->image.rgb.size() != expected_rgb_size)
+  {
+    m_status_text->SetLabel(
+      wxString::FromUTF8(u8"2D显示图像缓冲区无效"));
+    return;
+  }
   std::memcpy(
     image.GetData(),
     result->image.rgb.data(),
     result->image.rgb.size());
-  m_canvas->Set_Bitmap(wxBitmap(image));
-  m_canvas->Set_Detections(result->detections);
+  m_canvas->Set_Frame(wxBitmap(image), result->detections);
   const auto status = m_camera_service.Status();
-  m_status_text->SetLabel(wxString::Format(
+  wxString status_label = wxString::Format(
     wxString::FromUTF8(
       u8"%u × %u  Frame=%llu  %.1f FPS  %s"),
     result->image.width,
@@ -776,14 +805,14 @@ void Camera_2D_Image_View::Consume_Result()
     result->image.frame_number,
     status.frames_per_second,
     wxString::FromUTF8(
-      jutze_camera::pixel_format_name(status.pixel_format))));
+      jutze_camera::pixel_format_name(status.pixel_format)));
   const auto found_detection = std::find_if(
     result->detections.begin(),
     result->detections.end(),
     [](const auto &item) { return item.found; });
   if (found_detection != result->detections.end())
   {
-    m_status_text->SetLabel(wxString::Format(
+    status_label = wxString::Format(
       wxString::FromUTF8(
         u8"%u × %u  Frame=%llu  %.1f FPS  "
         u8"十字中心（图片像素坐标系）X=%.2f px，Y=%.2f px"),
@@ -792,8 +821,9 @@ void Camera_2D_Image_View::Consume_Result()
       result->image.frame_number,
       status.frames_per_second,
       found_detection->center_x,
-      found_detection->center_y));
+      found_detection->center_y);
   }
+  m_status_text->SetLabel(status_label);
 }
 
 void Camera_2D_Image_View::On_Timer(wxTimerEvent &)
