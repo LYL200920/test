@@ -627,21 +627,21 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   Camera_2D_Cross_Template_Service& camera_2d_template_service,
   std::shared_ptr<application::Robot_Connection_Controller> robot_connection,
   wxWindowID id)
-  : wxPanel (parent, id)
+  : wxPanel(parent, id)
 {
   m_camera_2d_service = &camera_2d_service;
   m_robot_connection = std::move(robot_connection);
   if( !m_robot_connection )
     throw std::invalid_argument("Robot connection controller is null.");
-  Bind (
+  this->Bind (
     wxEVT_KUKA_MODEL_STATE,
     &Robot_Model_Panel_Controller::On_Kuka_Model_State,
     this);
-  Bind (
+  this->Bind (
     wxEVT_KUKA_SERVICE_STATUS,
     &Robot_Model_Panel_Controller::On_Kuka_Service_Status,
     this);
-  Bind (
+  this->Bind (
     wxEVT_RUN_IMAGE_PROCESSING_RESULT,
     &Robot_Model_Panel_Controller::On_Run_Image_Processing_Result,
     this);
@@ -1087,10 +1087,10 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     TEACH_POINT_DEFAULT_EXPANDED_WIDTH);
 
   m_trajectory_timer.SetOwner (this);
-  Bind (wxEVT_TIMER, &Robot_Model_Panel_Controller::On_Trajectory_Timer, this,
+  this->Bind (wxEVT_TIMER, &Robot_Model_Panel_Controller::On_Trajectory_Timer, this,
         m_trajectory_timer.GetId ( ));
   m_run_timer.SetOwner (this);
-  Bind (wxEVT_TIMER, &Robot_Model_Panel_Controller::On_Run_Timer, this,
+  this->Bind (wxEVT_TIMER, &Robot_Model_Panel_Controller::On_Run_Timer, this,
         m_run_timer.GetId ( ));
 
   auto* toolbar_sizer = new wxBoxSizer (wxHORIZONTAL);
@@ -1113,7 +1113,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     1,
     wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,
     6);
-  SetSizer (sizer);
+  this->SetSizer (sizer);
 
   Select_Display_Page (Main_Display_Page::Robot);
 
@@ -1165,20 +1165,20 @@ Robot_Model_Panel_Controller::~Robot_Model_Panel_Controller()
     m_robot_connection_observer_token = 0;
     m_robot_connection->Disconnect();
   }
-  DeletePendingEvents ( );
-  Unbind (
+  this->DeletePendingEvents ( );
+  this->Unbind (
     wxEVT_KUKA_MODEL_STATE,
     &Robot_Model_Panel_Controller::On_Kuka_Model_State,
     this);
-  Unbind (
+  this->Unbind (
     wxEVT_KUKA_SERVICE_STATUS,
     &Robot_Model_Panel_Controller::On_Kuka_Service_Status,
     this);
-  Unbind (
+  this->Unbind (
     wxEVT_RUN_IMAGE_PROCESSING_RESULT,
     &Robot_Model_Panel_Controller::On_Run_Image_Processing_Result,
     this);
-  Unbind (
+  this->Unbind (
     wxEVT_TIMER,
     &Robot_Model_Panel_Controller::On_Run_Timer,
     this,
@@ -1193,7 +1193,7 @@ void Robot_Model_Panel_Controller::Initialize_After_Layout()
   // been laid out and the top-level frame has been shown.  Creating VTK's
   // native OpenGL resources in this controller's constructor is unreliable on
   // Windows, especially with a wxGLCanvas nested inside a wxSimplebook.
-  Layout();
+  this->Layout();
   if( m_display_book ) m_display_book->Layout();
   Load_Default_Model ( );
   m_initialization_completed = true;

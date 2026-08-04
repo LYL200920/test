@@ -5,9 +5,8 @@
 
 #include <memory>
 
-// Keep the public panel as the native host of Robot_Model_View.  An additional
-// wxPanel layer around wxGLCanvas is not reliably composited by every Windows
-// OpenGL driver.
+// Inheritance keeps Robot_Model_Panel as the public wrapper without creating
+// another native wxPanel around the wxGLCanvas.
 class Robot_Model_Panel final : public Robot_Model_Panel_Controller
 {
 public:
