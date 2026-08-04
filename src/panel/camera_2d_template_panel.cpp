@@ -224,7 +224,6 @@ void Camera_2D_Template_Panel::Set_On_Show_Image(
 
 void Camera_2D_Template_Panel::Refresh_Template_List()
 {
-  const auto active = m_template_service.Active_Template();
   const auto templates = m_template_service.Templates();
   std::unordered_set<std::string> existing_ids;
   for (const auto &item : templates) existing_ids.insert(item.id);
@@ -236,9 +235,8 @@ void Camera_2D_Template_Panel::Refresh_Template_List()
     else
       ++iterator;
   }
-  if (!m_matching_selection_initialized && active)
-    m_visible_template_ids.insert(active->id);
-  m_matching_selection_initialized = true;
+  // Matching starts with no template selected. Users explicitly check the
+  // templates they want to run against the live or loaded image.
   m_refreshing_template_list = true;
   m_template_list->Freeze();
   m_template_list->DeleteAllItems();
@@ -254,14 +252,6 @@ void Camera_2D_Template_Panel::Refresh_Template_List()
       m_visible_template_ids.find(templates[index].id) !=
         m_visible_template_ids.end());
     m_template_ids.push_back(templates[index].id);
-    if (active && active->id == templates[index].id)
-    {
-      m_template_list->SetItemState(
-        row,
-        wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-        wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-      m_template_list->EnsureVisible(row);
-    }
   }
   m_template_list->Thaw();
   m_refreshing_template_list = false;
@@ -646,7 +636,6 @@ void Camera_2D_Template_Panel::On_Roi_Selected(
     Show_Error(error);
     return;
   }
-  if (!updating) m_visible_template_ids.insert(created_id);
   m_instruction_text->SetLabel(
     updating
       ? wxString::FromUTF8(

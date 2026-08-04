@@ -142,7 +142,10 @@ private:
   void Update_Display_Menu();
   void Layout_Camera_2D_Preview();
   void Toggle_Camera_2D_Preview();
+  void Collapse_Camera_2D_Preview();
+  void Hide_Camera_Preview_Menu_If_Pointer_Left();
   void Ensure_Camera_2D_Floating_Preview();
+  void Select_Camera_Preview(Main_Display_Page page);
   wxPanel *Build_Robot_Tool_Page(wxWindow *parent);
   wxPanel *Build_Teach_Tool_Page(wxWindow *parent);
   void Apply_Joint_Limits(const robot_model::Robot_Kinematic_Params &params);
@@ -203,6 +206,13 @@ private:
   void Apply_Tool_Visualization();
 
 private:
+  enum class Camera_Preview_State
+  {
+    Launcher,
+    Quarter,
+    Full
+  };
+
   struct Run_Captured_Frame
   {
     std::shared_ptr<const jutze_camera::camera_frame> frame;
@@ -259,17 +269,23 @@ private:
   bool m_hardware_step_preview_active = false;
   bool m_teach_step_preview_active = false;
   Camera_Control_Panel *m_camera_control_panel = nullptr;
+  Camera_Service *m_camera_service = nullptr;
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;
   Camera_2D_Service *m_camera_2d_service = nullptr;
   Camera_2D_Cross_Template_Service *m_camera_2d_template_service = nullptr;
   wxPanel *m_display_panel = nullptr;
-  wxPanel *m_camera_2d_preview_panel = nullptr;
-  Camera_2D_Image_View *m_camera_2d_preview_view = nullptr;
+  wxSimplebook *m_camera_preview_book = nullptr;
+  wxButton *m_camera_preview_3d_button = nullptr;
+  wxButton *m_camera_preview_2d_button = nullptr;
+  wxButton *m_camera_preview_cloud_button = nullptr;
+  wxButton *m_camera_preview_launcher_button = nullptr;
   wxButton *m_camera_2d_preview_toggle = nullptr;
+  wxButton *m_camera_preview_collapse_button = nullptr;
   wxMiniFrame *m_camera_2d_preview_frame = nullptr;
-  Camera_2D_Image_View *m_camera_2d_floating_view = nullptr;
-  bool m_camera_2d_preview_expanded = false;
+  Camera_Preview_State m_camera_preview_state = Camera_Preview_State::Launcher;
+  bool m_camera_preview_menu_visible = false;
+  Main_Display_Page m_camera_preview_page = Main_Display_Page::Camera_2D_Image;
   Run_Progress_Panel *m_run_progress_panel = nullptr;
   Joint_Control_Panel *m_joint_panel = nullptr;
   Cartesian_Pose_Panel *m_cartesian_pose_panel = nullptr;

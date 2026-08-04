@@ -632,6 +632,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
 {
   m_camera_2d_service = &camera_2d_service;
   m_camera_2d_template_service = &camera_2d_template_service;
+  m_camera_service = &camera_service;
   m_robot_connection = std::move(robot_connection);
   if( !m_robot_connection )
     throw std::invalid_argument("Robot connection controller is null.");
@@ -667,26 +668,8 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   m_robot_connection_observer_token =
     m_robot_connection->Subscribe(std::move(robot_observer));
 
-  auto* title = new wxStaticText (
-    this, wxID_ANY, wxString::FromUTF8 (u8"显示区域"));
   m_model_name_text = new wxStaticText (
     this, wxID_ANY, wxString::FromUTF8 (u8"当前机械臂：未加载"));
-  m_robot_display_button = new wxToggleButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"机械臂"));
-  m_camera_display_button = new wxToggleButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"相机图像"));
-  m_camera_2d_display_button = new wxToggleButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"2D图像"));
-  m_point_cloud_display_button = new wxToggleButton (
-    this, wxID_ANY, wxString::FromUTF8 (u8"点云"));
-  m_robot_display_button->Bind (
-    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel_Controller::On_Robot_Display, this);
-  m_camera_display_button->Bind (
-    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel_Controller::On_Camera_Image_Display, this);
-  m_camera_2d_display_button->Bind (
-    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel_Controller::On_Camera_2D_Image_Display, this);
-  m_point_cloud_display_button->Bind (
-    wxEVT_TOGGLEBUTTON, &Robot_Model_Panel_Controller::On_Point_Cloud_Display, this);
   m_workspace_splitter = new wxSplitterWindow (
     this,
     wxID_ANY,
@@ -797,32 +780,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     {
       Apply_Flange_Pose_Drag_Result (result);
     });
-  m_camera_image_view = new Camera_Image_View (
-    m_display_book, camera_service);
-  m_camera_2d_image_view = new Camera_2D_Image_View (
-    m_display_book, camera_2d_service, camera_2d_template_service);
-  m_point_cloud_view = new Point_Cloud_View (
-    m_display_book, camera_service);
-
-  m_camera_2d_preview_panel = new wxPanel (
-    display_panel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-    wxBORDER_SIMPLE);
-  m_camera_2d_preview_toggle = new wxButton (
-    m_camera_2d_preview_panel,
-    wxID_ANY,
-    wxString::FromUTF8 (u8"2D 相机 · 点击展开"));
-  m_camera_2d_preview_view = new Camera_2D_Image_View (
-    m_camera_2d_preview_panel,
-    camera_2d_service,
-    camera_2d_template_service);
-  auto* preview_sizer = new wxBoxSizer (wxVERTICAL);
-  preview_sizer->Add (m_camera_2d_preview_toggle, 0, wxEXPAND);
-  preview_sizer->Add (m_camera_2d_preview_view, 1, wxEXPAND);
-  m_camera_2d_preview_panel->SetSizer (preview_sizer);
-  m_camera_2d_preview_panel->Hide ( );
-  m_camera_2d_preview_toggle->Bind (
-    wxEVT_BUTTON,
-    [this] (wxCommandEvent&) { Toggle_Camera_2D_Preview ( ); });
+  Ensure_Camera_2D_Floating_Preview ( );
   display_panel->Bind (
     wxEVT_SIZE,
     [this] (wxSizeEvent& event)
@@ -936,9 +894,6 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     if( m_view ) m_view->Clear_Point_Cloud_Selection_Outline ( );
   };
   m_display_book->AddPage (m_view, wxEmptyString, true);
-  m_display_book->AddPage (m_camera_image_view, wxEmptyString, false);
-  m_display_book->AddPage (m_point_cloud_view, wxEmptyString, false);
-  m_display_book->AddPage (m_camera_2d_image_view, wxEmptyString, false);
   m_right_tool_panel = new Right_Tool_Panel (m_content_splitter);
   m_right_tool_panel->Set_On_Width_Changed (
     [this] (int width) { Resize_Right_Tool (width); });
@@ -1124,15 +1079,6 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
         m_run_timer.GetId ( ));
 
   auto* toolbar_sizer = new wxBoxSizer (wxHORIZONTAL);
-  toolbar_sizer->Add (title, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-  toolbar_sizer->Add (
-    m_robot_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  toolbar_sizer->Add (
-    m_camera_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  toolbar_sizer->Add (
-    m_camera_2d_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-  toolbar_sizer->Add (
-    m_point_cloud_display_button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
   toolbar_sizer->AddStretchSpacer (1);
   toolbar_sizer->Add (m_model_name_text, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
 
@@ -1190,7 +1136,7 @@ Robot_Model_Panel_Controller::~Robot_Model_Panel_Controller()
     m_camera_2d_preview_frame->SetEvtHandlerEnabled (false);
     m_camera_2d_preview_frame->Destroy ( );
     m_camera_2d_preview_frame = nullptr;
-    m_camera_2d_floating_view = nullptr;
+    m_camera_preview_book = nullptr;
   }
   if( m_run_timer.IsRunning() )
     m_run_timer.Stop();
@@ -1623,86 +1569,119 @@ void Robot_Model_Panel_Controller::Set_Flange_Interaction_Mode (
 
 void Robot_Model_Panel_Controller::Select_Display_Page (Main_Display_Page page)
 {
-  m_display_page = page;
   if( m_display_book )
+    m_display_book->SetSelection (0);
+  m_display_page = Main_Display_Page::Robot;
+  if( page != Main_Display_Page::Robot )
   {
-    m_display_book->SetSelection (static_cast<int> (page));
+    Select_Camera_Preview (page);
+    if( m_camera_preview_state == Camera_Preview_State::Launcher )
+      m_camera_preview_state = Camera_Preview_State::Quarter;
+    m_camera_preview_menu_visible = false;
   }
-  if( m_camera_2d_preview_panel )
-  {
-    m_camera_2d_preview_panel->Show (
-      page == Main_Display_Page::Robot &&
-      !m_camera_2d_preview_expanded);
-    if( m_camera_2d_preview_frame )
-    {
-      m_camera_2d_preview_frame->Show (
-        page == Main_Display_Page::Robot &&
-        m_camera_2d_preview_expanded);
-    }
-    Layout_Camera_2D_Preview ( );
-  }
+  Layout_Camera_2D_Preview ( );
   Update_Display_Menu ( );
 }
 
 void Robot_Model_Panel_Controller::Layout_Camera_2D_Preview ( )
 {
-  if( !m_display_book || !m_camera_2d_preview_panel ||
-      m_display_page != Main_Display_Page::Robot )
+  if( !m_display_book || !m_display_panel )
     return;
+  Ensure_Camera_2D_Floating_Preview ( );
+  if( !m_camera_2d_preview_frame ) return;
 
   const wxRect area = m_display_book->GetRect ( );
   if( area.width <= 0 || area.height <= 0 ) return;
 
+  const bool launcher =
+    m_camera_preview_state == Camera_Preview_State::Launcher;
+  const bool full = m_camera_preview_state == Camera_Preview_State::Full;
+  const bool show_menu = launcher && m_camera_preview_menu_visible;
+
+  if( m_camera_preview_book ) m_camera_preview_book->Show (!launcher);
+  if( m_camera_preview_launcher_button )
+    m_camera_preview_launcher_button->Show (launcher);
+  if( m_camera_preview_3d_button )
+    m_camera_preview_3d_button->Show (!launcher || show_menu);
+  if( m_camera_preview_2d_button )
+    m_camera_preview_2d_button->Show (!launcher || show_menu);
+  if( m_camera_preview_cloud_button )
+    m_camera_preview_cloud_button->Show (!launcher || show_menu);
+  if( m_camera_2d_preview_toggle )
+    m_camera_2d_preview_toggle->Show (!launcher);
+  if( m_camera_preview_collapse_button )
+    m_camera_preview_collapse_button->Show (!launcher);
+  m_camera_2d_preview_frame->Layout ( );
+
   constexpr int margin = 12;
-  int width = m_camera_2d_preview_expanded ? area.width / 2 : 220;
-  int height = m_camera_2d_preview_expanded ? area.height / 2 : 165;
-  width = std::clamp (width, 180, std::max (180, area.width - 2 * margin));
-  height = std::clamp (
-    height, 135, std::max (135, area.height - 2 * margin));
-  const int x = m_camera_2d_preview_expanded
-    ? area.x + area.width - width - margin
-    : area.x + margin;
-  const int y = m_camera_2d_preview_expanded
-    ? area.y + margin
-    : area.y + area.height - height - margin;
-
-  if( m_camera_2d_preview_expanded )
+  int width = 0;
+  int height = 0;
+  int x = area.x;
+  int y = area.y;
+  if( launcher )
   {
-    Ensure_Camera_2D_Floating_Preview ( );
-    if( !m_camera_2d_preview_frame ) return;
-    const wxPoint screen_position =
-      m_display_panel->ClientToScreen (wxPoint (x, y));
-    m_camera_2d_preview_frame->SetSize (
-      screen_position.x, screen_position.y, width, height);
-    m_camera_2d_preview_frame->Show ( );
-    m_camera_2d_preview_frame->Raise ( );
-    return;
+    width = show_menu ? std::min (460, area.width) : std::min (130, area.width);
+    height = std::min (42, area.height);
+    x = area.x + margin;
+    y = area.y + area.height - height - margin;
   }
-
-  m_camera_2d_preview_panel->SetSize (x, y, width, height);
-  m_camera_2d_preview_panel->Layout ( );
-  m_camera_2d_preview_panel->Raise ( );
+  else if( full )
+  {
+    width = area.width;
+    height = area.height;
+  }
+  else
+  {
+    width = std::min (area.width, std::max (360, area.width / 2));
+    height = std::min (area.height, std::max (260, area.height / 2));
+    x = area.x + std::max (0, area.width - width - margin);
+    y = area.y + margin;
+  }
+  const wxPoint screen_position =
+    m_display_panel->ClientToScreen (wxPoint (x, y));
+  m_camera_2d_preview_frame->SetSize (
+    screen_position.x, screen_position.y, width, height);
+  if( m_camera_2d_preview_toggle )
+  {
+    m_camera_2d_preview_toggle->SetLabel (wxString::FromUTF8 (
+      full ? u8"恢复1/4" : u8"100%显示"));
+  }
+  m_camera_2d_preview_frame->Show ( );
+  m_camera_2d_preview_frame->Raise ( );
 }
 
 void Robot_Model_Panel_Controller::Toggle_Camera_2D_Preview ( )
 {
-  m_camera_2d_preview_expanded = !m_camera_2d_preview_expanded;
-  if( m_camera_2d_preview_toggle )
-  {
-    m_camera_2d_preview_toggle->SetLabel (wxString::FromUTF8 (
-      u8"2D 相机 · 点击展开"));
-  }
-  if( m_camera_2d_preview_panel )
-    m_camera_2d_preview_panel->Show (!m_camera_2d_preview_expanded);
-  if( m_camera_2d_preview_frame && !m_camera_2d_preview_expanded )
-    m_camera_2d_preview_frame->Hide ( );
+  if( m_camera_preview_state == Camera_Preview_State::Quarter )
+    m_camera_preview_state = Camera_Preview_State::Full;
+  else if( m_camera_preview_state == Camera_Preview_State::Full )
+    m_camera_preview_state = Camera_Preview_State::Quarter;
+  Layout_Camera_2D_Preview ( );
+}
+
+void Robot_Model_Panel_Controller::Collapse_Camera_2D_Preview ( )
+{
+  m_camera_preview_state = Camera_Preview_State::Launcher;
+  m_camera_preview_menu_visible = false;
+  Layout_Camera_2D_Preview ( );
+}
+
+void Robot_Model_Panel_Controller::Hide_Camera_Preview_Menu_If_Pointer_Left ( )
+{
+  if( m_camera_preview_state != Camera_Preview_State::Launcher ||
+      !m_camera_preview_menu_visible || !m_camera_2d_preview_frame )
+    return;
+  if( m_camera_2d_preview_frame->GetScreenRect ( ).Contains (
+        wxGetMousePosition ()))
+    return;
+  m_camera_preview_menu_visible = false;
   Layout_Camera_2D_Preview ( );
 }
 
 void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
 {
-  if( m_camera_2d_preview_frame || !m_camera_2d_service ||
-      !m_camera_2d_template_service )
+  if( m_camera_2d_preview_frame || !m_camera_service ||
+      !m_camera_2d_service || !m_camera_2d_template_service )
     return;
 
   m_camera_2d_preview_frame = new wxMiniFrame (
@@ -1712,39 +1691,127 @@ void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
     wxDefaultPosition,
     wxDefaultSize,
     wxBORDER_SIMPLE | wxFRAME_FLOAT_ON_PARENT | wxFRAME_NO_TASKBAR);
-  m_camera_2d_floating_view = new Camera_2D_Image_View (
-    m_camera_2d_preview_frame,
+  m_camera_preview_book = new wxSimplebook (
+    m_camera_2d_preview_frame, wxID_ANY);
+  m_camera_image_view = new Camera_Image_View (
+    m_camera_preview_book, *m_camera_service);
+  m_camera_2d_image_view = new Camera_2D_Image_View (
+    m_camera_preview_book,
     *m_camera_2d_service,
     *m_camera_2d_template_service);
+  m_point_cloud_view = new Point_Cloud_View (
+    m_camera_preview_book, *m_camera_service);
+  m_camera_preview_book->AddPage (m_camera_image_view, wxEmptyString, false);
+  m_camera_preview_book->AddPage (m_camera_2d_image_view, wxEmptyString, true);
+  m_camera_preview_book->AddPage (m_point_cloud_view, wxEmptyString, false);
+
+  m_camera_preview_3d_button = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"3D图像"));
+  m_camera_preview_2d_button = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"2D图像"));
+  m_camera_preview_cloud_button = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"点云"));
+  m_camera_preview_launcher_button = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"画面预览"));
+  m_camera_2d_preview_toggle = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"100%显示"));
+  m_camera_preview_collapse_button = new wxButton (
+    m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"收起"));
+  auto* controls = new wxBoxSizer (wxHORIZONTAL);
+  controls->Add (m_camera_preview_launcher_button, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add (m_camera_preview_3d_button, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add (m_camera_preview_2d_button, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add (m_camera_preview_cloud_button, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add (m_camera_2d_preview_toggle, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add (m_camera_preview_collapse_button, 1, wxEXPAND);
   auto* sizer = new wxBoxSizer (wxVERTICAL);
-  sizer->Add (m_camera_2d_floating_view, 1, wxEXPAND);
+  sizer->Add (m_camera_preview_book, 1, wxEXPAND);
+  sizer->Add (controls, 0, wxEXPAND | wxALL, 4);
   m_camera_2d_preview_frame->SetSizer (sizer);
-  auto* collapse = new wxButton (
-    m_camera_2d_preview_frame,
-    wxID_ANY,
-    wxString::FromUTF8 (u8"收起"),
-    wxDefaultPosition,
-    wxSize (64, 28));
-  collapse->Bind (
+  m_camera_preview_3d_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) {
+      Select_Camera_Preview (Main_Display_Page::Camera_Image);
+      if( m_camera_preview_state == Camera_Preview_State::Launcher )
+        m_camera_preview_state = Camera_Preview_State::Quarter;
+      m_camera_preview_menu_visible = false;
+      Layout_Camera_2D_Preview ( ); });
+  m_camera_preview_2d_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) {
+      Select_Camera_Preview (Main_Display_Page::Camera_2D_Image);
+      if( m_camera_preview_state == Camera_Preview_State::Launcher )
+        m_camera_preview_state = Camera_Preview_State::Quarter;
+      m_camera_preview_menu_visible = false;
+      Layout_Camera_2D_Preview ( ); });
+  m_camera_preview_cloud_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) {
+      Select_Camera_Preview (Main_Display_Page::Point_Cloud);
+      if( m_camera_preview_state == Camera_Preview_State::Launcher )
+        m_camera_preview_state = Camera_Preview_State::Quarter;
+      m_camera_preview_menu_visible = false;
+      Layout_Camera_2D_Preview ( ); });
+  m_camera_preview_launcher_button->Bind (
+    wxEVT_ENTER_WINDOW,
+    [this] (wxMouseEvent& event)
+    {
+      m_camera_preview_menu_visible = true;
+      Layout_Camera_2D_Preview ( );
+      event.Skip ( );
+    });
+  m_camera_2d_preview_toggle->Bind (
     wxEVT_BUTTON,
     [this] (wxCommandEvent&) { Toggle_Camera_2D_Preview ( ); });
-  m_camera_2d_preview_frame->Bind (
-    wxEVT_SIZE,
-    [collapse] (wxSizeEvent& event)
-    {
-      event.Skip ( );
-      const wxSize size = event.GetSize ( );
-      collapse->SetPosition (wxPoint (std::max (4, size.x - 70), 6));
-      collapse->Raise ( );
-    });
+  m_camera_preview_collapse_button->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) { Collapse_Camera_2D_Preview ( ); });
+
+  const auto bind_menu_leave = [this] (wxWindow* window)
+  {
+    window->Bind (
+      wxEVT_LEAVE_WINDOW,
+      [this] (wxMouseEvent& event)
+      {
+        CallAfter ([this] { Hide_Camera_Preview_Menu_If_Pointer_Left ( ); });
+        event.Skip ( );
+      });
+  };
+  bind_menu_leave (m_camera_2d_preview_frame);
+  bind_menu_leave (m_camera_preview_launcher_button);
+  bind_menu_leave (m_camera_preview_3d_button);
+  bind_menu_leave (m_camera_preview_2d_button);
+  bind_menu_leave (m_camera_preview_cloud_button);
   m_camera_2d_preview_frame->Bind (
     wxEVT_CLOSE_WINDOW,
     [this] (wxCloseEvent& event)
     {
       event.Veto ( );
-      if( m_camera_2d_preview_expanded )
-        Toggle_Camera_2D_Preview ( );
+      Collapse_Camera_2D_Preview ( );
     });
+  Select_Camera_Preview (m_camera_preview_page);
+}
+
+void Robot_Model_Panel_Controller::Select_Camera_Preview (
+  Main_Display_Page page)
+{
+  if( !m_camera_preview_book ) return;
+  int selection = 1;
+  if( page == Main_Display_Page::Camera_Image ) selection = 0;
+  else if( page == Main_Display_Page::Point_Cloud ) selection = 2;
+  else page = Main_Display_Page::Camera_2D_Image;
+  m_camera_preview_page = page;
+  m_camera_preview_book->SetSelection (selection);
+  const wxColour selected_colour (210, 230, 250);
+  if( m_camera_preview_3d_button )
+    m_camera_preview_3d_button->SetBackgroundColour (
+      selection == 0 ? selected_colour : wxNullColour);
+  if( m_camera_preview_2d_button )
+    m_camera_preview_2d_button->SetBackgroundColour (
+      selection == 1 ? selected_colour : wxNullColour);
+  if( m_camera_preview_cloud_button )
+    m_camera_preview_cloud_button->SetBackgroundColour (
+      selection == 2 ? selected_colour : wxNullColour);
 }
 
 void Robot_Model_Panel_Controller::Update_Display_Menu ( )

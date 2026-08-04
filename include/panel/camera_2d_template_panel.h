@@ -77,7 +77,6 @@ private:
   std::shared_ptr<const jutze_camera::camera_frame> m_creation_frame;
   bool m_roi_editing = false;
   bool m_refreshing_template_list = false;
-  bool m_matching_selection_initialized = false;
   std::string m_editing_template_id;
   std::unordered_set<std::string> m_visible_template_ids;
   std::optional<Camera_2D_Display_Image> m_loaded_image;
