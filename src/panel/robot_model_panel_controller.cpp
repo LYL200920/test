@@ -34,6 +34,7 @@
 #include <wx/image.h>
 #include <wx/grid.h>
 #include <wx/msgdlg.h>
+#include <wx/minifram.h>
 #include <wx/scrolwin.h>
 #include <wx/sizer.h>
 #include <wx/simplebook.h>
@@ -630,6 +631,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   : wxPanel(parent, id)
 {
   m_camera_2d_service = &camera_2d_service;
+  m_camera_2d_template_service = &camera_2d_template_service;
   m_robot_connection = std::move(robot_connection);
   if( !m_robot_connection )
     throw std::invalid_argument("Robot connection controller is null.");
@@ -1183,6 +1185,13 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
 
 Robot_Model_Panel_Controller::~Robot_Model_Panel_Controller()
 {
+  if( m_camera_2d_preview_frame )
+  {
+    m_camera_2d_preview_frame->SetEvtHandlerEnabled (false);
+    m_camera_2d_preview_frame->Destroy ( );
+    m_camera_2d_preview_frame = nullptr;
+    m_camera_2d_floating_view = nullptr;
+  }
   if( m_run_timer.IsRunning() )
     m_run_timer.Stop();
   if( m_run_image_processing_thread.joinable() )
@@ -1622,7 +1631,14 @@ void Robot_Model_Panel_Controller::Select_Display_Page (Main_Display_Page page)
   if( m_camera_2d_preview_panel )
   {
     m_camera_2d_preview_panel->Show (
-      page == Main_Display_Page::Robot);
+      page == Main_Display_Page::Robot &&
+      !m_camera_2d_preview_expanded);
+    if( m_camera_2d_preview_frame )
+    {
+      m_camera_2d_preview_frame->Show (
+        page == Main_Display_Page::Robot &&
+        m_camera_2d_preview_expanded);
+    }
     Layout_Camera_2D_Preview ( );
   }
   Update_Display_Menu ( );
@@ -1638,12 +1654,8 @@ void Robot_Model_Panel_Controller::Layout_Camera_2D_Preview ( )
   if( area.width <= 0 || area.height <= 0 ) return;
 
   constexpr int margin = 12;
-  int width = m_camera_2d_preview_expanded
-    ? area.width / 2
-    : 220;
-  int height = m_camera_2d_preview_expanded
-    ? area.height / 2
-    : 165;
+  int width = m_camera_2d_preview_expanded ? area.width / 2 : 220;
+  int height = m_camera_2d_preview_expanded ? area.height / 2 : 165;
   width = std::clamp (width, 180, std::max (180, area.width - 2 * margin));
   height = std::clamp (
     height, 135, std::max (135, area.height - 2 * margin));
@@ -1653,6 +1665,20 @@ void Robot_Model_Panel_Controller::Layout_Camera_2D_Preview ( )
   const int y = m_camera_2d_preview_expanded
     ? area.y + margin
     : area.y + area.height - height - margin;
+
+  if( m_camera_2d_preview_expanded )
+  {
+    Ensure_Camera_2D_Floating_Preview ( );
+    if( !m_camera_2d_preview_frame ) return;
+    const wxPoint screen_position =
+      m_display_panel->ClientToScreen (wxPoint (x, y));
+    m_camera_2d_preview_frame->SetSize (
+      screen_position.x, screen_position.y, width, height);
+    m_camera_2d_preview_frame->Show ( );
+    m_camera_2d_preview_frame->Raise ( );
+    return;
+  }
+
   m_camera_2d_preview_panel->SetSize (x, y, width, height);
   m_camera_2d_preview_panel->Layout ( );
   m_camera_2d_preview_panel->Raise ( );
@@ -1664,11 +1690,61 @@ void Robot_Model_Panel_Controller::Toggle_Camera_2D_Preview ( )
   if( m_camera_2d_preview_toggle )
   {
     m_camera_2d_preview_toggle->SetLabel (wxString::FromUTF8 (
-      m_camera_2d_preview_expanded
-        ? u8"2D 相机 · 点击收起"
-        : u8"2D 相机 · 点击展开"));
+      u8"2D 相机 · 点击展开"));
   }
+  if( m_camera_2d_preview_panel )
+    m_camera_2d_preview_panel->Show (!m_camera_2d_preview_expanded);
+  if( m_camera_2d_preview_frame && !m_camera_2d_preview_expanded )
+    m_camera_2d_preview_frame->Hide ( );
   Layout_Camera_2D_Preview ( );
+}
+
+void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
+{
+  if( m_camera_2d_preview_frame || !m_camera_2d_service ||
+      !m_camera_2d_template_service )
+    return;
+
+  m_camera_2d_preview_frame = new wxMiniFrame (
+    wxGetTopLevelParent (this),
+    wxID_ANY,
+    wxEmptyString,
+    wxDefaultPosition,
+    wxDefaultSize,
+    wxBORDER_SIMPLE | wxFRAME_FLOAT_ON_PARENT | wxFRAME_NO_TASKBAR);
+  m_camera_2d_floating_view = new Camera_2D_Image_View (
+    m_camera_2d_preview_frame,
+    *m_camera_2d_service,
+    *m_camera_2d_template_service);
+  auto* sizer = new wxBoxSizer (wxVERTICAL);
+  sizer->Add (m_camera_2d_floating_view, 1, wxEXPAND);
+  m_camera_2d_preview_frame->SetSizer (sizer);
+  auto* collapse = new wxButton (
+    m_camera_2d_preview_frame,
+    wxID_ANY,
+    wxString::FromUTF8 (u8"收起"),
+    wxDefaultPosition,
+    wxSize (64, 28));
+  collapse->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) { Toggle_Camera_2D_Preview ( ); });
+  m_camera_2d_preview_frame->Bind (
+    wxEVT_SIZE,
+    [collapse] (wxSizeEvent& event)
+    {
+      event.Skip ( );
+      const wxSize size = event.GetSize ( );
+      collapse->SetPosition (wxPoint (std::max (4, size.x - 70), 6));
+      collapse->Raise ( );
+    });
+  m_camera_2d_preview_frame->Bind (
+    wxEVT_CLOSE_WINDOW,
+    [this] (wxCloseEvent& event)
+    {
+      event.Veto ( );
+      if( m_camera_2d_preview_expanded )
+        Toggle_Camera_2D_Preview ( );
+    });
 }
 
 void Robot_Model_Panel_Controller::Update_Display_Menu ( )
