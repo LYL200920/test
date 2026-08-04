@@ -23,6 +23,8 @@ add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 option(ENABLE_MV3D_CAMERA "Build the MV3D RGBD camera adapter" ON)
 option(ENABLE_HUARAY_CAMERA "Build the HuarayTech 2D camera adapter" ON)
 option(BUILD_DESKTOP_APP "Build the hardware-integrated desktop application" ON)
+option(ENABLE_ROBOT_MODEL_DIAGNOSTICS
+       "Write temporary robot model loading and OpenGL diagnostics" ON)
 
 if(BUILD_DESKTOP_APP AND
    (NOT ENABLE_MV3D_CAMERA OR NOT ENABLE_HUARAY_CAMERA))
@@ -324,6 +326,7 @@ set(robot_model_render_sources
   src/robot_model/flange_transform_gizmo_renderer.cpp
   src/robot_model/fov_frame_renderer.cpp
   src/robot_model/robot_calibration_builder.cpp
+  src/robot_model/robot_model_diagnostics.cpp
   src/robot_model/robot_mesh_loader.cpp
   src/robot_model/robot_model_view.cpp
   src/robot_model/robot_render_controller.cpp
@@ -335,7 +338,11 @@ target_include_directories(robot_model_render PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
 target_link_libraries(robot_model_render
   PUBLIC robot_model_domain robot_model_collision wx::gl ${VTK_LIBRARIES}
-  PRIVATE robot_model_io wx::base wx::core)
+  PRIVATE app_paths robot_model_io wx::base wx::core)
+if(ENABLE_ROBOT_MODEL_DIAGNOSTICS)
+  target_compile_definitions(robot_model_render PRIVATE
+    ROBOT_MODEL_DIAGNOSTICS_ENABLED=1)
+endif()
 
 file(GLOB point_cloud_sources CONFIGURE_DEPENDS "src/point_cloud/*.cpp")
 file(GLOB point_cloud_headers CONFIGURE_DEPENDS

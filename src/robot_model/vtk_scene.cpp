@@ -1,4 +1,5 @@
 #include "vtk_scene.h"
+#include "robot_model_diagnostics.h"
 
 #include <vtkCamera.h>
 #include <vtkCommand.h>
@@ -11,6 +12,7 @@
 #include <GL/gl.h>
 
 #include <algorithm>
+#include <sstream>
 
 namespace robot_model
 {
@@ -90,6 +92,20 @@ namespace robot_model
     m_canvas = canvas;
     m_gl_context = context;
 
+    Initialize_Robot_Model_Diagnostics();
+    std::ostringstream graphics;
+    const auto *vendor = glGetString(GL_VENDOR);
+    const auto *renderer = glGetString(GL_RENDERER);
+    const auto *version = glGetString(GL_VERSION);
+    graphics << "OpenGL vendor="
+             << (vendor ? reinterpret_cast<const char *>(vendor) : "<null>")
+             << " renderer="
+             << (renderer ? reinterpret_cast<const char *>(renderer) : "<null>")
+             << " version="
+             << (version ? reinterpret_cast<const char *>(version) : "<null>")
+             << " gl_error=" << glGetError();
+    Write_Robot_Model_Diagnostic(graphics.str());
+
     m_render_window = vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New();
     m_render_window->SetOwnContext(false);
     m_render_window->SetReadyForRendering(true);
@@ -123,6 +139,9 @@ namespace robot_model
     m_render_window->AddRenderer(m_renderer);
 
     const auto size = canvas->GetClientSize();
+    Write_Robot_Model_Diagnostic(
+      "canvas_size=" + std::to_string(size.x) + "x" +
+      std::to_string(size.y));
     if (size.x > 0 && size.y > 0)
     {
       m_render_window->SetSize(size.x, size.y);

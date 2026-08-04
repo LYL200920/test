@@ -1,5 +1,6 @@
 #include "robot_model_view.h"
 
+#include "robot_model_diagnostics.h"
 #include "vtk_scene.h"
 
 #include <wx/dcclient.h>
@@ -9,12 +10,15 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <sstream>
 #include <utility>
 
 Robot_Model_View::Robot_Model_View(wxWindow *parent, wxWindowID id)
     : wxGLCanvas(parent, id, nullptr, wxDefaultPosition, wxDefaultSize, wxBORDER_SIMPLE | wxFULL_REPAINT_ON_RESIZE),
       m_drag_update_timer(this)
 {
+  robot_model::Initialize_Robot_Model_Diagnostics();
+  robot_model::Write_Robot_Model_Diagnostic("Robot_Model_View constructed");
   SetBackgroundStyle(wxBG_STYLE_PAINT);
   m_gl_context = new wxGLContext(this);
 
@@ -50,6 +54,12 @@ Robot_Model_View::~Robot_Model_View()
 
 void Robot_Model_View::Load_Model(const robot_model::Robot_Model_Info &model)
 {
+  std::ostringstream diagnostic;
+  diagnostic << "Load_Model display_name=" << model.display_name
+             << " model_dir=" << model.model_dir.u8string()
+             << " xml_path=" << model.xml_path.u8string()
+             << " stl_count=" << model.stl_files.size();
+  robot_model::Write_Robot_Model_Diagnostic(diagnostic.str());
   m_collision_index_rebuild_coordinator.Reset();
   Ensure_VTK();
   m_render_controller.Load_Model(model);
