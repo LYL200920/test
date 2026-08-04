@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
 <ToolVisualizations version="1">
-  <Fov visible="true" coordinate="tool_1" width="45" length="61" widthAxis="Y" lengthAxis="X" />
+  <Fov visible="true" coordinate="tool_1" width="45.399999999999999" length="61.5" widthAxis="Y" lengthAxis="X" />
   <ToolFrame visible="false" scale="0.77000000000000002" />
 </ToolVisualizations>
