@@ -23,6 +23,25 @@ constexpr int kRoi_Bottom = 8;
 constexpr int kRoi_Inside = 16;
 constexpr int kRoi_Handle_Radius = 5;
 constexpr int kMinimum_Roi_Size = 20;
+constexpr int kMaximum_Preview_Width = 1280;
+constexpr int kMaximum_Preview_Height = 960;
+
+void Limit_Preview_Image_Size(wxImage *image)
+{
+  if (!image || !image->IsOk()) return;
+  const int width = image->GetWidth();
+  const int height = image->GetHeight();
+  if (width <= kMaximum_Preview_Width &&
+      height <= kMaximum_Preview_Height)
+    return;
+  const double scale = std::min(
+    static_cast<double>(kMaximum_Preview_Width) / width,
+    static_cast<double>(kMaximum_Preview_Height) / height);
+  image->Rescale(
+    std::max(1, static_cast<int>(std::lround(width * scale))),
+    std::max(1, static_cast<int>(std::lround(height * scale))),
+    wxIMAGE_QUALITY_NORMAL);
+}
 }
 
 Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
@@ -46,26 +65,34 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
 
 void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
 {
+  if (!bitmap.IsOk()) return;
   if (!m_bitmap.IsOk() ||
-      m_bitmap.GetWidth() != bitmap.GetWidth() ||
-      m_bitmap.GetHeight() != bitmap.GetHeight())
+      m_image_width != bitmap.GetWidth() ||
+      m_image_height != bitmap.GetHeight())
   {
     m_pan_offset = wxPoint();
   }
+  m_image_width = bitmap.GetWidth();
+  m_image_height = bitmap.GetHeight();
   m_bitmap = std::move(bitmap);
   Refresh(false);
 }
 
 void Camera_2D_Bitmap_Canvas::Set_Frame(
   wxBitmap bitmap,
-  std::vector<Camera_2D_Cross_Detection> detections)
+  std::vector<Camera_2D_Cross_Detection> detections,
+  int image_width,
+  int image_height)
 {
+  if (!bitmap.IsOk() || image_width <= 0 || image_height <= 0) return;
   if (!m_bitmap.IsOk() ||
-      m_bitmap.GetWidth() != bitmap.GetWidth() ||
-      m_bitmap.GetHeight() != bitmap.GetHeight())
+      m_image_width != image_width ||
+      m_image_height != image_height)
   {
     m_pan_offset = wxPoint();
   }
+  m_image_width = image_width;
+  m_image_height = image_height;
   m_bitmap = std::move(bitmap);
   m_detections = std::move(detections);
   // The image and its overlays belong to the same camera frame. Updating them
@@ -77,6 +104,8 @@ void Camera_2D_Bitmap_Canvas::Clear_Bitmap()
 {
   if (!m_bitmap.IsOk() && m_detections.empty()) return;
   m_bitmap = wxBitmap();
+  m_image_width = 0;
+  m_image_height = 0;
   m_detections.clear();
   Refresh(false);
 }
@@ -114,13 +143,13 @@ void Camera_2D_Bitmap_Canvas::Begin_Roi_Editing(
   Begin_Roi_Selection(std::move(callback));
   if (!m_bitmap.IsOk()) return;
   m_editable_roi.x = std::clamp(
-    roi.x, 0, std::max(0, m_bitmap.GetWidth() - 1));
+    roi.x, 0, std::max(0, m_image_width - 1));
   m_editable_roi.y = std::clamp(
-    roi.y, 0, std::max(0, m_bitmap.GetHeight() - 1));
+    roi.y, 0, std::max(0, m_image_height - 1));
   m_editable_roi.width = std::clamp(
-    roi.width, 1, m_bitmap.GetWidth() - m_editable_roi.x);
+    roi.width, 1, m_image_width - m_editable_roi.x);
   m_editable_roi.height = std::clamp(
-    roi.height, 1, m_bitmap.GetHeight() - m_editable_roi.y);
+    roi.height, 1, m_image_height - m_editable_roi.y);
   m_has_editable_roi = true;
   Refresh(false);
 }
@@ -165,8 +194,8 @@ double Camera_2D_Bitmap_Canvas::Display_Scale() const
   return std::max(
     0.01,
     std::min(
-      static_cast<double>(area.x) / m_bitmap.GetWidth(),
-      static_cast<double>(area.y) / m_bitmap.GetHeight()));
+      static_cast<double>(area.x) / m_image_width,
+      static_cast<double>(area.y) / m_image_height));
 }
 
 void Camera_2D_Bitmap_Canvas::Zoom_In()
@@ -203,10 +232,10 @@ wxPoint Camera_2D_Bitmap_Canvas::Display_Offset(double scale) const
   const wxSize area = GetClientSize();
   return wxPoint(
     static_cast<int>(std::lround(
-      (area.x - m_bitmap.GetWidth() * scale) * 0.5)) +
+      (area.x - m_image_width * scale) * 0.5)) +
       m_pan_offset.x,
     static_cast<int>(std::lround(
-      (area.y - m_bitmap.GetHeight() * scale) * 0.5)) +
+      (area.y - m_image_height * scale) * 0.5)) +
       m_pan_offset.y);
 }
 
@@ -223,15 +252,16 @@ void Camera_2D_Bitmap_Canvas::On_Paint(wxPaintEvent &)
   const int source_width = m_bitmap.GetWidth();
   const int source_height = m_bitmap.GetHeight();
   if (area.x <= 0 || area.y <= 0 ||
-      source_width <= 0 || source_height <= 0)
+      source_width <= 0 || source_height <= 0 ||
+      m_image_width <= 0 || m_image_height <= 0)
   {
     return;
   }
   const double scale = Display_Scale();
   const int width = std::max(
-    1, static_cast<int>(source_width * scale));
+    1, static_cast<int>(m_image_width * scale));
   const int height = std::max(
-    1, static_cast<int>(source_height * scale));
+    1, static_cast<int>(m_image_height * scale));
   const wxPoint offset = Display_Offset(scale);
   wxMemoryDC source_dc;
   source_dc.SelectObject(m_bitmap);
@@ -348,10 +378,10 @@ wxPoint Camera_2D_Bitmap_Canvas::Image_Point(
   return wxPoint(
     std::clamp(
       static_cast<int>((canvas_point.x - offset.x) / scale),
-      0, m_bitmap.GetWidth() - 1),
+      0, m_image_width - 1),
     std::clamp(
       static_cast<int>((canvas_point.y - offset.y) / scale),
-      0, m_bitmap.GetHeight() - 1));
+      0, m_image_height - 1));
 }
 
 int Camera_2D_Bitmap_Canvas::Hit_Test_Roi(
@@ -477,11 +507,11 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
       m_editable_roi.x = std::clamp(
         m_roi_before_drag.x + delta.x,
         0,
-        m_bitmap.GetWidth() - m_roi_before_drag.width);
+        m_image_width - m_roi_before_drag.width);
       m_editable_roi.y = std::clamp(
         m_roi_before_drag.y + delta.y,
         0,
-        m_bitmap.GetHeight() - m_roi_before_drag.height);
+        m_image_height - m_roi_before_drag.height);
     }
     else if (m_roi_drag_mode == Roi_Drag_Mode::Resize)
     {
@@ -497,10 +527,10 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
         top = std::min(point.y, bottom - kMinimum_Roi_Size + 1);
       if (m_roi_resize_edges & kRoi_Bottom)
         bottom = std::max(point.y, top + kMinimum_Roi_Size - 1);
-      left = std::clamp(left, 0, m_bitmap.GetWidth() - 1);
-      right = std::clamp(right, 0, m_bitmap.GetWidth() - 1);
-      top = std::clamp(top, 0, m_bitmap.GetHeight() - 1);
-      bottom = std::clamp(bottom, 0, m_bitmap.GetHeight() - 1);
+      left = std::clamp(left, 0, m_image_width - 1);
+      right = std::clamp(right, 0, m_image_width - 1);
+      top = std::clamp(top, 0, m_image_height - 1);
+      bottom = std::clamp(bottom, 0, m_image_height - 1);
       m_editable_roi = {
         left, top, right - left + 1, bottom - top + 1};
     }
@@ -656,7 +686,19 @@ void Camera_2D_Image_View::Show_Static_Image(
   if (!image.IsOk() || !image.GetData()) return;
   std::memcpy(
     image.GetData(), image_data.rgb.data(), image_data.rgb.size());
-  m_canvas->Set_Frame(wxBitmap(image), std::move(detections));
+  Limit_Preview_Image_Size(&image);
+  wxBitmap bitmap(image);
+  if (!bitmap.IsOk())
+  {
+    m_status_text->SetLabel(
+      wxString::FromUTF8(u8"创建2D显示位图失败，保留上一帧"));
+    return;
+  }
+  m_canvas->Set_Frame(
+    std::move(bitmap),
+    std::move(detections),
+    static_cast<int>(image_data.width),
+    static_cast<int>(image_data.height));
   m_status_text->SetLabel(wxString::Format(
     wxString::FromUTF8(u8"读取图片：%s  %u × %u"),
     wxString::FromUTF8(source_name.c_str()),
@@ -795,7 +837,19 @@ void Camera_2D_Image_View::Consume_Result()
     image.GetData(),
     result->image.rgb.data(),
     result->image.rgb.size());
-  m_canvas->Set_Frame(wxBitmap(image), result->detections);
+  Limit_Preview_Image_Size(&image);
+  wxBitmap bitmap(image);
+  if (!bitmap.IsOk())
+  {
+    m_status_text->SetLabel(
+      wxString::FromUTF8(u8"创建2D显示位图失败，保留上一帧"));
+    return;
+  }
+  m_canvas->Set_Frame(
+    std::move(bitmap),
+    result->detections,
+    static_cast<int>(result->image.width),
+    static_cast<int>(result->image.height));
   const auto status = m_camera_service.Status();
   wxString status_label = wxString::Format(
     wxString::FromUTF8(

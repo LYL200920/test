@@ -31,7 +31,9 @@ public:
   void Set_Bitmap(wxBitmap bitmap);
   void Set_Frame(
     wxBitmap bitmap,
-    std::vector<Camera_2D_Cross_Detection> detections);
+    std::vector<Camera_2D_Cross_Detection> detections,
+    int image_width,
+    int image_height);
   void Clear_Bitmap();
   void Set_Detection(
     std::optional<Camera_2D_Cross_Detection> detection);
@@ -72,6 +74,8 @@ private:
     Resize
   };
   wxBitmap m_bitmap;
+  int m_image_width = 0;
+  int m_image_height = 0;
   std::vector<Camera_2D_Cross_Detection> m_detections;
   std::function<void(Camera_2D_Roi)> m_roi_callback;
   bool m_selecting_roi = false;
