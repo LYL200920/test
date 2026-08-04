@@ -4,10 +4,12 @@
 #include "robot_calibration_builder.h"
 #include "robot_kinematic_params.h"
 #include "robot_model_config_loader.h"
+#include "robot_model_diagnostics.h"
 #include "vtk_scene.h"
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 namespace robot_model
 {
@@ -419,6 +421,26 @@ namespace robot_model
       Rebuild_Collision_Obstacle_Points(nullptr);
       Apply_Joint_Pose();
       Update_Current_Pose_Collision();
+
+      Write_Robot_Model_Diagnostic(
+        "Robot assembly parts=" + std::to_string(m_assembly.Parts().size()) +
+        " forward_model_has_flange=" +
+        (m_has_forward_model ? "true" : "false"));
+      for (std::size_t index = 0; index < m_assembly.Parts().size(); ++index)
+      {
+        const auto &part = m_assembly.Parts()[index];
+        double bounds[6] = {};
+        if (part.actor) part.actor->GetBounds(bounds);
+        std::ostringstream part_message;
+        part_message << "Robot actor index=" << index
+                     << " actor=" << (part.actor ? "present" : "null")
+                     << " visible="
+                     << (part.actor && part.actor->GetVisibility() ? "true" : "false")
+                     << " bounds=[" << bounds[0] << ',' << bounds[1] << ','
+                     << bounds[2] << ',' << bounds[3] << ',' << bounds[4]
+                     << ',' << bounds[5] << ']';
+        Write_Robot_Model_Diagnostic(part_message.str());
+      }
     }
     else
     {

@@ -12,6 +12,8 @@
 #include <vtkRenderer.h>
 #include <vtkSmartPointer.h>
 
+#include <cstddef>
+
 namespace robot_model
 {
 
@@ -45,6 +47,8 @@ private:
   static void On_Is_Current (vtkObject*, unsigned long, void* client_data, void* call_data);
   static void On_Frame (vtkObject*, unsigned long, void* client_data, void*);
   static void On_Supports_OpenGL (vtkObject*, unsigned long, void* client_data, void* call_data);
+  static void On_VTK_Message (vtkObject*, unsigned long, void* client_data,
+                              void* call_data);
 
   void Setup_View_Cube ( );
   void Update_View_Cube_Camera ( );
@@ -59,6 +63,10 @@ private:
   View_Cube_Controller m_view_cube;
 
   bool m_ready = false;
+  std::size_t m_make_current_count = 0;
+  std::size_t m_is_current_count = 0;
+  std::size_t m_frame_count = 0;
+  std::size_t m_render_count = 0;
 };
 
 } // namespace robot_model

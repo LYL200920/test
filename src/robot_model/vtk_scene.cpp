@@ -8,6 +8,7 @@
 #include <vtkLineSource.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkProperty.h>
+#include <vtkPropCollection.h>
 
 #include <GL/gl.h>
 
@@ -50,7 +51,15 @@ namespace robot_model
     auto *self = static_cast<Vtk_Scene *>(client_data);
     if (self && self->m_canvas && self->m_gl_context)
     {
-      self->m_canvas->SetCurrent(*self->m_gl_context);
+      const bool success = self->m_canvas->SetCurrent(*self->m_gl_context);
+      ++self->m_make_current_count;
+      if (self->m_make_current_count <= 5 || !success)
+      {
+        Write_Robot_Model_Diagnostic(
+          "WindowMakeCurrent count=" +
+          std::to_string(self->m_make_current_count) +
+          " success=" + (success ? "true" : "false"));
+      }
     }
   }
 
@@ -61,6 +70,14 @@ namespace robot_model
     if (is_current && self && self->m_gl_context)
     {
       *is_current = true;
+      ++self->m_is_current_count;
+      if (self->m_is_current_count <= 5)
+      {
+        Write_Robot_Model_Diagnostic(
+          "WindowIsCurrent count=" +
+          std::to_string(self->m_is_current_count) +
+          " reported=true");
+      }
     }
   }
 
@@ -69,7 +86,17 @@ namespace robot_model
     auto *self = static_cast<Vtk_Scene *>(client_data);
     if (self && self->m_canvas)
     {
-      self->m_canvas->SwapBuffers();
+      const bool success = self->m_canvas->SwapBuffers();
+      ++self->m_frame_count;
+      const auto error = glGetError();
+      if (self->m_frame_count <= 5 || !success || error != GL_NO_ERROR)
+      {
+        Write_Robot_Model_Diagnostic(
+          "WindowFrame/SwapBuffers count=" +
+          std::to_string(self->m_frame_count) +
+          " success=" + (success ? "true" : "false") +
+          " gl_error=" + std::to_string(error));
+      }
     }
   }
 
@@ -80,6 +107,19 @@ namespace robot_model
     {
       *supports_opengl = 1;
     }
+  }
+
+  void Vtk_Scene::On_VTK_Message(vtkObject *, unsigned long event_id,
+                                 void *, void *call_data)
+  {
+    std::string message = "VTK render ";
+    message += vtkCommand::GetStringFromEventId(event_id);
+    if (call_data)
+    {
+      message += ": ";
+      message += static_cast<const char *>(call_data);
+    }
+    Write_Robot_Model_Diagnostic(message);
   }
 
   void Vtk_Scene::Init(wxGLCanvas *canvas, wxGLContext *context)
@@ -132,9 +172,17 @@ namespace robot_model
     supports_opengl_cb->SetCallback(&Vtk_Scene::On_Supports_OpenGL);
     m_render_window->AddObserver(vtkCommand::WindowSupportsOpenGLEvent, supports_opengl_cb);
 
+    auto vtk_message_cb = vtkSmartPointer<vtkCallbackCommand>::New();
+    vtk_message_cb->SetClientData(this);
+    vtk_message_cb->SetCallback(&Vtk_Scene::On_VTK_Message);
+    m_render_window->AddObserver(vtkCommand::ErrorEvent, vtk_message_cb);
+    m_render_window->AddObserver(vtkCommand::WarningEvent, vtk_message_cb);
+
     m_renderer = vtkSmartPointer<vtkRenderer>::New();
     m_renderer->SetBackground(0.08, 0.09, 0.11);
     m_renderer->SetLayer(0);
+    m_renderer->AddObserver(vtkCommand::ErrorEvent, vtk_message_cb);
+    m_renderer->AddObserver(vtkCommand::WarningEvent, vtk_message_cb);
 
     m_render_window->AddRenderer(m_renderer);
 
@@ -176,6 +224,8 @@ namespace robot_model
       m_render_window->RemoveObservers(vtkCommand::WindowIsCurrentEvent);
       m_render_window->RemoveObservers(vtkCommand::WindowFrameEvent);
       m_render_window->RemoveObservers(vtkCommand::WindowSupportsOpenGLEvent);
+      m_render_window->RemoveObservers(vtkCommand::ErrorEvent);
+      m_render_window->RemoveObservers(vtkCommand::WarningEvent);
       m_render_window->Finalize();
       m_render_window = nullptr;
     }
@@ -190,8 +240,26 @@ namespace robot_model
   {
     if (m_ready && m_render_window)
     {
+      ++m_render_count;
+      const auto before_error = glGetError();
+      if (m_render_count <= 5)
+      {
+        const auto prop_count = m_renderer && m_renderer->GetViewProps()
+          ? m_renderer->GetViewProps()->GetNumberOfItems() : 0;
+        Write_Robot_Model_Diagnostic(
+          "Render begin count=" + std::to_string(m_render_count) +
+          " props=" + std::to_string(prop_count) +
+          " gl_error_before=" + std::to_string(before_error));
+      }
       Update_View_Cube_Camera();
       m_render_window->Render();
+      const auto after_error = glGetError();
+      if (m_render_count <= 5 || after_error != GL_NO_ERROR)
+      {
+        Write_Robot_Model_Diagnostic(
+          "Render end count=" + std::to_string(m_render_count) +
+          " gl_error_after=" + std::to_string(after_error));
+      }
     }
   }
 
@@ -251,6 +319,16 @@ namespace robot_model
     double center[3] = {0.0, 0.0, 0.0};
     double radius = 1.0;
     compute_scene_center_and_radius(m_renderer, center, radius);
+    double scene_bounds[6] = {};
+    m_renderer->ComputeVisiblePropBounds(scene_bounds);
+    std::ostringstream scene_message;
+    scene_message << "Reset_Camera scene_bounds=["
+                  << scene_bounds[0] << ',' << scene_bounds[1] << ','
+                  << scene_bounds[2] << ',' << scene_bounds[3] << ','
+                  << scene_bounds[4] << ',' << scene_bounds[5] << ']'
+                  << " center=[" << center[0] << ',' << center[1] << ','
+                  << center[2] << "] radius=" << radius;
+    Write_Robot_Model_Diagnostic(scene_message.str());
     const double camera_xy_scale = 1.25;
     const double camera_z_scale = 0.9;
     const double view_angle = 26.0;
@@ -274,6 +352,23 @@ namespace robot_model
       camera->SetViewAngle(view_angle);
     }
     m_renderer->ResetCameraClippingRange();
+    if (auto *camera = m_renderer->GetActiveCamera())
+    {
+      double position[3] = {};
+      double focal_point[3] = {};
+      double clipping[2] = {};
+      camera->GetPosition(position);
+      camera->GetFocalPoint(focal_point);
+      camera->GetClippingRange(clipping);
+      std::ostringstream camera_message;
+      camera_message << "Camera position=[" << position[0] << ','
+                     << position[1] << ',' << position[2]
+                     << "] focal_point=[" << focal_point[0] << ','
+                     << focal_point[1] << ',' << focal_point[2]
+                     << "] clipping=[" << clipping[0] << ',' << clipping[1]
+                     << "] view_angle=" << camera->GetViewAngle();
+      Write_Robot_Model_Diagnostic(camera_message.str());
+    }
   }
 
   void Vtk_Scene::Setup_View_Cube()
