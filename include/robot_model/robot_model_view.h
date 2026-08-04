@@ -133,6 +133,7 @@ private:
 
 private:
   wxGLContext *m_gl_context = nullptr;
+  bool m_context_failure_logged = false;
   std::unique_ptr<robot_model::Vtk_Scene> m_scene;
   robot_model::Robot_Render_Controller m_render_controller;
   robot_model::Coordinate_Frame_Renderer m_world_frame_renderer{500.0, 20.0, true};
