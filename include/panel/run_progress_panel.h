@@ -34,6 +34,7 @@ public:
 
   void Set_Callbacks(Callbacks callbacks);
   bool Save_Images() const;
+  bool Build_Mosaic() const;
   Motion_Mode Selected_Motion_Mode() const;
   int Motion_Speed() const;
   void Set_Progress_Ready(bool ready);
@@ -52,6 +53,7 @@ private:
   Callbacks m_callbacks;
   wxStaticText *m_ct_value = nullptr;
   wxCheckBox *m_save_images = nullptr;
+  wxCheckBox *m_build_mosaic = nullptr;
   wxChoice *m_motion_mode = nullptr;
   wxSlider *m_motion_speed = nullptr;
   wxStaticText *m_motion_speed_label = nullptr;

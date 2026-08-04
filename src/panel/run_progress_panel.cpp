@@ -40,6 +40,9 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
 
   m_save_images = new wxCheckBox(
     this, wxID_ANY, wxString::FromUTF8(u8"保存运动点原图"));
+  m_build_mosaic = new wxCheckBox(
+    this, wxID_ANY, wxString::FromUTF8(u8"运行完成后生成拼图"));
+  m_build_mosaic->SetValue(true);
 
   auto *motion_row = new wxBoxSizer(wxHORIZONTAL);
   motion_row->Add(
@@ -118,6 +121,7 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(ct_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
   sizer->Add(m_ct_value, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 14);
   sizer->Add(m_save_images, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(m_build_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(motion_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_run_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
@@ -176,6 +180,11 @@ bool Run_Progress_Panel::Save_Images() const
   return m_save_images && m_save_images->GetValue();
 }
 
+bool Run_Progress_Panel::Build_Mosaic() const
+{
+  return m_build_mosaic && m_build_mosaic->GetValue();
+}
+
 Run_Progress_Panel::Motion_Mode
 Run_Progress_Panel::Selected_Motion_Mode() const
 {
@@ -212,6 +221,8 @@ void Run_Progress_Panel::Set_Running(bool running, bool stopping)
   m_stopping = running && stopping;
   if (m_save_images)
     m_save_images->Enable(!running);
+  if (m_build_mosaic)
+    m_build_mosaic->Enable(!running);
   if (m_motion_mode)
     m_motion_mode->Enable(!running);
   if (m_motion_speed)

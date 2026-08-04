@@ -737,6 +737,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   m_content_splitter->SetSashSize (6);
 
   auto* display_panel = new wxPanel (m_content_splitter, wxID_ANY);
+  m_display_panel = display_panel;
   m_display_book = new wxSimplebook (display_panel, wxID_ANY);
   m_display_book->SetMinSize (wxSize (DISPLAY_MINIMUM_WIDTH, -1));
   auto* status_panel = new wxPanel (
@@ -800,6 +801,33 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     m_display_book, camera_2d_service, camera_2d_template_service);
   m_point_cloud_view = new Point_Cloud_View (
     m_display_book, camera_service);
+
+  m_camera_2d_preview_panel = new wxPanel (
+    display_panel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    wxBORDER_SIMPLE);
+  m_camera_2d_preview_toggle = new wxButton (
+    m_camera_2d_preview_panel,
+    wxID_ANY,
+    wxString::FromUTF8 (u8"2D 相机 · 点击展开"));
+  m_camera_2d_preview_view = new Camera_2D_Image_View (
+    m_camera_2d_preview_panel,
+    camera_2d_service,
+    camera_2d_template_service);
+  auto* preview_sizer = new wxBoxSizer (wxVERTICAL);
+  preview_sizer->Add (m_camera_2d_preview_toggle, 0, wxEXPAND);
+  preview_sizer->Add (m_camera_2d_preview_view, 1, wxEXPAND);
+  m_camera_2d_preview_panel->SetSizer (preview_sizer);
+  m_camera_2d_preview_panel->Hide ( );
+  m_camera_2d_preview_toggle->Bind (
+    wxEVT_BUTTON,
+    [this] (wxCommandEvent&) { Toggle_Camera_2D_Preview ( ); });
+  display_panel->Bind (
+    wxEVT_SIZE,
+    [this] (wxSizeEvent& event)
+    {
+      event.Skip ( );
+      CallAfter (&Robot_Model_Panel_Controller::Layout_Camera_2D_Preview);
+    });
   Point_Cloud_Overlay_Toolbar::Callbacks overlay_callbacks;
   overlay_callbacks.renderer = [this]
   {
@@ -1591,7 +1619,56 @@ void Robot_Model_Panel_Controller::Select_Display_Page (Main_Display_Page page)
   {
     m_display_book->SetSelection (static_cast<int> (page));
   }
+  if( m_camera_2d_preview_panel )
+  {
+    m_camera_2d_preview_panel->Show (
+      page == Main_Display_Page::Robot);
+    Layout_Camera_2D_Preview ( );
+  }
   Update_Display_Menu ( );
+}
+
+void Robot_Model_Panel_Controller::Layout_Camera_2D_Preview ( )
+{
+  if( !m_display_book || !m_camera_2d_preview_panel ||
+      m_display_page != Main_Display_Page::Robot )
+    return;
+
+  const wxRect area = m_display_book->GetRect ( );
+  if( area.width <= 0 || area.height <= 0 ) return;
+
+  constexpr int margin = 12;
+  int width = m_camera_2d_preview_expanded
+    ? area.width / 2
+    : 220;
+  int height = m_camera_2d_preview_expanded
+    ? area.height / 2
+    : 165;
+  width = std::clamp (width, 180, std::max (180, area.width - 2 * margin));
+  height = std::clamp (
+    height, 135, std::max (135, area.height - 2 * margin));
+  const int x = m_camera_2d_preview_expanded
+    ? area.x + area.width - width - margin
+    : area.x + margin;
+  const int y = m_camera_2d_preview_expanded
+    ? area.y + margin
+    : area.y + area.height - height - margin;
+  m_camera_2d_preview_panel->SetSize (x, y, width, height);
+  m_camera_2d_preview_panel->Layout ( );
+  m_camera_2d_preview_panel->Raise ( );
+}
+
+void Robot_Model_Panel_Controller::Toggle_Camera_2D_Preview ( )
+{
+  m_camera_2d_preview_expanded = !m_camera_2d_preview_expanded;
+  if( m_camera_2d_preview_toggle )
+  {
+    m_camera_2d_preview_toggle->SetLabel (wxString::FromUTF8 (
+      m_camera_2d_preview_expanded
+        ? u8"2D 相机 · 点击收起"
+        : u8"2D 相机 · 点击展开"));
+  }
+  Layout_Camera_2D_Preview ( );
 }
 
 void Robot_Model_Panel_Controller::Update_Display_Menu ( )
@@ -2604,6 +2681,8 @@ void Robot_Model_Panel_Controller::Start_Progress_Run()
   }
 
   m_run_save_images = m_run_progress_panel->Save_Images();
+  m_run_build_mosaic = m_run_progress_panel->Build_Mosaic();
+  const bool capture_images = m_run_save_images || m_run_build_mosaic;
   m_run_linear_motion =
     m_run_progress_panel->Selected_Motion_Mode() ==
     Run_Progress_Panel::Motion_Mode::Linear;
@@ -2614,19 +2693,19 @@ void Robot_Model_Panel_Controller::Start_Progress_Run()
     {
       return point.type == robot_model::Robot_Teach_Point_Type::Motion;
     });
-  if( has_motion_point )
+  if( capture_images && has_motion_point )
   {
     if( !m_camera_2d_service || !m_camera_2d_service->Is_Grabbing() )
     {
       m_run_progress_panel->Set_Status(
-        "保存图片前请打开 2D 相机并开始采集", true);
+        "采集运动点图像前请打开 2D 相机并开始采集", true);
       return;
     }
     if( m_camera_2d_service->Status().trigger_mode !=
         jutze_camera::camera_trigger_mode::soft_trigger )
     {
       m_run_progress_panel->Set_Status(
-        "保存图片需要将 2D 相机设置为软触发模式", true);
+        "采集运动点图像需要将 2D 相机设置为软触发模式", true);
       return;
     }
 
@@ -2659,6 +2738,7 @@ void Robot_Model_Panel_Controller::Start_Progress_Run()
   for( const auto& point : points )
   {
     capture_image_at_point.push_back(
+      capture_images &&
       point.type == robot_model::Robot_Teach_Point_Type::Motion);
   }
   Apply_Progress_Run_Transition(
@@ -2869,10 +2949,12 @@ void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
 {
   if( m_run_captured_frames.empty() || m_run_image_processing.load() )
     return;
-  const auto* camera_tool = robot_model::Find_Tool_Coordinate(
-    m_tool_configuration,
-    m_tool_visualization_configuration.fov.tool_coordinate_id);
-  if( !camera_tool )
+  const auto* camera_tool = m_run_build_mosaic
+    ? robot_model::Find_Tool_Coordinate(
+        m_tool_configuration,
+        m_tool_visualization_configuration.fov.tool_coordinate_id)
+    : nullptr;
+  if( m_run_build_mosaic && !camera_tool )
   {
     m_run_captured_frames.clear();
     m_progress_run_controller.Image_Processing_Completed(
@@ -2893,21 +2975,26 @@ void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
   m_run_captured_frames.clear();
   const auto image_directory = m_run_image_directory;
   const bool save_original_images = m_run_save_images;
+  const bool build_mosaic = m_run_build_mosaic;
   const auto fov_configuration =
     m_tool_visualization_configuration.fov;
-  const auto flange_from_camera_pose =
-    camera_tool->flange_from_tool_pose;
+  const robot_model::XyzabcPose flange_from_camera_pose = camera_tool
+    ? camera_tool->flange_from_tool_pose
+    : robot_model::XyzabcPose{};
   m_run_image_processing.store(true);
   if( m_run_progress_panel )
   {
     m_run_progress_panel->Set_Status(
-      "机械臂运动已完成，正在后台保存图片并生成拼图...");
+      build_mosaic
+        ? "机械臂运动已完成，正在后台处理图片并生成拼图..."
+        : "机械臂运动已完成，正在后台保存运动点原图...");
   }
   m_run_image_processing_thread = std::thread(
     [this,
      captures = std::move(captures),
      image_directory,
      save_original_images,
+     build_mosaic,
      fov_configuration,
      flange_from_camera_pose]() mutable
     {
@@ -2950,7 +3037,7 @@ void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
           capture.frame.reset();
         }
 
-        if( result.message.empty() )
+        if( result.message.empty() && build_mosaic )
         {
           const std::size_t converted_count = converted.size();
           if( !build_pose_mosaic(
@@ -2979,6 +3066,14 @@ void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
             result.mosaic =
               make_image_preview(result.mosaic, 360, 260);
           }
+        }
+        else if( result.message.empty() )
+        {
+          result.success = true;
+          result.message =
+            "运动点原图保存完成，共 " +
+            std::to_string(converted.size()) +
+            " 张；目录：" + image_directory.string();
         }
       }
       catch( const std::exception& error )
@@ -3040,11 +3135,18 @@ void Robot_Model_Panel_Controller::Finish_Progress_Run(
   std::string final_message = message;
   if( success )
   {
-    final_message += m_run_captured_frames.empty()
-      ? "；没有运动点图片可处理"
-      : (m_run_save_images
-          ? "；原图将在后台保存并生成拼图"
-          : "；将在后台生成拼图");
+    if( m_run_captured_frames.empty() )
+    {
+      final_message += (m_run_save_images || m_run_build_mosaic)
+        ? "；没有运动点图片可处理"
+        : "；未选择图片保存或拼图";
+    }
+    else if( m_run_build_mosaic && m_run_save_images )
+      final_message += "；原图将在后台保存并生成拼图";
+    else if( m_run_build_mosaic )
+      final_message += "；将在后台生成拼图";
+    else
+      final_message += "；原图将在后台保存";
   }
   if( m_run_progress_panel )
   {

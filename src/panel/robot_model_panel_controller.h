@@ -139,6 +139,8 @@ private:
   void Set_Flange_Interaction_Mode(Robot_Model_View::Flange_Interaction_Mode mode);
   void Select_Display_Page(Main_Display_Page page);
   void Update_Display_Menu();
+  void Layout_Camera_2D_Preview();
+  void Toggle_Camera_2D_Preview();
   wxPanel *Build_Robot_Tool_Page(wxWindow *parent);
   wxPanel *Build_Teach_Tool_Page(wxWindow *parent);
   void Apply_Joint_Limits(const robot_model::Robot_Kinematic_Params &params);
@@ -258,6 +260,11 @@ private:
   Camera_2D_Control_Panel *m_camera_2d_control_panel = nullptr;
   Camera_2D_Template_Panel *m_camera_2d_template_panel = nullptr;
   Camera_2D_Service *m_camera_2d_service = nullptr;
+  wxPanel *m_display_panel = nullptr;
+  wxPanel *m_camera_2d_preview_panel = nullptr;
+  Camera_2D_Image_View *m_camera_2d_preview_view = nullptr;
+  wxButton *m_camera_2d_preview_toggle = nullptr;
+  bool m_camera_2d_preview_expanded = false;
   Run_Progress_Panel *m_run_progress_panel = nullptr;
   Joint_Control_Panel *m_joint_panel = nullptr;
   Cartesian_Pose_Panel *m_cartesian_pose_panel = nullptr;
@@ -289,6 +296,7 @@ private:
   bool m_progress_completed = false;
   application::Progress_Run_Controller m_progress_run_controller;
   bool m_run_save_images = false;
+  bool m_run_build_mosaic = true;
   bool m_run_linear_motion = false;
   int m_run_motion_speed = 100;
   unsigned long long m_run_previous_frame_number = 0;
