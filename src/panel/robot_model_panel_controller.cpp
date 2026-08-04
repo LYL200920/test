@@ -5,6 +5,9 @@
 #include "camera_image_view.h"
 #include "camera_service.h"
 #include "camera_2d_control_panel.h"
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+#include "camera_intrinsic_calibration_dialog.h"
+#endif
 #include "camera_2d_image_view.h"
 #include "camera_2d_template_panel.h"
 #include "robot_joint_state_builder.h"
@@ -916,6 +919,16 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     camera_2d_service);
   m_camera_2d_control_panel->Set_On_Show_Image (
     [this] { Select_Display_Page (Main_Display_Page::Camera_2D_Image); });
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  m_camera_2d_control_panel->Set_On_Calibrate (
+    [this]
+    {
+      if( !m_camera_2d_service ) return;
+      Camera_Intrinsic_Calibration_Dialog dialog (
+        this, *m_camera_2d_service);
+      dialog.ShowModal ( );
+    });
+#endif
   m_camera_2d_template_panel = new Camera_2D_Template_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Template2D),
     camera_2d_service,

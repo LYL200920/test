@@ -23,6 +23,8 @@ add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 option(ENABLE_MV3D_CAMERA "Build the MV3D RGBD camera adapter" ON)
 option(ENABLE_HUARAY_CAMERA "Build the HuarayTech 2D camera adapter" ON)
 option(BUILD_DESKTOP_APP "Build the hardware-integrated desktop application" ON)
+option(ENABLE_CAMERA_INTRINSIC_CALIBRATION
+       "Build the OpenCV camera intrinsic calibration module" ON)
 option(ENABLE_ROBOT_MODEL_DIAGNOSTICS
        "Write temporary robot model loading and OpenGL diagnostics" ON)
 
@@ -46,6 +48,32 @@ add_subdirectory(3rd/wxWidgets EXCLUDE_FROM_ALL)
 
 add_subdirectory(3rd/pugixml EXCLUDE_FROM_ALL)
 target_include_directories(pugixml PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/3rd/pugixml")
+
+if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+  # Keep the bundled OpenCV build limited to the modules needed for checkerboard
+  # detection, calibration and dataset image loading.
+  set(BUILD_LIST "calib3d,imgcodecs" CACHE STRING
+      "OpenCV modules required by this project" FORCE)
+  set(BUILD_opencv_apps OFF CACHE BOOL "Build OpenCV applications" FORCE)
+  set(BUILD_EXAMPLES OFF CACHE BOOL "Build OpenCV examples" FORCE)
+  set(BUILD_PERF_TESTS OFF CACHE BOOL "Build OpenCV performance tests" FORCE)
+  set(BUILD_TESTS OFF CACHE BOOL "Build third-party tests" FORCE)
+  set(BUILD_JAVA OFF CACHE BOOL "Build OpenCV Java bindings" FORCE)
+  set(BUILD_opencv_python_bindings_generator OFF CACHE BOOL
+      "Build OpenCV Python binding generator" FORCE)
+  set(WITH_FFMPEG OFF CACHE BOOL "Use FFmpeg" FORCE)
+  set(WITH_GSTREAMER OFF CACHE BOOL "Use GStreamer" FORCE)
+  set(WITH_IPP OFF CACHE BOOL "Use Intel IPP" FORCE)
+  set(WITH_ITT OFF CACHE BOOL "Use Intel ITT" FORCE)
+  set(WITH_JASPER OFF CACHE BOOL "Use Jasper" FORCE)
+  set(WITH_OPENEXR OFF CACHE BOOL "Use OpenEXR" FORCE)
+  set(WITH_OPENJPEG OFF CACHE BOOL "Use OpenJPEG" FORCE)
+  set(WITH_MSMF OFF CACHE BOOL "Use Media Foundation" FORCE)
+  set(WITH_OPENCL OFF CACHE BOOL "Use OpenCL" FORCE)
+  set(WITH_TIFF OFF CACHE BOOL "Use TIFF" FORCE)
+  set(WITH_WEBP OFF CACHE BOOL "Use WebP" FORCE)
+  add_subdirectory(3rd/opencv "${CMAKE_BINARY_DIR}/opencv" EXCLUDE_FROM_ALL)
+endif()
 
 add_library(asio INTERFACE)
 target_include_directories(asio INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/3rd")
@@ -165,6 +193,7 @@ find_package(VTK REQUIRED COMPONENTS
 set(project_include_dirs
   "${CMAKE_CURRENT_SOURCE_DIR}/include/application"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/camera"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/kuka"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/net"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/panel"
@@ -202,6 +231,62 @@ target_link_libraries(camera_core PUBLIC
 
 add_library(camera INTERFACE)
 target_link_libraries(camera INTERFACE camera_core)
+
+if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+  set(camera_calibration_opencv_include_dirs
+    "${CMAKE_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/core/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/calib3d/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/features2d/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/flann/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/imgproc/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/3rd/opencv/modules/imgcodecs/include")
+
+  add_library(camera_calibration_core STATIC
+    src/camera_calibration/intrinsic_calibration.cpp
+    include/camera_calibration/intrinsic_calibration.h)
+  target_include_directories(camera_calibration_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration")
+  target_include_directories(camera_calibration_core PRIVATE
+    ${camera_calibration_opencv_include_dirs})
+  target_link_libraries(camera_calibration_core PRIVATE
+    opencv_calib3d opencv_imgproc opencv_core)
+
+  add_library(camera_calibration_io STATIC
+    src/camera_calibration/camera_intrinsics_repository.cpp
+    src/camera_calibration/intrinsic_calibration_dataset.cpp
+    include/camera_calibration/camera_intrinsics_repository.h
+    include/camera_calibration/intrinsic_calibration_dataset.h)
+  target_include_directories(camera_calibration_io PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration")
+  target_include_directories(camera_calibration_io PRIVATE
+    ${camera_calibration_opencv_include_dirs})
+  target_link_libraries(camera_calibration_io
+    PUBLIC camera_calibration_core
+    PRIVATE opencv_imgcodecs opencv_imgproc pugixml)
+
+  add_library(camera_calibration_workflow STATIC
+    src/application/camera_intrinsic_calibration_workflow.cpp
+    include/application/camera_intrinsic_calibration_workflow.h)
+  target_include_directories(camera_calibration_workflow PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/application"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration")
+  target_link_libraries(camera_calibration_workflow PUBLIC
+    camera_calibration_core)
+
+  add_executable(camera_intrinsic_calibration_cli
+    tools/camera_intrinsic_calibration_cli.cpp)
+  target_link_libraries(camera_intrinsic_calibration_cli PRIVATE
+    camera_calibration_io)
+  if(WIN32)
+    add_custom_command(TARGET camera_intrinsic_calibration_cli POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+              "-DRUNTIME_DLLS=$<JOIN:$<TARGET_RUNTIME_DLLS:camera_intrinsic_calibration_cli>,|>"
+              "-DDESTINATION=$<TARGET_FILE_DIR:camera_intrinsic_calibration_cli>"
+              -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_runtime_dlls.cmake"
+      VERBATIM)
+  endif()
+endif()
 
 if(ENABLE_MV3D_CAMERA)
   set(camera_mv3d_adapter_sources
@@ -369,6 +454,12 @@ set(panel_headers)
 if(BUILD_DESKTOP_APP)
   file(GLOB panel_sources CONFIGURE_DEPENDS "src/panel/*.cpp")
   file(GLOB panel_headers CONFIGURE_DEPENDS "include/panel/*.h" "include/panel/*.hpp")
+  if(NOT ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    list(REMOVE_ITEM panel_sources
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/panel/camera_intrinsic_calibration_dialog.cpp")
+    list(REMOVE_ITEM panel_headers
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/panel/camera_intrinsic_calibration_dialog.h")
+  endif()
   add_library(panel STATIC ${panel_sources} ${panel_headers})
   target_include_directories(panel PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include/panel"
@@ -387,6 +478,12 @@ if(BUILD_DESKTOP_APP)
     wx::base
     wx::core
     wx::gl)
+  if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    target_compile_definitions(panel PRIVATE
+      CAMERA_INTRINSIC_CALIBRATION_ENABLED=1)
+    target_link_libraries(panel PUBLIC
+      camera_calibration_io camera_calibration_workflow)
+  endif()
 
   add_executable(test_app WIN32 src/main.cpp)
   set_target_properties(test_app PROPERTIES OUTPUT_NAME test)
@@ -409,6 +506,13 @@ if(MSVC)
       robot_model_collision
       robot_model_render
       point_cloud)
+  if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    list(APPEND msvc_project_targets
+      camera_calibration_core
+      camera_calibration_io
+      camera_calibration_workflow
+      camera_intrinsic_calibration_cli)
+  endif()
   if(ENABLE_MV3D_CAMERA)
     list(APPEND msvc_project_targets camera_mv3d_adapter)
   endif()
@@ -501,6 +605,18 @@ if(BUILD_TESTING)
 
   add_project_test(camera_frame_buffer_tests camera_frame_buffer_tests.cpp)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)
+
+  if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    add_project_test(camera_intrinsic_calibration_tests
+                     camera_intrinsic_calibration_tests.cpp)
+    target_link_libraries(camera_intrinsic_calibration_tests PRIVATE
+      camera_calibration_io)
+
+    add_project_test(camera_intrinsic_calibration_workflow_tests
+                     camera_intrinsic_calibration_workflow_tests.cpp)
+    target_link_libraries(camera_intrinsic_calibration_workflow_tests PRIVATE
+      camera_calibration_workflow)
+  endif()
 
   if(ENABLE_MV3D_CAMERA)
     add_project_test(camera_device_detail_tests camera_device_detail_tests.cpp)

@@ -188,11 +188,16 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
   acquisition_buttons->Add(m_save_button, 1, wxEXPAND);
   m_show_button = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"显示2D图像"));
+  m_calibrate_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"相机内参标定…"));
+  m_calibrate_button->Enable(false);
   m_frame_info_text = new wxStaticText(this, wxID_ANY, "");
   acquisition_box->Add(
     acquisition_buttons, 0, wxEXPAND | wxALL, 6);
   acquisition_box->Add(
     m_show_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+  acquisition_box->Add(
+    m_calibrate_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
   acquisition_box->Add(
     m_frame_info_text, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
@@ -226,6 +231,8 @@ Camera_2D_Control_Panel::Camera_2D_Control_Panel(
     wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Save, this);
   m_show_button->Bind(
     wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Show_Image, this);
+  m_calibrate_button->Bind(
+    wxEVT_BUTTON, &Camera_2D_Control_Panel::On_Calibrate, this);
 
   m_timer.SetOwner(this);
   Bind(
@@ -240,6 +247,16 @@ void Camera_2D_Control_Panel::Set_On_Show_Image(
   std::function<void()> callback)
 {
   m_on_show_image = std::move(callback);
+}
+
+void Camera_2D_Control_Panel::Set_On_Calibrate(
+  std::function<void()> callback)
+{
+  m_on_calibrate = std::move(callback);
+  if (m_calibrate_button)
+  {
+    m_calibrate_button->Enable(static_cast<bool>(m_on_calibrate));
+  }
 }
 
 void Camera_2D_Control_Panel::Set_On_Availability_Changed(
@@ -589,6 +606,14 @@ void Camera_2D_Control_Panel::On_Show_Image(wxCommandEvent &)
   if (m_on_show_image)
   {
     m_on_show_image();
+  }
+}
+
+void Camera_2D_Control_Panel::On_Calibrate(wxCommandEvent &)
+{
+  if (m_on_calibrate)
+  {
+    m_on_calibrate();
   }
 }
 

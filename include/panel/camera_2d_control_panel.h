@@ -25,6 +25,7 @@ public:
     Camera_2D_Service &camera_service);
 
   void Set_On_Show_Image(std::function<void()> callback);
+  void Set_On_Calibrate(std::function<void()> callback);
   void Set_On_Availability_Changed(
     std::function<void(bool)> callback);
 
@@ -43,11 +44,13 @@ private:
   void On_Reload(wxCommandEvent &event);
   void On_Save(wxCommandEvent &event);
   void On_Show_Image(wxCommandEvent &event);
+  void On_Calibrate(wxCommandEvent &event);
   void On_Timer(wxTimerEvent &event);
 
   Camera_2D_Service &m_camera_service;
   std::vector<std::string> m_device_keys;
   std::function<void()> m_on_show_image;
+  std::function<void()> m_on_calibrate;
   wxChoice *m_device_choice = nullptr;
   wxButton *m_refresh_button = nullptr;
   wxButton *m_open_button = nullptr;
@@ -68,6 +71,7 @@ private:
   wxButton *m_trigger_button = nullptr;
   wxButton *m_save_button = nullptr;
   wxButton *m_show_button = nullptr;
+  wxButton *m_calibrate_button = nullptr;
   wxStaticText *m_frame_info_text = nullptr;
   wxTimer m_timer;
   Camera_2D_Parameters m_parameters;
