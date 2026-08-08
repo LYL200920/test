@@ -9,6 +9,8 @@
 #include <wx/choice.h>
 #include <wx/dirdlg.h>
 #include <wx/dcmemory.h>
+#include <wx/filedlg.h>
+#include <wx/gauge.h>
 #include <wx/image.h>
 #include <wx/listctrl.h>
 #include <wx/msgdlg.h>
@@ -76,7 +78,8 @@ std::string Safe_File_Component(std::string text)
 Camera_Intrinsic_Calibration_Dialog::
 Camera_Intrinsic_Calibration_Dialog(
   wxWindow *parent,
-  Camera_2D_Service &camera_service)
+  Camera_2D_Service &camera_service,
+  Camera_Calibration_Progress_Host *progress_host)
   : wxDialog(
       parent,
       wxID_ANY,
@@ -85,14 +88,22 @@ Camera_Intrinsic_Calibration_Dialog(
       wxSize(1080, 760),
       wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
     camera_service_(camera_service),
+    progress_host_(progress_host),
     session_image_directory_(Make_Session_Image_Directory())
 {
   Build_Ui();
+  if (progress_path_text_)
+  {
+    progress_path_text_->SetValue(
+      (application::Get_App_Paths().progress_root /
+       "progress_camera_calib_board.xml").wstring());
+  }
   Bind(
     wxEVT_INTRINSIC_CALIBRATION_WORKER,
     &Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete,
     this);
   Refresh_Preparation();
+  Inspect_Progress(false);
   Refresh_Navigation();
   CentreOnParent();
 }
@@ -104,6 +115,10 @@ Camera_Intrinsic_Calibration_Dialog::
   if (worker_.joinable())
   {
     worker_.join();
+  }
+  if (progress_host_)
+  {
+    progress_host_->Detach_Calibration_Progress_Observer(this);
   }
 }
 
@@ -139,6 +154,10 @@ void Camera_Intrinsic_Calibration_Dialog::Build_Ui()
     wxEVT_BUTTON, &Camera_Intrinsic_Calibration_Dialog::On_Next, this);
   cancel_button_->Bind(
     wxEVT_BUTTON, &Camera_Intrinsic_Calibration_Dialog::On_Cancel, this);
+  Bind(
+    wxEVT_CLOSE_WINDOW,
+    &Camera_Intrinsic_Calibration_Dialog::On_Close,
+    this);
 }
 
 wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
@@ -237,8 +256,54 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Capture_Page()
   font.SetPointSize(font.GetPointSize() + 3);
   font.SetWeight(wxFONTWEIGHT_BOLD);
   title->SetFont(font);
+
+  auto *progress_box = new wxStaticBoxSizer(
+    wxVERTICAL,
+    page,
+    wxString::FromUTF8(u8"Progress 自动运动取图"));
+  progress_path_text_ = new wxTextCtrl(page, wxID_ANY);
+  progress_browse_button_ = new wxButton(
+    page, wxID_ANY, wxString::FromUTF8(u8"浏览…"));
+  progress_inspect_button_ = new wxButton(
+    page, wxID_ANY, wxString::FromUTF8(u8"检查"));
+  auto *path_row = new wxBoxSizer(wxHORIZONTAL);
+  path_row->Add(progress_path_text_, 1, wxEXPAND | wxRIGHT, 6);
+  path_row->Add(progress_browse_button_, 0, wxRIGHT, 6);
+  path_row->Add(progress_inspect_button_, 0);
+
+  progress_speed_spin_ = new wxSpinCtrl(
+    page, wxID_ANY, "20", wxDefaultPosition, wxSize(70, -1),
+    wxSP_ARROW_KEYS, 1, 100, 20);
+  progress_settle_spin_ = new wxSpinCtrl(
+    page, wxID_ANY, "500", wxDefaultPosition, wxSize(85, -1),
+    wxSP_ARROW_KEYS, 0, 5000, 500);
+  progress_start_button_ = new wxButton(
+    page, wxID_ANY, wxString::FromUTF8(u8"开始自动取图"));
+  progress_stop_button_ = new wxButton(
+    page, wxID_ANY, wxString::FromUTF8(u8"停止运动"));
+  auto *run_row = new wxBoxSizer(wxHORIZONTAL);
+  run_row->Add(new wxStaticText(
+    page, wxID_ANY, wxString::FromUTF8(u8"LIN速度(mm/s)")),
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  run_row->Add(progress_speed_spin_, 0, wxRIGHT, 12);
+  run_row->Add(new wxStaticText(
+    page, wxID_ANY, wxString::FromUTF8(u8"到位稳定(ms)")),
+    0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+  run_row->Add(progress_settle_spin_, 0, wxRIGHT, 12);
+  run_row->Add(progress_start_button_, 0, wxRIGHT, 6);
+  run_row->Add(progress_stop_button_, 0);
+  progress_summary_text_ = new wxStaticText(page, wxID_ANY, wxEmptyString);
+  progress_status_text_ = new wxStaticText(page, wxID_ANY, wxEmptyString);
+  progress_gauge_ = new wxGauge(page, wxID_ANY, 1);
+  progress_box->Add(path_row, 0, wxEXPAND | wxALL, 6);
+  progress_box->Add(progress_summary_text_, 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
+  progress_box->Add(run_row, 0, wxEXPAND | wxALL, 6);
+  progress_box->Add(progress_gauge_, 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
+  progress_box->Add(
+    progress_status_text_, 0, wxEXPAND | wxALL, 6);
+
   preview_ = new wxStaticBitmap(
-    page, wxID_ANY, wxNullBitmap, wxDefaultPosition, wxSize(620, 430));
+    page, wxID_ANY, wxNullBitmap, wxDefaultPosition, wxSize(620, 300));
   preview_->SetBackgroundColour(wxColour(35, 35, 35));
   capture_list_ = new wxListCtrl(
     page, wxID_ANY, wxDefaultPosition, wxDefaultSize,
@@ -269,6 +334,7 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Capture_Page()
     wxString::FromUTF8(
       u8"依次覆盖中心、四边、四角，并采集绕 X/Y 两轴正负倾斜的图像。建议 15～20 张以上。")),
     0, wxEXPAND | wxBOTTOM, 10);
+  sizer->Add(progress_box, 0, wxEXPAND | wxBOTTOM, 10);
   sizer->Add(content, 1, wxEXPAND | wxBOTTOM, 10);
   sizer->Add(actions, 0, wxBOTTOM, 8);
   sizer->Add(capture_status_, 0, wxEXPAND);
@@ -279,6 +345,27 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Capture_Page()
     wxEVT_BUTTON, &Camera_Intrinsic_Calibration_Dialog::On_Import, this);
   remove_button_->Bind(
     wxEVT_BUTTON, &Camera_Intrinsic_Calibration_Dialog::On_Remove, this);
+  progress_browse_button_->Bind(
+    wxEVT_BUTTON,
+    &Camera_Intrinsic_Calibration_Dialog::On_Browse_Progress,
+    this);
+  progress_inspect_button_->Bind(
+    wxEVT_BUTTON,
+    &Camera_Intrinsic_Calibration_Dialog::On_Inspect_Progress,
+    this);
+  progress_start_button_->Bind(
+    wxEVT_BUTTON,
+    &Camera_Intrinsic_Calibration_Dialog::On_Start_Progress,
+    this);
+  progress_stop_button_->Bind(
+    wxEVT_BUTTON,
+    &Camera_Intrinsic_Calibration_Dialog::On_Stop_Progress,
+    this);
+  progress_path_text_->Bind(wxEVT_TEXT, [this](wxCommandEvent &)
+  {
+    progress_checked_ = false;
+    Refresh_Progress_Controls();
+  });
   return page;
 }
 
@@ -388,6 +475,74 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Capture_List()
   Refresh_Navigation();
 }
 
+void Camera_Intrinsic_Calibration_Dialog::Refresh_Progress_Controls()
+{
+  if (!progress_start_button_)
+  {
+    return;
+  }
+  const bool available = progress_host_ != nullptr;
+  progress_path_text_->Enable(available && !progress_active_ && !busy_);
+  progress_browse_button_->Enable(available && !progress_active_ && !busy_);
+  progress_inspect_button_->Enable(available && !progress_active_ && !busy_);
+  progress_speed_spin_->Enable(available && !progress_active_ && !busy_);
+  progress_settle_spin_->Enable(available && !progress_active_ && !busy_);
+  progress_start_button_->Enable(
+    available && progress_checked_ && !progress_active_ && !busy_);
+  progress_stop_button_->Enable(available && progress_active_);
+  if (!available)
+  {
+    progress_summary_text_->SetLabel(wxString::FromUTF8(
+      u8"当前以离线模式打开，Progress 自动运动不可用。"));
+  }
+}
+
+bool Camera_Intrinsic_Calibration_Dialog::Inspect_Progress(bool show_error)
+{
+  if (!progress_host_ || !progress_path_text_)
+  {
+    progress_checked_ = false;
+    Refresh_Progress_Controls();
+    return false;
+  }
+  const std::filesystem::path path(
+    std::wstring(progress_path_text_->GetValue().wc_str()));
+  Camera_Calibration_Progress_Summary summary;
+  std::string error;
+  if (!progress_host_->Inspect_Calibration_Progress(
+        path, &summary, &error))
+  {
+    progress_checked_ = false;
+    progress_summary_text_->SetLabel(
+      wxString::FromUTF8(u8"检查失败：") + From_Utf8(error));
+    if (show_error)
+    {
+      wxMessageBox(
+        From_Utf8(error),
+        wxString::FromUTF8(u8"标定 Progress 检查失败"),
+        wxOK | wxICON_ERROR,
+        this);
+    }
+    Refresh_Progress_Controls();
+    return false;
+  }
+  progress_checked_ = true;
+  progress_summary_text_->SetLabel(wxString::Format(
+    wxString::FromUTF8(
+      u8"检查通过：机器人 %s；总点 %zu；取图点 %zu；过渡点 %zu"),
+    From_Utf8(summary.robot_model_id),
+    summary.total_point_count,
+    summary.capture_point_count,
+    summary.transition_point_count));
+  progress_gauge_->SetRange(
+    std::max(1, static_cast<int>(summary.total_point_count)));
+  progress_gauge_->SetValue(0);
+  progress_status_text_->SetLabel(wxString::FromUTF8(
+    u8"开始前请确认标定板固定、运动区域无人且机械臂已回到复位位置。"));
+  Refresh_Progress_Controls();
+  return true;
+}
+
 void Camera_Intrinsic_Calibration_Dialog::Refresh_Review()
 {
   const auto readiness = workflow_.Readiness(10);
@@ -415,8 +570,8 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Review()
 void Camera_Intrinsic_Calibration_Dialog::Refresh_Navigation()
 {
   const std::size_t page = book_->GetSelection();
-  back_button_->Enable(!busy_ && page > 0 && page < 4);
-  cancel_button_->Enable(!busy_);
+  back_button_->Enable(!busy_ && !progress_active_ && page > 0 && page < 4);
+  cancel_button_->Enable(!busy_ && !progress_active_);
   next_button_->SetLabel(page == 2
     ? wxString::FromUTF8(u8"审查数据")
     : (page == 3
@@ -424,7 +579,7 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Navigation()
       : (page == 4
         ? wxString::FromUTF8(u8"保存并完成")
         : wxString::FromUTF8(u8"下一步"))));
-  bool next_enabled = !busy_;
+  bool next_enabled = !busy_ && !progress_active_;
   if (page == 0)
   {
     next_enabled = next_enabled && lens_choice_->GetSelection() == 0;
@@ -438,6 +593,7 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Navigation()
     next_enabled = next_enabled && has_result_;
   }
   next_button_->Enable(next_enabled);
+  Refresh_Progress_Controls();
 }
 
 void Camera_Intrinsic_Calibration_Dialog::Show_Preview(
@@ -487,9 +643,10 @@ void Camera_Intrinsic_Calibration_Dialog::Set_Busy(
   const wxString &message)
 {
   busy_ = busy;
-  capture_button_->Enable(!busy && camera_service_.Latest_Frame() != nullptr);
-  import_button_->Enable(!busy);
-  remove_button_->Enable(!busy);
+  capture_button_->Enable(
+    !busy && !progress_active_ && camera_service_.Latest_Frame() != nullptr);
+  import_button_->Enable(!busy && !progress_active_);
+  remove_button_->Enable(!busy && !progress_active_);
   if (!message.empty())
   {
     capture_status_->SetLabel(message);
@@ -542,6 +699,12 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
   Set_Busy(false);
   if (!result.success)
   {
+    if (result.operation == Worker_Operation::Progress_Capture &&
+        progress_host_)
+    {
+      progress_host_->Complete_Calibration_Image_Processing(
+        false, result.error);
+    }
     wxMessageBox(
       From_Utf8(result.error),
       wxString::FromUTF8(u8"内参标定"),
@@ -551,6 +714,7 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
     return;
   }
   if (result.operation == Worker_Operation::Capture ||
+      result.operation == Worker_Operation::Progress_Capture ||
       result.operation == Worker_Operation::Import)
   {
     std::optional<camera_calibration::Image_Detection_Result>
@@ -559,6 +723,10 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
     {
       preview_detection = result.captures.front().detection;
     }
+    const bool progress_accepted =
+      result.operation == Worker_Operation::Progress_Capture &&
+      !result.captures.empty() &&
+      result.captures.front().detection.chessboard_found;
     for (auto &capture : result.captures)
     {
       workflow_.Add_Capture(std::move(capture));
@@ -573,6 +741,12 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
     capture_status_->SetLabel(wxString::Format(
       wxString::FromUTF8(u8"处理完成，当前共有 %zu 张图像"),
       workflow_.Captures().size()));
+    if (result.operation == Worker_Operation::Progress_Capture &&
+        progress_host_)
+    {
+      progress_host_->Complete_Calibration_Image_Processing(
+        progress_accepted, std::string());
+    }
   }
   else if (result.operation == Worker_Operation::Calibrate)
   {
@@ -772,9 +946,248 @@ void Camera_Intrinsic_Calibration_Dialog::On_Remove(wxCommandEvent &)
   Refresh_Capture_List();
 }
 
+void Camera_Intrinsic_Calibration_Dialog::On_Browse_Progress(wxCommandEvent &)
+{
+  wxFileDialog dialog(
+    this,
+    wxString::FromUTF8(u8"选择相机标定 Progress"),
+    wxEmptyString,
+    wxEmptyString,
+    wxString::FromUTF8(u8"Progress XML (*.xml)|*.xml"),
+    wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+  if (dialog.ShowModal() != wxID_OK)
+  {
+    return;
+  }
+  progress_path_text_->SetValue(dialog.GetPath());
+  Inspect_Progress(true);
+}
+
+void Camera_Intrinsic_Calibration_Dialog::On_Inspect_Progress(wxCommandEvent &)
+{
+  Inspect_Progress(true);
+}
+
+void Camera_Intrinsic_Calibration_Dialog::On_Start_Progress(wxCommandEvent &)
+{
+  if (!progress_host_ || progress_active_ || busy_)
+  {
+    return;
+  }
+  if (!Inspect_Progress(true))
+  {
+    return;
+  }
+  if (!workflow_.Captures().empty() &&
+      wxMessageBox(
+        wxString::FromUTF8(
+          u8"开始 Progress 自动取图会清空当前采集记录，是否继续？"),
+        wxString::FromUTF8(u8"确认自动取图"),
+        wxYES_NO | wxICON_WARNING,
+        this) != wxYES)
+  {
+    return;
+  }
+  if (wxMessageBox(
+        wxString::FromUTF8(
+          u8"请确认：\n"
+          u8"1. 标定板已经固定；\n"
+          u8"2. 机械臂运动区域无人且无障碍物；\n"
+          u8"3. 已准备好使用急停。\n\n"
+          u8"是否开始自动运动取图？"),
+        wxString::FromUTF8(u8"运动安全确认"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_WARNING,
+        this) != wxYES)
+  {
+    return;
+  }
+
+  const auto board = workflow_.Chessboard();
+  workflow_.Reset(board);
+  has_result_ = false;
+  session_image_directory_ = Make_Session_Image_Directory();
+  Refresh_Capture_List();
+
+  Camera_Calibration_Progress_Options options;
+  options.linear_velocity_mm_s = progress_speed_spin_->GetValue();
+  options.settling_time_ms = progress_settle_spin_->GetValue();
+  options.image_timeout_ms = 3000;
+  options.maximum_detection_retries = 1;
+  const std::filesystem::path path(
+    std::wstring(progress_path_text_->GetValue().wc_str()));
+  progress_active_ = true;
+  Refresh_Navigation();
+  std::string error;
+  if (!progress_host_->Start_Calibration_Progress(
+        path, options, this, &error))
+  {
+    progress_active_ = false;
+    progress_status_text_->SetLabel(
+      wxString::FromUTF8(u8"启动失败：") + From_Utf8(error));
+    Refresh_Navigation();
+    wxMessageBox(
+      From_Utf8(error),
+      wxString::FromUTF8(u8"无法开始自动取图"),
+      wxOK | wxICON_ERROR,
+      this);
+  }
+}
+
+void Camera_Intrinsic_Calibration_Dialog::On_Stop_Progress(wxCommandEvent &)
+{
+  if (progress_host_ && progress_active_)
+  {
+    progress_stop_button_->Enable(false);
+    progress_status_text_->SetLabel(wxString::FromUTF8(
+      u8"正在请求停止机械臂，请等待停止确认…"));
+    progress_host_->Request_Calibration_Progress_Stop();
+  }
+}
+
+void Camera_Intrinsic_Calibration_Dialog::
+On_Calibration_Progress_Update(
+  const Camera_Calibration_Progress_Update &update)
+{
+  progress_active_ = update.active;
+  if (progress_gauge_)
+  {
+    const int range = std::max(1, static_cast<int>(update.point_count));
+    progress_gauge_->SetRange(range);
+    progress_gauge_->SetValue(std::min(
+      range,
+      static_cast<int>(update.point_index + (update.active ? 1 : 0))));
+  }
+  if (progress_status_text_)
+  {
+    progress_status_text_->SetLabel(wxString::Format(
+      wxString::FromUTF8(
+        u8"点位 %zu/%zu，当前 P[%zu]，有效图 %zu，失败点 %zu%s\n%s"),
+      update.point_count == 0 ? 0 : update.point_index + 1,
+      update.point_count,
+      update.point_id,
+      update.accepted_image_count,
+      update.rejected_point_count,
+      update.retry_index == 0
+        ? wxString()
+        : wxString::Format(
+            wxString::FromUTF8(u8"，第 %zu 次重拍"),
+            update.retry_index),
+      From_Utf8(update.message)));
+  }
+  Refresh_Navigation();
+}
+
+void Camera_Intrinsic_Calibration_Dialog::On_Calibration_Progress_Frame(
+  std::shared_ptr<const jutze_camera::camera_frame> frame,
+  std::size_t point_index,
+  std::size_t point_id,
+  std::size_t retry_index)
+{
+  if (!frame || busy_)
+  {
+    if (progress_host_)
+    {
+      progress_host_->Complete_Calibration_Image_Processing(
+        false,
+        frame ? "上一张标定图片仍在处理" : "相机返回了空图片");
+    }
+    return;
+  }
+  std::ostringstream filename;
+  filename << 'P' << std::setw(3) << std::setfill('0') << point_id
+           << "_try" << (retry_index + 1)
+           << "_frame" << frame->m_frame_num << ".png";
+  const auto image_path = session_image_directory_ / filename.str();
+  const auto board = workflow_.Chessboard();
+  Start_Worker([
+    frame, board, image_path, point_index, point_id, retry_index]()
+  {
+    Worker_Result result;
+    result.operation = Worker_Operation::Progress_Capture;
+    result.progress_point_index = point_index;
+    result.progress_point_id = point_id;
+    result.progress_retry_index = retry_index;
+    Camera_2D_Display_Image image;
+    if (!Convert_Camera_2D_Frame(*frame, &image, &result.error))
+    {
+      return result;
+    }
+    const camera_calibration::Image_View view{
+      image.rgb.data(),
+      static_cast<int>(image.width),
+      static_cast<int>(image.height),
+      static_cast<std::size_t>(image.width) * 3,
+      camera_calibration::Pixel_Format::RGB8};
+    if (!camera_calibration::Save_Calibration_Image(
+          image_path, view, &result.error))
+    {
+      return result;
+    }
+    camera_calibration::Intrinsic_Calibration_Session session(board);
+    camera_calibration::Image_Detection_Result detection;
+    if (!session.Add_Image(
+          view,
+          image_path.filename().string(),
+          &detection,
+          &result.error))
+    {
+      return result;
+    }
+    result.captures.push_back({detection, image_path, true});
+    result.preview_image = std::move(image);
+    result.success = true;
+    return result;
+  });
+}
+
+void Camera_Intrinsic_Calibration_Dialog::
+On_Calibration_Progress_Finished(
+  bool success,
+  const std::string &message)
+{
+  progress_active_ = false;
+  if (progress_gauge_ && success)
+  {
+    progress_gauge_->SetValue(progress_gauge_->GetRange());
+  }
+  progress_status_text_->SetLabel(
+    (success ? wxString::FromUTF8(u8"完成：")
+             : wxString::FromUTF8(u8"已中止：")) +
+    From_Utf8(message));
+  Refresh_Capture_List();
+  Refresh_Navigation();
+  if (!success && message.find("stopped") == std::string::npos)
+  {
+    wxMessageBox(
+      From_Utf8(message),
+      wxString::FromUTF8(u8"Progress 自动取图"),
+      wxOK | wxICON_WARNING,
+      this);
+  }
+}
+
 void Camera_Intrinsic_Calibration_Dialog::On_Cancel(wxCommandEvent &)
 {
+  if (progress_active_ && progress_host_)
+  {
+    progress_stop_button_->Enable(false);
+    progress_status_text_->SetLabel(wxString::FromUTF8(
+      u8"正在请求停止机械臂，请等待停止确认…"));
+    progress_host_->Request_Calibration_Progress_Stop();
+    return;
+  }
   EndModal(wxID_CANCEL);
+}
+
+void Camera_Intrinsic_Calibration_Dialog::On_Close(wxCloseEvent &event)
+{
+  if (progress_active_ && progress_host_)
+  {
+    progress_host_->Request_Calibration_Progress_Stop();
+    event.Veto();
+    return;
+  }
+  event.Skip();
 }
 
 bool Camera_Intrinsic_Calibration_Dialog::Apply_Board_Configuration()

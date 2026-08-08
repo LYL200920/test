@@ -925,7 +925,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     {
       if( !m_camera_2d_service ) return;
       Camera_Intrinsic_Calibration_Dialog dialog (
-        this, *m_camera_2d_service);
+        this, *m_camera_2d_service, this);
       dialog.ShowModal ( );
     });
 #endif
@@ -1243,6 +1243,40 @@ void Robot_Model_Panel_Controller::Refresh_Robot_Command_Controls(
   const application::Robot_Connection_Status &status)
 {
   m_robot_connection_status = status;
+  if( m_calibration_progress_controller.Is_Active() )
+  {
+    using Calibration_State =
+      application::Camera_Calibration_Progress_State;
+    if( m_calibration_progress_controller.State() ==
+          Calibration_State::Stopping &&
+        ( status.state == application::Robot_Control_State::Ready ||
+          status.state == application::Robot_Control_State::Fault ||
+          status.state == application::Robot_Control_State::Disconnected ) )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Stop_Confirmed());
+      return;
+    }
+    if( m_calibration_progress_controller.State() !=
+          Calibration_State::Stopping &&
+        ( status.state == application::Robot_Control_State::Fault ||
+          status.state == application::Robot_Control_State::Disconnected ) )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Effect_Failed(
+          status.state == application::Robot_Control_State::Disconnected
+            ? "机械臂连接断开，标定取图已中止"
+            : "机械臂故障，标定取图已中止：" + status.detail));
+      return;
+    }
+    if( m_calibration_progress_controller.State() ==
+          Calibration_State::Moving &&
+        status.state == application::Robot_Control_State::Ready )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Motion_Completed());
+    }
+  }
   if( m_progress_run_controller.Is_Motion_Active() )
   {
     if( m_progress_run_controller.State() ==
@@ -1297,7 +1331,8 @@ void Robot_Model_Panel_Controller::Refresh_Robot_Command_Controls(
     status.state == application::Robot_Control_State::Completed;
 
   const bool safe_controls =
-    !m_progress_run_controller.Is_Motion_Active();
+    !m_progress_run_controller.Is_Motion_Active() &&
+    !m_calibration_progress_controller.Is_Active();
   if( m_kuka_move_joint_button )
     m_kuka_move_joint_button->Enable (safe_controls && ready);
   if( m_kuka_move_ptp_button )
@@ -2700,6 +2735,173 @@ void Robot_Model_Panel_Controller::On_Complete_Progress ( )
   }
 }
 
+bool Robot_Model_Panel_Controller::Inspect_Calibration_Progress(
+  const std::filesystem::path &path,
+  Camera_Calibration_Progress_Summary *summary,
+  std::string *error_message) const
+{
+  auto fail = [error_message](const std::string &message)
+  {
+    if( error_message ) *error_message = message;
+    return false;
+  };
+  if( !summary ) return fail("标定 Progress 摘要输出为空");
+  robot_model::Robot_Progress_File progress;
+  std::string load_error;
+  if( !robot_model::Load_Robot_Progress(path, &progress, &load_error) )
+    return fail("加载标定 Progress 失败：" + load_error);
+  if( progress.robot_model_id != m_current_model_id )
+  {
+    return fail(
+      "Progress 机械臂型号为 " + progress.robot_model_id +
+      "，当前型号为 " + m_current_model_id);
+  }
+  if( progress.points.empty() )
+    return fail("标定 Progress 中没有点位");
+
+  const auto *params =
+    m_view && m_view->Has_Current_Model() ? &m_view->Kinematic_Params() : nullptr;
+  std::size_t capture_count = 0;
+  for( const auto &point : progress.points )
+  {
+    const auto point_name = robot_model::Format_Teach_Point_Name(point.id);
+    if( !point.has_world_pose ||
+        !std::all_of(
+          point.world_pose.begin(), point.world_pose.end(),
+          [](double value) { return std::isfinite(value); }) ||
+        !std::all_of(
+          point.joint_angles_deg.begin(), point.joint_angles_deg.end(),
+          [](double value) { return std::isfinite(value); }) )
+    {
+      return fail(point_name + " 的机器人位姿无效");
+    }
+    if( params )
+    {
+      for( std::size_t joint = 0; joint < point.joint_angles_deg.size(); ++joint )
+      {
+        if( joint < params->joint_mins.size() &&
+            point.joint_angles_deg[joint] < params->joint_mins[joint] - 1.0e-6 )
+          return fail(point_name + " 超出关节下限");
+        if( joint < params->joint_maxs.size() &&
+            point.joint_angles_deg[joint] > params->joint_maxs[joint] + 1.0e-6 )
+          return fail(point_name + " 超出关节上限");
+      }
+    }
+    if( point.type == robot_model::Robot_Teach_Point_Type::Motion )
+      ++capture_count;
+  }
+  if( capture_count == 0 )
+    return fail("标定 Progress 中没有 motion 取图点");
+
+  summary->path = path;
+  summary->robot_model_id = progress.robot_model_id;
+  summary->total_point_count = progress.points.size();
+  summary->capture_point_count = capture_count;
+  summary->transition_point_count = progress.points.size() - capture_count;
+  if( error_message ) error_message->clear();
+  return true;
+}
+
+bool Robot_Model_Panel_Controller::Start_Calibration_Progress(
+  const std::filesystem::path &path,
+  const Camera_Calibration_Progress_Options &options,
+  Camera_Calibration_Progress_Observer *observer,
+  std::string *error_message)
+{
+  auto fail = [error_message](const std::string &message)
+  {
+    if( error_message ) *error_message = message;
+    return false;
+  };
+  if( !observer ) return fail("标定 Progress 观察者为空");
+  if( m_calibration_progress_controller.Is_Active() ||
+      m_progress_run_controller.Is_Motion_Active() ||
+      m_progress_run_controller.State() ==
+        application::Progress_Run_State::Processing_Images ||
+      m_run_image_processing.load() || Is_Trajectory_Active() ||
+      m_hardware_step_preview_active )
+  {
+    return fail("当前存在其他机械臂运动或图片处理任务");
+  }
+  if( options.linear_velocity_mm_s < 1 ||
+      options.linear_velocity_mm_s > 100 )
+    return fail("标定 LIN 速度必须在 1～100 mm/s 之间");
+  if( options.settling_time_ms < 0 || options.settling_time_ms > 5000 )
+    return fail("到位稳定时间必须在 0～5000 ms 之间");
+  if( options.image_timeout_ms < 500 || options.image_timeout_ms > 30000 )
+    return fail("相机取图超时必须在 500～30000 ms 之间");
+
+  Camera_Calibration_Progress_Summary summary;
+  if( !Inspect_Calibration_Progress(path, &summary, error_message) )
+    return false;
+  std::string readiness_error;
+  if( !Is_Robot_At_Home(&readiness_error) )
+    return fail(readiness_error);
+  if( !m_camera_2d_service || !m_camera_2d_service->Is_Grabbing() )
+    return fail("请先打开 2D 相机并开始采集");
+  if( m_camera_2d_service->Status().trigger_mode !=
+        jutze_camera::camera_trigger_mode::soft_trigger )
+    return fail("Progress 自动取图要求 2D 相机使用软触发模式");
+
+  robot_model::Robot_Progress_File progress;
+  std::string load_error;
+  if( !robot_model::Load_Robot_Progress(path, &progress, &load_error) )
+    return fail("重新加载标定 Progress 失败：" + load_error);
+  m_calibration_progress_points = std::move(progress.points);
+  m_calibration_progress_options = options;
+  m_calibration_progress_observer = observer;
+  std::vector<bool> capture_mask;
+  capture_mask.reserve(m_calibration_progress_points.size());
+  for( const auto &point : m_calibration_progress_points )
+  {
+    capture_mask.push_back(
+      point.type == robot_model::Robot_Teach_Point_Type::Motion);
+  }
+
+  Set_Run_Safety_Lock(true);
+  if( !m_run_timer.IsRunning() )
+    m_run_timer.Start(RUN_TIMER_INTERVAL_MS);
+  Apply_Calibration_Progress_Transition(
+    m_calibration_progress_controller.Start(
+      std::move(capture_mask), options.maximum_detection_retries));
+  if( error_message ) error_message->clear();
+  return m_calibration_progress_controller.Is_Active();
+}
+
+void Robot_Model_Panel_Controller::Complete_Calibration_Image_Processing(
+  bool accepted,
+  const std::string &error_message)
+{
+  if( !m_calibration_progress_controller.Is_Active() ) return;
+  if( !error_message.empty() )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Effect_Failed(
+        "标定图片处理失败：" + error_message));
+    return;
+  }
+  Apply_Calibration_Progress_Transition(
+    m_calibration_progress_controller.Image_Processed(accepted));
+}
+
+void Robot_Model_Panel_Controller::Request_Calibration_Progress_Stop()
+{
+  Apply_Calibration_Progress_Transition(
+    m_calibration_progress_controller.Request_Stop());
+}
+
+bool Robot_Model_Panel_Controller::Is_Calibration_Progress_Active() const
+{
+  return m_calibration_progress_controller.Is_Active();
+}
+
+void Robot_Model_Panel_Controller::Detach_Calibration_Progress_Observer(
+  Camera_Calibration_Progress_Observer *observer)
+{
+  if( m_calibration_progress_observer == observer )
+    m_calibration_progress_observer = nullptr;
+}
+
 bool Robot_Model_Panel_Controller::Is_Robot_At_Home(std::string *reason) const
 {
   auto fail = [reason](const std::string &message)
@@ -2760,7 +2962,8 @@ bool Robot_Model_Panel_Controller::Is_Robot_At_Home(std::string *reason) const
 void Robot_Model_Panel_Controller::Refresh_Run_Readiness()
 {
   if( !m_run_progress_panel ||
-      m_progress_run_controller.Is_Motion_Active() )
+      m_progress_run_controller.Is_Motion_Active() ||
+      m_calibration_progress_controller.Is_Active() )
     return;
   std::string reason;
   const bool ready = Is_Robot_At_Home(&reason);
@@ -2804,7 +3007,8 @@ void Robot_Model_Panel_Controller::Set_Run_Safety_Lock(bool locked)
 
 void Robot_Model_Panel_Controller::Start_Progress_Run()
 {
-  if( m_progress_run_controller.Is_Motion_Active() ||
+  if( m_calibration_progress_controller.Is_Active() ||
+      m_progress_run_controller.Is_Motion_Active() ||
       m_progress_run_controller.State() ==
         application::Progress_Run_State::Processing_Images ||
       !m_progress_completed ||
@@ -3001,8 +3205,242 @@ void Robot_Model_Panel_Controller::Capture_Run_Point_Image()
     "机械臂已到位，正在获取 2D 图片...");
 }
 
+void Robot_Model_Panel_Controller::Dispatch_Next_Calibration_Point()
+{
+  using State = application::Camera_Calibration_Progress_State;
+  if( m_calibration_progress_controller.State() != State::Moving ) return;
+  const std::size_t index =
+    m_calibration_progress_controller.Current_Point_Index();
+  if( index >= m_calibration_progress_points.size() )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Effect_Failed(
+        "标定 Progress 点位索引无效"));
+    return;
+  }
+  if( !m_robot_connection || !m_robot_connection->Can_Move() )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Effect_Failed(
+        "机械臂未就绪，标定取图已中止"));
+    return;
+  }
+  const auto &point = m_calibration_progress_points[index];
+  try
+  {
+    application::Robot_Cartesian_Motion_Options options;
+    options.velocity = static_cast<double>(
+      m_calibration_progress_options.linear_velocity_mm_s);
+    options.acceleration_percent = static_cast<double>(
+      m_kuka_acceleration_slider
+        ? m_kuka_acceleration_slider->GetValue()
+        : 50);
+    options.blend_mm = 0.0;
+    const auto sequence = m_robot_connection->Move_Linear(
+      point.world_pose, options);
+    Notify_Calibration_Progress(
+      "正在执行 " + robot_model::Format_Teach_Point_Name(point.id) +
+      "（LIN " +
+      std::to_string(m_calibration_progress_options.linear_velocity_mm_s) +
+      " mm/s），sequence=" + std::to_string(sequence));
+  }
+  catch( const std::exception &error )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Effect_Failed(
+        std::string("下发标定点位失败：") + error.what()));
+  }
+}
+
+void Robot_Model_Panel_Controller::Trigger_Calibration_Image()
+{
+  using State = application::Camera_Calibration_Progress_State;
+  if( m_calibration_progress_controller.State() !=
+        State::Waiting_For_Image )
+    return;
+  const auto previous =
+    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+  m_calibration_had_previous_frame = static_cast<bool>(previous);
+  m_calibration_previous_frame_number = previous ? previous->m_frame_num : 0;
+  std::string error;
+  if( !m_camera_2d_service ||
+      !m_camera_2d_service->Software_Trigger(&error) )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Effect_Failed(
+        "2D 相机触发失败：" + error));
+    return;
+  }
+  m_calibration_progress_deadline =
+    std::chrono::steady_clock::now() + std::chrono::milliseconds(
+      m_calibration_progress_options.image_timeout_ms);
+  Notify_Calibration_Progress("机械臂已稳定，正在获取 2D 图片");
+}
+
+void Robot_Model_Panel_Controller::On_Calibration_Progress_Timer()
+{
+  using State = application::Camera_Calibration_Progress_State;
+  const auto now = std::chrono::steady_clock::now();
+  if( m_calibration_progress_controller.State() == State::Settling )
+  {
+    if( now >= m_calibration_progress_deadline )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Settling_Completed());
+    }
+    return;
+  }
+  if( m_calibration_progress_controller.State() !=
+        State::Waiting_For_Image )
+    return;
+
+  const auto frame =
+    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+  const bool has_new_frame =
+    frame && (!m_calibration_had_previous_frame ||
+              frame->m_frame_num != m_calibration_previous_frame_number);
+  if( has_new_frame )
+  {
+    const std::size_t index =
+      m_calibration_progress_controller.Current_Point_Index();
+    if( index >= m_calibration_progress_points.size() )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Effect_Failed(
+          "标定 Progress 点位索引无效"));
+      return;
+    }
+    const auto transition =
+      m_calibration_progress_controller.Image_Arrived();
+    Apply_Calibration_Progress_Transition(transition);
+    if( transition.action ==
+          application::Camera_Calibration_Progress_Action::Process_Image &&
+        m_calibration_progress_observer )
+    {
+      m_calibration_progress_observer->On_Calibration_Progress_Frame(
+        frame,
+        index,
+        m_calibration_progress_points[index].id,
+        transition.retry_index);
+    }
+    else if( transition.action ==
+               application::Camera_Calibration_Progress_Action::Process_Image )
+    {
+      Apply_Calibration_Progress_Transition(
+        m_calibration_progress_controller.Effect_Failed(
+          "标定窗口已关闭，无法处理图片"));
+    }
+    return;
+  }
+  if( now >= m_calibration_progress_deadline )
+  {
+    Apply_Calibration_Progress_Transition(
+      m_calibration_progress_controller.Image_Timed_Out());
+  }
+}
+
+void Robot_Model_Panel_Controller::Apply_Calibration_Progress_Transition(
+  const application::Camera_Calibration_Progress_Transition &transition)
+{
+  using Action = application::Camera_Calibration_Progress_Action;
+  using State = application::Camera_Calibration_Progress_State;
+  if( !transition.message.empty() )
+    Notify_Calibration_Progress(transition.message);
+  switch( transition.action )
+  {
+    case Action::None:
+      return;
+    case Action::Move_Point:
+      Dispatch_Next_Calibration_Point();
+      return;
+    case Action::Wait_For_Settling:
+      m_calibration_progress_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(
+          m_calibration_progress_options.settling_time_ms);
+      Notify_Calibration_Progress(
+        transition.retry_index == 0
+          ? "机械臂已到位，等待振动稳定"
+          : "未检出棋盘格，等待稳定后重拍当前点");
+      return;
+    case Action::Trigger_Image:
+      Trigger_Calibration_Image();
+      return;
+    case Action::Process_Image:
+      Notify_Calibration_Progress("正在保存图片并检测棋盘格角点");
+      return;
+    case Action::Request_Stop:
+      Notify_Calibration_Progress("停止命令已发送，等待机械臂确认");
+      try
+      {
+        if( !m_robot_connection )
+          throw std::runtime_error("KUKA service is unavailable.");
+        m_robot_connection->Request_Stop();
+      }
+      catch( const std::exception &error )
+      {
+        Finish_Calibration_Progress(
+          false, std::string("发送停止命令失败：") + error.what());
+      }
+      return;
+    case Action::Finish:
+      Finish_Calibration_Progress(
+        transition.state == State::Completed,
+        transition.message.empty()
+          ? (transition.state == State::Completed
+              ? "Progress 自动取图完成"
+              : "Progress 自动取图失败")
+          : transition.message);
+      return;
+  }
+}
+
+void Robot_Model_Panel_Controller::Notify_Calibration_Progress(
+  const std::string &message)
+{
+  if( !m_calibration_progress_observer ) return;
+  Camera_Calibration_Progress_Update update;
+  update.active = m_calibration_progress_controller.Is_Active();
+  update.stopping =
+    m_calibration_progress_controller.State() ==
+      application::Camera_Calibration_Progress_State::Stopping;
+  update.point_index =
+    m_calibration_progress_controller.Current_Point_Index();
+  update.point_count = m_calibration_progress_points.size();
+  update.retry_index =
+    m_calibration_progress_controller.Current_Retry_Index();
+  update.accepted_image_count =
+    m_calibration_progress_controller.Accepted_Image_Count();
+  update.rejected_point_count =
+    m_calibration_progress_controller.Rejected_Point_Count();
+  if( update.point_index < m_calibration_progress_points.size() )
+    update.point_id = m_calibration_progress_points[update.point_index].id;
+  update.message = message;
+  m_calibration_progress_observer->On_Calibration_Progress_Update(update);
+}
+
+void Robot_Model_Panel_Controller::Finish_Calibration_Progress(
+  bool success,
+  const std::string &message)
+{
+  if( m_run_timer.IsRunning() &&
+      !m_progress_run_controller.Is_Motion_Active() )
+    m_run_timer.Stop();
+  Set_Run_Safety_Lock(false);
+  Refresh_Robot_Command_Controls(m_robot_connection_status);
+  auto *observer = m_calibration_progress_observer;
+  m_calibration_progress_observer = nullptr;
+  if( observer )
+    observer->On_Calibration_Progress_Finished(success, message);
+  m_calibration_progress_points.clear();
+}
+
 void Robot_Model_Panel_Controller::On_Run_Timer(wxTimerEvent &)
 {
+  if( m_calibration_progress_controller.Is_Active() )
+  {
+    On_Calibration_Progress_Timer();
+    return;
+  }
   if( !m_progress_run_controller.Is_Motion_Active() )
     return;
   const auto now = std::chrono::steady_clock::now();

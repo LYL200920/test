@@ -14,6 +14,8 @@
 #include "template_configuration.h"
 #include "camera_2d_service.h"
 #include "camera_2d_cross_template.h"
+#include "camera_calibration_progress_controller.h"
+#include "camera_calibration_progress_host.h"
 #include "progress_run_controller.h"
 #include "robot_connection_controller.h"
 
@@ -67,7 +69,9 @@ enum class Main_Display_Page
   Camera_2D_Image = 3
 };
 
-class Robot_Model_Panel_Controller : public wxPanel
+class Robot_Model_Panel_Controller :
+  public wxPanel,
+  public Camera_Calibration_Progress_Host
 {
 public:
   Robot_Model_Panel_Controller(
@@ -83,6 +87,23 @@ public:
   void Initialize_After_Layout();
   void Show_Model_Configuration(wxWindow *parent = nullptr);
   void Refresh_Template_Configuration();
+
+  bool Inspect_Calibration_Progress(
+    const std::filesystem::path &path,
+    Camera_Calibration_Progress_Summary *summary,
+    std::string *error_message) const override;
+  bool Start_Calibration_Progress(
+    const std::filesystem::path &path,
+    const Camera_Calibration_Progress_Options &options,
+    Camera_Calibration_Progress_Observer *observer,
+    std::string *error_message) override;
+  void Complete_Calibration_Image_Processing(
+    bool accepted,
+    const std::string &error_message) override;
+  void Request_Calibration_Progress_Stop() override;
+  bool Is_Calibration_Progress_Active() const override;
+  void Detach_Calibration_Progress_Observer(
+    Camera_Calibration_Progress_Observer *observer) override;
 
 private:
   void On_Add_Trajectory_Point(wxCommandEvent &event);
@@ -115,6 +136,15 @@ private:
   void Start_Run_Image_Processing();
   void On_Run_Image_Processing_Result(wxThreadEvent &event);
   void Finish_Progress_Run(bool success, const std::string &message);
+  void Apply_Calibration_Progress_Transition(
+    const application::Camera_Calibration_Progress_Transition &transition);
+  void Dispatch_Next_Calibration_Point();
+  void Trigger_Calibration_Image();
+  void On_Calibration_Progress_Timer();
+  void Finish_Calibration_Progress(
+    bool success,
+    const std::string &message);
+  void Notify_Calibration_Progress(const std::string &message);
   void Set_Run_Safety_Lock(bool locked);
   void Refresh_Run_Readiness();
   bool Is_Robot_At_Home(std::string *reason = nullptr) const;
@@ -316,6 +346,17 @@ private:
   bool m_playback_cloud_switch_blocked = false;
   bool m_progress_completed = false;
   application::Progress_Run_Controller m_progress_run_controller;
+  application::Camera_Calibration_Progress_Controller
+    m_calibration_progress_controller;
+  std::vector<robot_model::Robot_Teach_Point>
+    m_calibration_progress_points;
+  Camera_Calibration_Progress_Options m_calibration_progress_options;
+  Camera_Calibration_Progress_Observer *m_calibration_progress_observer =
+    nullptr;
+  std::chrono::steady_clock::time_point
+    m_calibration_progress_deadline;
+  unsigned long long m_calibration_previous_frame_number = 0;
+  bool m_calibration_had_previous_frame = false;
   bool m_run_save_images = false;
   bool m_run_build_mosaic = true;
   bool m_run_linear_motion = false;

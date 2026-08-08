@@ -211,6 +211,8 @@ target_include_directories(app_paths PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include/application")
 
 add_library(application_core STATIC
+  src/application/camera_calibration_progress_controller.cpp
+  include/application/camera_calibration_progress_controller.h
   src/application/progress_run_controller.cpp
   include/application/progress_run_controller.h)
 target_include_directories(application_core PUBLIC
@@ -574,6 +576,11 @@ if(BUILD_TESTING)
   add_project_test(progress_run_controller_tests
                    progress_run_controller_tests.cpp)
   target_link_libraries(progress_run_controller_tests PRIVATE application_core)
+
+  add_project_test(camera_calibration_progress_controller_tests
+                   camera_calibration_progress_controller_tests.cpp)
+  target_link_libraries(camera_calibration_progress_controller_tests PRIVATE
+                        application_core)
 
   add_project_test(robot_connection_controller_tests
                    robot_connection_controller_tests.cpp)
