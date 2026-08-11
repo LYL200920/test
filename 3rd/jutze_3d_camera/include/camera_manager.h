@@ -23,6 +23,9 @@ public:
 
   bool Ensure_Initialized(std::string *error = nullptr);
   bool Refresh_Devices(std::string *error = nullptr);
+  bool Configure_Device_Ip(const std::string &serial_number,
+                           const Camera_Ip_Configuration &configuration,
+                           std::string *error = nullptr);
   bool Open_Selected_Device(std::string *error = nullptr);
   bool Refresh_Current_Device_Info(std::string *error = nullptr);
   bool Refresh_Parameters(std::string *error = nullptr);

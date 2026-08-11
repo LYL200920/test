@@ -4,6 +4,7 @@
 #include "common.hpp"
 #include "camera_device_detail.h"
 #include "camera_frame.h"
+#include "camera_ip_config.h"
 #include "camera_parameter.h"
 #include "camera_stream_config.h"
 
@@ -28,6 +29,9 @@ public:
                            std::string *error = nullptr);
     bool Open_Device(const MV3D_RGBD_DEVICE_INFO &sdk_device,
                      std::string *error = nullptr);
+    bool Configure_Device_Ip(const std::string &serial_number,
+                             const Camera_Ip_Configuration &configuration,
+                             std::string *error = nullptr);
     bool Get_Device_Info(Camera_Device_Detail &detail,
                          std::string *error = nullptr);
     bool Get_Parameter(const std::string &key,

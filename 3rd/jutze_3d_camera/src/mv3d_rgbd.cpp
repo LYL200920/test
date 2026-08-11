@@ -23,6 +23,14 @@ namespace
     const auto end = std::find(std::begin(value), std::end(value), '\0');
     return std::string(std::begin(value), end);
   }
+
+  template <std::size_t Size>
+  void To_Fixed_String(const std::string &value, char (&destination)[Size])
+  {
+    std::fill(std::begin(destination), std::end(destination), '\0');
+    const auto count = (std::min)(value.size(), Size - 1U);
+    std::copy_n(value.begin(), count, destination);
+  }
 } // namespace
 
 Mv3d_Rgbd_Camera::~Mv3d_Rgbd_Camera()
@@ -137,6 +145,48 @@ bool Mv3d_Rgbd_Camera::Open_Device(const MV3D_RGBD_DEVICE_INFO &sdk_device, std:
   if (m_handle == nullptr)
     return Fail(MV3D_RGBD_E_HANDLE, "MV3D_RGBD_OpenDevice", error);
 
+  return true;
+}
+
+bool Mv3d_Rgbd_Camera::Configure_Device_Ip(
+    const std::string &serial_number,
+    const Camera_Ip_Configuration &configuration,
+    std::string *error)
+{
+  if (error)
+    error->clear();
+  if (!m_initialized)
+    return Fail(MV3D_RGBD_E_CALLORDER, "SDK is not initialized", error);
+  if (m_handle != nullptr)
+    return Fail(MV3D_RGBD_E_CALLORDER, "Close the camera before configuring its IP", error);
+  if (serial_number.empty())
+    return Fail(MV3D_RGBD_E_PARAMETER, "Camera serial number is empty", error);
+  if (!Validate_Camera_Ip_Configuration(configuration, error))
+    return false;
+
+  MV3D_RGBD_IP_CONFIG sdk_configuration{};
+  switch (configuration.mode)
+  {
+  case Camera_Ip_Mode::Static:
+    sdk_configuration.enIPCfgMode = IpCfgMode_Static;
+    To_Fixed_String(configuration.ip_address, sdk_configuration.chDestIp);
+    To_Fixed_String(configuration.subnet_mask, sdk_configuration.chDestNetMask);
+    To_Fixed_String(
+        configuration.default_gateway.empty() ? "0.0.0.0" : configuration.default_gateway,
+        sdk_configuration.chDestGateWay);
+    break;
+  case Camera_Ip_Mode::Dhcp:
+    sdk_configuration.enIPCfgMode = IpCfgMode_DHCP;
+    break;
+  case Camera_Ip_Mode::Lla:
+    sdk_configuration.enIPCfgMode = IpCfgMode_LLA;
+    break;
+  }
+
+  const auto status = MV3D_RGBD_SetIpConfig(
+      serial_number.c_str(), &sdk_configuration);
+  if (status != MV3D_RGBD_OK)
+    return Fail(status, "MV3D_RGBD_SetIpConfig", error);
   return true;
 }
 

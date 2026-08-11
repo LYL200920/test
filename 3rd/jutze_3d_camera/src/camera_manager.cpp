@@ -124,6 +124,42 @@ bool Camera_Manager::Refresh_Devices(std::string *error)
   return true;
 }
 
+bool Camera_Manager::Configure_Device_Ip(
+    const std::string &serial_number,
+    const Camera_Ip_Configuration &configuration,
+    std::string *error)
+{
+  if (error)
+    error->clear();
+
+  Restore_Lifecycle_State();
+  if (m_state != Camera_State::Initialized)
+    return Return_Error("Close the camera before configuring its IP", error);
+  const auto device = std::find_if(
+      m_devices.begin(), m_devices.end(),
+      [&serial_number](const CAMERA_DEVICE_INFO &candidate)
+      { return candidate.serial_number == serial_number; });
+  if (device == m_devices.end())
+    return Return_Error("Camera serial number was not found; refresh devices first", error);
+
+  std::string operation_error;
+  if (!m_camera.Configure_Device_Ip(
+          serial_number, configuration, &operation_error))
+  {
+    return Set_Error(Camera_State::Initialized, operation_error, error);
+  }
+
+  m_selected_serial_number = serial_number;
+  m_devices.clear();
+  m_sdk_devices.clear();
+  m_selected_sdk_device.reset();
+  m_device_detail.reset();
+  Clear_Parameters();
+  Clear_Stream_Configuration();
+  Clear_Error();
+  return true;
+}
+
 bool Camera_Manager::Select_Device(const std::string &serial_number)
 {
   if (!Can_Select_Device())

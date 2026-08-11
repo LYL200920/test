@@ -4,14 +4,30 @@ project(jutze_3d_camera VERSION 1.0.0 LANGUAGES CXX)
 
 option(JUTZE_3D_CAMERA_ENABLE_MV3D
        "Build the MV3D RGBD backend" ON)
+option(JUTZE_3D_CAMERA_BUILD_TESTS
+       "Build the jutze_3d_camera tests" ${PROJECT_IS_TOP_LEVEL})
 
 add_library(jutze_3d_camera_types STATIC
-  src/camera_frame.cpp)
+  src/camera_frame.cpp
+  src/camera_ip_config.cpp)
 add_library(jutze_3d_camera::types ALIAS jutze_3d_camera_types)
 target_compile_features(jutze_3d_camera_types PUBLIC cxx_std_17)
+if(MSVC)
+  target_compile_options(jutze_3d_camera_types PRIVATE /utf-8)
+endif()
 target_include_directories(jutze_3d_camera_types PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>")
+
+if(JUTZE_3D_CAMERA_BUILD_TESTS)
+  enable_testing()
+  add_executable(jutze_3d_camera_ip_config_tests
+    tests/camera_ip_config_tests.cpp)
+  target_link_libraries(jutze_3d_camera_ip_config_tests PRIVATE
+    jutze_3d_camera::types)
+  add_test(NAME jutze_3d_camera_ip_config_tests
+           COMMAND jutze_3d_camera_ip_config_tests)
+endif()
 
 if(JUTZE_3D_CAMERA_ENABLE_MV3D)
   if(NOT WIN32)
@@ -78,6 +94,10 @@ if(JUTZE_3D_CAMERA_ENABLE_MV3D)
     src/mv3d_rgbd.cpp)
   add_library(jutze_3d_camera::jutze_3d_camera ALIAS jutze_3d_camera)
   target_compile_features(jutze_3d_camera PUBLIC cxx_std_17)
+  target_compile_definitions(jutze_3d_camera PUBLIC NOMINMAX)
+  if(MSVC)
+    target_compile_options(jutze_3d_camera PRIVATE /utf-8)
+  endif()
   target_include_directories(jutze_3d_camera PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>")
@@ -96,4 +116,5 @@ if(JUTZE_3D_CAMERA_ENABLE_MV3D)
               $<TARGET_FILE_DIR:${target}>
       COMMAND_EXPAND_LISTS)
   endfunction()
+
 endif()
