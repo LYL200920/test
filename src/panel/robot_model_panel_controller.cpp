@@ -687,6 +687,8 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     m_workspace_splitter);
   m_teach_point_list_panel->Set_On_Selection_Changed (
     [this] { On_Teach_Point_Selection_Changed ( ); });
+  m_teach_point_list_panel->Set_On_Point_Activated (
+    [this] (int point_index) { On_Teach_Point_Activated (point_index); });
   m_teach_point_list_panel->Set_On_Pose_Coordinate_Changed (
     [this] (int selection)
     {
@@ -3093,6 +3095,8 @@ void Robot_Model_Panel_Controller::Start_Progress_Run()
     (m_run_linear_motion ? " mm/s" : "%"));
   Set_Run_Safety_Lock(true);
   m_run_timer.Start(RUN_TIMER_INTERVAL_MS);
+  if( m_teach_point_list_panel )
+    m_teach_point_list_panel->Begin_Point_Execution();
   std::vector<bool> capture_image_at_point;
   capture_image_at_point.reserve(points.size());
   for( const auto& point : points )
@@ -3126,13 +3130,6 @@ void Robot_Model_Panel_Controller::Dispatch_Next_Run_Point()
       m_progress_run_controller.Effect_Failed(
         "机械臂未就绪，Progress 已中止"));
     return;
-  }
-
-  if( m_teach_point_list_panel )
-  {
-    m_teach_point_list_panel->Set_Point_Selection(
-      static_cast<int>(point_index));
-    Update_Teach_Point_Details();
   }
 
   try
@@ -3495,6 +3492,48 @@ void Robot_Model_Panel_Controller::Request_Progress_Emergency_Stop()
 void Robot_Model_Panel_Controller::Apply_Progress_Run_Transition(
   const application::Progress_Run_Transition& transition)
 {
+  if( m_teach_point_list_panel )
+  {
+    using List_State = Teach_Point_List_Panel::Point_Execution_State;
+    const auto point_count =
+      m_teach_point_store.Point_Count(m_current_model_id);
+    if( transition.state == application::Progress_Run_State::Moving &&
+        transition.action == application::Progress_Run_Action::Move_Point )
+    {
+      if( transition.point_index > 0 )
+      {
+        m_teach_point_list_panel->Set_Point_Execution_State(
+          static_cast<int>(transition.point_index - 1),
+          List_State::Completed,
+          false);
+      }
+      m_teach_point_list_panel->Set_Point_Execution_State(
+        static_cast<int>(transition.point_index), List_State::Moving);
+    }
+    else if( transition.state ==
+               application::Progress_Run_State::Waiting_For_Image )
+    {
+      m_teach_point_list_panel->Set_Point_Execution_State(
+        static_cast<int>(transition.point_index), List_State::Waiting);
+    }
+    else if( transition.state ==
+               application::Progress_Run_State::Processing_Images ||
+             transition.state == application::Progress_Run_State::Completed )
+    {
+      for( std::size_t index = 0; index < point_count; ++index )
+      {
+        m_teach_point_list_panel->Set_Point_Execution_State(
+          static_cast<int>(index), List_State::Completed, false);
+      }
+    }
+    else if( transition.state == application::Progress_Run_State::Failed &&
+             transition.point_index < point_count )
+    {
+      m_teach_point_list_panel->Set_Point_Execution_State(
+        static_cast<int>(transition.point_index), List_State::Failed);
+    }
+  }
+
   switch( transition.action )
   {
     case application::Progress_Run_Action::None:
@@ -3821,15 +3860,22 @@ void Robot_Model_Panel_Controller::On_Play_Trajectory (wxCommandEvent&)
       collision_summary (start_result.collision));
     return;
   }
+  if( m_teach_point_list_panel )
+  {
+    using List_State = Teach_Point_List_Panel::Point_Execution_State;
+    m_teach_point_list_panel->Begin_Point_Execution ( );
+    m_teach_point_list_panel->Set_Point_Execution_State (
+      0, List_State::Completed, false);
+    if( points.size ( ) > 1 )
+    {
+      m_teach_point_list_panel->Set_Point_Execution_State (
+        1, List_State::Moving);
+    }
+  }
   m_next_playback_waypoint_index = 1;
   m_next_playback_cloud_switch = 0;
   m_waiting_for_playback_cloud = false;
   m_playback_cloud_switch_blocked = false;
-  if( m_teach_point_list_panel )
-  {
-    m_teach_point_list_panel->Set_Point_Selection (0);
-    Update_Teach_Point_Details ( );
-  }
   m_speed_zero_paused_playback = false;
   Set_Joint_Controls_Enabled (false);
   if( m_view && m_view->Collision_Rebuild_In_Progress ( ) )
@@ -3961,6 +4007,12 @@ void Robot_Model_Panel_Controller::On_Trajectory_Timer (wxTimerEvent&)
             cloud_switch.require_point_cloud) )
       {
         m_playback_cloud_switch_blocked = true;
+        if( m_teach_point_list_panel )
+        {
+          m_teach_point_list_panel->Set_Point_Execution_State (
+            static_cast<int> (cloud_switch.point_index),
+            Teach_Point_List_Panel::Point_Execution_State::Failed);
+        }
         Set_Joint_Controls_Enabled (true);
         Update_Trajectory_Status ( );
         return;
@@ -3993,6 +4045,16 @@ void Robot_Model_Panel_Controller::On_Trajectory_Timer (wxTimerEvent&)
   {
     m_trajectory_timer.Stop ( );
     m_trajectory_session.Pause ( );
+    if( m_teach_point_list_panel &&
+        m_next_playback_waypoint_index <
+          m_playback_waypoint_point_indices.size ( ) )
+    {
+      m_teach_point_list_panel->Set_Point_Execution_State (
+        static_cast<int> (
+          m_playback_waypoint_point_indices[
+            m_next_playback_waypoint_index]),
+        Teach_Point_List_Panel::Point_Execution_State::Failed);
+    }
     Set_Joint_Controls_Enabled (true);
     Update_Trajectory_Status ( );
     m_status_text->SetLabel (
@@ -4014,19 +4076,30 @@ void Robot_Model_Panel_Controller::On_Trajectory_Timer (wxTimerEvent&)
     {
       if( m_teach_point_list_panel )
       {
-        m_teach_point_list_panel->Set_Point_Selection (
-          static_cast<int> (
-            m_playback_waypoint_point_indices[
-              m_next_playback_waypoint_index]));
-        Update_Teach_Point_Details ( );
+        using List_State = Teach_Point_List_Panel::Point_Execution_State;
+        const int reached_point = static_cast<int> (
+          m_playback_waypoint_point_indices[
+            m_next_playback_waypoint_index]);
+        m_teach_point_list_panel->Set_Point_Execution_State (
+          reached_point, List_State::Completed);
+        if( m_next_playback_waypoint_index + 1 <
+              m_playback_waypoint_point_indices.size ( ) )
+        {
+          m_teach_point_list_panel->Set_Point_Execution_State (
+            static_cast<int> (
+              m_playback_waypoint_point_indices[
+                m_next_playback_waypoint_index + 1]),
+            List_State::Moving);
+        }
       }
       ++m_next_playback_waypoint_index;
+      Update_Trajectory_Status ( );
     }
   }
 
   if( m_trajectory_session.Is_Finished ( ) )
   {
-    Stop_Trajectory_Playback ( );
+    Stop_Trajectory_Playback (false);
   }
 }
 
@@ -4698,7 +4771,10 @@ void Robot_Model_Panel_Controller::Set_Joint_Controls_Enabled (bool enabled)
   }
   if( m_teach_point_list_panel )
   {
-    m_teach_point_list_panel->Set_List_Enabled (enabled);
+    // Keep the list readable and selectable while motion is active. Editing
+    // commands are locked separately; point activation performs its own
+    // real-run safety check.
+    m_teach_point_list_panel->Set_List_Enabled (true);
   }
 }
 
@@ -4923,6 +4999,72 @@ void Robot_Model_Panel_Controller::On_Teach_Point_Selection_Changed ( )
   {
     Apply_Teach_Point_Bindings_Keeping_Display (
       static_cast<std::size_t> (selection));
+  }
+}
+
+void Robot_Model_Panel_Controller::On_Teach_Point_Activated (
+  int point_index)
+{
+  const bool progress_active =
+    m_calibration_progress_controller.Is_Active() ||
+    m_progress_run_controller.Is_Motion_Active() ||
+    m_progress_run_controller.State() ==
+      application::Progress_Run_State::Processing_Images ||
+    m_run_image_processing.load();
+  if( progress_active )
+  {
+    if( m_status_text )
+    {
+      m_status_text->SetLabel(wxString::FromUTF8(
+        u8"Progress 运行期间不能跳转仿真机械臂"));
+    }
+    return;
+  }
+
+  const auto& points = m_teach_point_store.Points(m_current_model_id);
+  if( point_index < 0 ||
+      static_cast<std::size_t>(point_index) >= points.size() )
+  {
+    return;
+  }
+  if( Is_Trajectory_Active() )
+  {
+    Stop_Trajectory_Playback();
+  }
+
+  const auto index = static_cast<std::size_t>(point_index);
+  if( !Apply_Teach_Point_Bindings_Keeping_Display(index) )
+  {
+    return;
+  }
+  const auto result = Apply_Joint_Input_Angles_To_Sliders(
+    points[index].joint_angles_deg);
+  if( !result.accepted )
+  {
+    if( m_status_text )
+    {
+      m_status_text->SetLabel(
+        result.collision.collided
+          ? wxString::FromUTF8(u8"无法跳转到该点：") +
+              collision_summary(result.collision)
+          : wxString::FromUTF8(u8"无法跳转到该点：关节姿态无效"));
+    }
+    return;
+  }
+
+  if( m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Set_Point_Selection(point_index);
+    m_teach_point_list_panel->Reset_Point_Execution();
+    Update_Teach_Point_Details();
+  }
+  Update_Trajectory_Status();
+  if( m_status_text )
+  {
+    m_status_text->SetLabel(
+      wxString::FromUTF8(u8"仿真机械臂已跳转到 ") +
+      wxString::FromUTF8(
+        robot_model::Format_Teach_Point_Name(points[index].id).c_str()));
   }
 }
 
@@ -5331,7 +5473,8 @@ bool Robot_Model_Panel_Controller::Is_Trajectory_Active ( ) const
   return m_trajectory_session.Is_Active ( );
 }
 
-void Robot_Model_Panel_Controller::Stop_Trajectory_Playback ( )
+void Robot_Model_Panel_Controller::Stop_Trajectory_Playback (
+  bool clear_execution)
 {
   if( m_trajectory_timer.IsRunning ( ) )
   {
@@ -5348,6 +5491,10 @@ void Robot_Model_Panel_Controller::Stop_Trajectory_Playback ( )
   m_next_playback_cloud_switch = 0;
   m_waiting_for_playback_cloud = false;
   m_playback_cloud_switch_blocked = false;
+  if( clear_execution && m_teach_point_list_panel )
+  {
+    m_teach_point_list_panel->Reset_Point_Execution ( );
+  }
   Update_Trajectory_Status ( );
   Set_Joint_Controls_Enabled (!m_hardware_step_preview_active);
 }
