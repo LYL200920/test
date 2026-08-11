@@ -222,7 +222,7 @@ private:
   double Get_Trajectory_Speed_Mps() const;
   int Get_Trajectory_Timer_Interval_Ms() const;
   bool Is_Trajectory_Active() const;
-  void Stop_Trajectory_Playback(bool clear_execution = true);
+  void Stop_Trajectory_Playback();
   void Resize_Right_Tool(int requested_width);
   void Resize_Teach_Point_List(bool collapsed);
   void Load_Model_List();

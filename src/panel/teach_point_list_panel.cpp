@@ -1,9 +1,12 @@
 #include "teach_point_list_panel.h"
 
 #include <wx/button.h>
+#include <wx/brush.h>
 #include <wx/choice.h>
 #include <wx/colour.h>
+#include <wx/dcmemory.h>
 #include <wx/grid.h>
+#include <wx/imaglist.h>
 #include <wx/menu.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -73,6 +76,41 @@ wxTreeItemId find_point_item(
   return {};
 }
 
+enum Execution_Image
+{
+  Execution_Pending = 0,
+  Execution_Moving,
+  Execution_Waiting,
+  Execution_Completed,
+  Execution_Failed
+};
+
+wxBitmap execution_bitmap(const wxColour &colour)
+{
+  wxBitmap bitmap(10, 14);
+  wxMemoryDC dc(bitmap);
+  dc.SetBackground(wxBrush(colour));
+  dc.Clear();
+  dc.SelectObject(wxNullBitmap);
+  return bitmap;
+}
+
+int execution_image(
+  Teach_Point_List_Panel::Point_Execution_State state)
+{
+  using State = Teach_Point_List_Panel::Point_Execution_State;
+  switch (state)
+  {
+  case State::Pending: return Execution_Pending;
+  case State::Moving: return Execution_Moving;
+  case State::Waiting: return Execution_Waiting;
+  case State::Completed: return Execution_Completed;
+  case State::Failed: return Execution_Failed;
+  case State::None: break;
+  }
+  return -1;
+}
+
 void configure_read_only_grid(wxGrid *grid, int rows, int columns)
 {
   grid->CreateGrid(rows, columns);
@@ -110,6 +148,13 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
     wxDefaultSize,
     wxTR_DEFAULT_STYLE | wxTR_HIDE_ROOT | wxTR_MULTIPLE |
       wxTR_FULL_ROW_HIGHLIGHT);
+  auto *execution_images = new wxImageList(10, 14, false, 5);
+  execution_images->Add(execution_bitmap(wxColour(190, 190, 190)));
+  execution_images->Add(execution_bitmap(wxColour(55, 135, 225)));
+  execution_images->Add(execution_bitmap(wxColour(235, 165, 35)));
+  execution_images->Add(execution_bitmap(wxColour(55, 165, 80)));
+  execution_images->Add(execution_bitmap(wxColour(210, 60, 60)));
+  m_point_list->AssignImageList(execution_images);
   m_point_list->AddRoot("Progress");
 
   m_info_grid = new wxGrid(this, wxID_ANY);
@@ -614,28 +659,13 @@ void Teach_Point_List_Panel::Update_Point_Execution_Appearance(
     background = wxColour(255, 224, 224);
   }
 
-  switch (state)
-  {
-  case Point_Execution_State::Moving:
-    background = wxColour(218, 235, 255);
-    break;
-  case Point_Execution_State::Waiting:
-    background = wxColour(255, 238, 190);
-    break;
-  case Point_Execution_State::Completed:
-    background = wxColour(220, 245, 225);
-    break;
-  case Point_Execution_State::Failed:
-    background = wxColour(255, 218, 218);
-    break;
-  case Point_Execution_State::None:
-  case Point_Execution_State::Pending:
-    break;
-  }
   m_point_list->SetItemBackgroundColour(item, background);
   m_point_list->SetItemTextColour(
     item, m_point_list->GetForegroundColour());
   m_point_list->SetItemBold(item, false);
+  const int image = execution_image(state);
+  m_point_list->SetItemImage(item, image, wxTreeItemIcon_Normal);
+  m_point_list->SetItemImage(item, image, wxTreeItemIcon_Selected);
 }
 
 void Teach_Point_List_Panel::Set_Dirty(bool dirty)

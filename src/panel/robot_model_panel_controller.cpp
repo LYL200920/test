@@ -3791,6 +3791,8 @@ void Robot_Model_Panel_Controller::Finish_Progress_Run(
   Refresh_Robot_Command_Controls(m_robot_connection_status);
   if( m_run_progress_panel )
     m_run_progress_panel->Set_Status(final_message, !success);
+  if( success && m_teach_point_list_panel )
+    m_teach_point_list_panel->Reset_Point_Execution();
   if( !success )
   {
     m_run_captured_frames.clear();
@@ -4099,7 +4101,7 @@ void Robot_Model_Panel_Controller::On_Trajectory_Timer (wxTimerEvent&)
 
   if( m_trajectory_session.Is_Finished ( ) )
   {
-    Stop_Trajectory_Playback (false);
+    Stop_Trajectory_Playback ( );
   }
 }
 
@@ -5473,8 +5475,7 @@ bool Robot_Model_Panel_Controller::Is_Trajectory_Active ( ) const
   return m_trajectory_session.Is_Active ( );
 }
 
-void Robot_Model_Panel_Controller::Stop_Trajectory_Playback (
-  bool clear_execution)
+void Robot_Model_Panel_Controller::Stop_Trajectory_Playback ( )
 {
   if( m_trajectory_timer.IsRunning ( ) )
   {
@@ -5491,7 +5492,7 @@ void Robot_Model_Panel_Controller::Stop_Trajectory_Playback (
   m_next_playback_cloud_switch = 0;
   m_waiting_for_playback_cloud = false;
   m_playback_cloud_switch_blocked = false;
-  if( clear_execution && m_teach_point_list_panel )
+  if( m_teach_point_list_panel )
   {
     m_teach_point_list_panel->Reset_Point_Execution ( );
   }
