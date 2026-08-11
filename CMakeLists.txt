@@ -28,6 +28,10 @@ option(ENABLE_CAMERA_INTRINSIC_CALIBRATION
 option(ENABLE_ROBOT_MODEL_DIAGNOSTICS
        "Write temporary robot model loading and OpenGL diagnostics" ON)
 
+set(JUTZE_3D_CAMERA_ENABLE_MV3D ${ENABLE_MV3D_CAMERA}
+    CACHE BOOL "Build the MV3D backend in jutze_3d_camera" FORCE)
+add_subdirectory(3rd/jutze_3d_camera EXCLUDE_FROM_ALL)
+
 if(BUILD_DESKTOP_APP AND
    (NOT ENABLE_MV3D_CAMERA OR NOT ENABLE_HUARAY_CAMERA))
   message(FATAL_ERROR
@@ -117,55 +121,6 @@ if(ENABLE_HUARAY_CAMERA)
     jutze_camera_types HuarayTech::MVSDK)
 endif()
 
-# MV3D RGBD SDK
-if(ENABLE_MV3D_CAMERA)
-set(MV3DRGBD_DEV_ROOT "F:/Software/HiViewer/Development"
-    CACHE PATH "MV3D RGBD SDK development directory")
-
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-  set(MV3DRGBD_LIBRARY_ARCH win64)
-  set(MV3DRGBD_RUNTIME_ARCH Win64_x64)
-else()
-  set(MV3DRGBD_LIBRARY_ARCH win32)
-  set(MV3DRGBD_RUNTIME_ARCH Win32_i86)
-endif()
-
-set(MV3DRGBD_RUNTIME_DIR
-    "C:/Program Files (x86)/Common Files/Mv3dRgbdSDK/Runtime/${MV3DRGBD_RUNTIME_ARCH}"
-    CACHE PATH "MV3D RGBD SDK runtime directory")
-set(MV3D_RUNTIME_DIR
-    "C:/Program Files (x86)/Common Files/MV3D/Runtime/${MV3DRGBD_RUNTIME_ARCH}"
-    CACHE PATH "MV3D common runtime directory")
-
-set(MV3DRGBD_INCLUDE_DIR "${MV3DRGBD_DEV_ROOT}/Includes")
-set(MV3DRGBD_IMPORT_LIBRARY
-    "${MV3DRGBD_DEV_ROOT}/Libraries/${MV3DRGBD_LIBRARY_ARCH}/Mv3dRgbd.lib")
-set(MV3DRGBD_RUNTIME_LIBRARY "${MV3DRGBD_RUNTIME_DIR}/Mv3dRgbd.dll")
-set(MV3DRGBD_RUNTIME_FILES
-    "${MV3DRGBD_RUNTIME_LIBRARY}"
-    "${MV3DRGBD_RUNTIME_DIR}/MvUdp.dll"
-    "${MV3DRGBD_RUNTIME_DIR}/Mv3dRgbdCfg.ini"
-    "${MV3D_RUNTIME_DIR}/pthreadVC2.dll")
-
-set(MV3DRGBD_REQUIRED_FILES
-    "${MV3DRGBD_INCLUDE_DIR}/Mv3dRgbdApi.h"
-    "${MV3DRGBD_INCLUDE_DIR}/Mv3dRgbdDefine.h"
-    "${MV3DRGBD_INCLUDE_DIR}/Mv3dRgbdImgProc.h"
-    "${MV3DRGBD_IMPORT_LIBRARY}"
-    ${MV3DRGBD_RUNTIME_FILES})
-foreach(required_file IN LISTS MV3DRGBD_REQUIRED_FILES)
-  if(NOT EXISTS "${required_file}")
-    message(FATAL_ERROR "MV3D RGBD SDK file was not found: ${required_file}")
-  endif()
-endforeach()
-
-add_library(MV3DRGBD::SDK SHARED IMPORTED GLOBAL)
-set_target_properties(MV3DRGBD::SDK PROPERTIES
-  IMPORTED_IMPLIB "${MV3DRGBD_IMPORT_LIBRARY}"
-  IMPORTED_LOCATION "${MV3DRGBD_RUNTIME_LIBRARY}"
-  INTERFACE_INCLUDE_DIRECTORIES "${MV3DRGBD_INCLUDE_DIR}")
-endif()
-
 # VTK is built and installed by build_on_windows.sh. An explicit VTK_DIR can
 # still be supplied when using an existing VTK installation.
 set(local_vtk_dir "${CMAKE_CURRENT_SOURCE_DIR}/vtk_build/install/lib/cmake/vtk-9.6")
@@ -222,14 +177,14 @@ file(GLOB camera_headers CONFIGURE_DEPENDS "include/camera/*.h" "include/camera/
 set(camera_core_sources
   src/camera/camera_2d_cross_template.cpp
   src/camera/camera_2d_image_converter.cpp
-  src/camera/camera_frame.cpp
   src/camera/camera_image_converter.cpp
   src/camera/camera_point_cloud_converter.cpp)
 add_library(camera_core STATIC ${camera_core_sources})
 target_include_directories(camera_core PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include/camera")
 target_link_libraries(camera_core PUBLIC
-  app_paths point_cloud_core jutze_camera_types pugixml)
+  app_paths point_cloud_core jutze_camera_types
+  jutze_3d_camera::types pugixml)
 
 add_library(camera INTERFACE)
 target_link_libraries(camera INTERFACE camera_core)
@@ -293,19 +248,12 @@ endif()
 if(ENABLE_MV3D_CAMERA)
   set(camera_mv3d_adapter_sources
     src/camera/camera_config_dialog.cpp
-    src/camera/camera_device_detail.cpp
-    src/camera/camera_manager.cpp
-    src/camera/camera_mv3d_format_compatibility.cpp
-    src/camera/camera_parameter.cpp
-    src/camera/camera_parameter_registry.cpp
-    src/camera/camera_service.cpp
-    src/camera/camera_stream_config.cpp
-    src/camera/mv3d_rgbd.cpp)
+    src/camera/camera_service.cpp)
   add_library(camera_mv3d_adapter STATIC ${camera_mv3d_adapter_sources})
   target_include_directories(camera_mv3d_adapter PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include/camera")
   target_link_libraries(camera_mv3d_adapter PUBLIC
-    camera_core MV3DRGBD::SDK wx::base wx::core)
+    camera_core jutze_3d_camera::jutze_3d_camera wx::base wx::core)
   target_link_libraries(camera INTERFACE camera_mv3d_adapter)
 endif()
 
@@ -516,7 +464,8 @@ if(MSVC)
       camera_intrinsic_calibration_cli)
   endif()
   if(ENABLE_MV3D_CAMERA)
-    list(APPEND msvc_project_targets camera_mv3d_adapter)
+    list(APPEND msvc_project_targets
+      jutze_3d_camera_types jutze_3d_camera camera_mv3d_adapter)
   endif()
   if(ENABLE_HUARAY_CAMERA)
     list(APPEND msvc_project_targets
@@ -540,12 +489,12 @@ if(WIN32 AND BUILD_DESKTOP_APP)
             $<TARGET_RUNTIME_DLLS:test_app>
             $<TARGET_FILE_DIR:test_app>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${MV3DRGBD_RUNTIME_FILES}
-            $<TARGET_FILE_DIR:test_app>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${HUARAY_RUNTIME_FILES}
             $<TARGET_FILE_DIR:test_app>
     COMMAND_EXPAND_LISTS)
+  if(ENABLE_MV3D_CAMERA)
+    jutze_3d_camera_copy_runtime(test_app)
+  endif()
 endif()
 
 if(BUILD_TESTING)
