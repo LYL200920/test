@@ -73,22 +73,6 @@ wxTreeItemId find_point_item(
   return {};
 }
 
-wxString execution_prefix(
-  Teach_Point_List_Panel::Point_Execution_State state)
-{
-  using State = Teach_Point_List_Panel::Point_Execution_State;
-  switch (state)
-  {
-  case State::Pending: return "[ ] ";
-  case State::Moving: return ">> ";
-  case State::Waiting: return "[..] ";
-  case State::Completed: return "[OK] ";
-  case State::Failed: return "[X] ";
-  case State::None: break;
-  }
-  return {};
-}
-
 void configure_read_only_grid(wxGrid *grid, int rows, int columns)
 {
   grid->CreateGrid(rows, columns);
@@ -124,8 +108,8 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
     wxID_ANY,
     wxDefaultPosition,
     wxDefaultSize,
-    wxTR_HIDE_ROOT | wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT |
-      wxTR_MULTIPLE);
+    wxTR_DEFAULT_STYLE | wxTR_HIDE_ROOT | wxTR_MULTIPLE |
+      wxTR_FULL_ROW_HIGHLIGHT);
   m_point_list->AddRoot("Progress");
 
   m_info_grid = new wxGrid(this, wxID_ANY);
@@ -617,8 +601,7 @@ void Teach_Point_List_Panel::Update_Point_Execution_Appearance(
   }
 
   const auto state = m_point_execution_states[index];
-  m_point_list->SetItemText(
-    item, execution_prefix(state) + m_point_names[index]);
+  m_point_list->SetItemText(item, m_point_names[index]);
   wxColour background = *wxWHITE;
   if (index < m_point_types.size() &&
       m_point_types[index] == robot_model::Robot_Teach_Point_Type::Transition)
@@ -631,40 +614,28 @@ void Teach_Point_List_Panel::Update_Point_Execution_Appearance(
     background = wxColour(255, 224, 224);
   }
 
-  wxColour foreground = m_point_list->GetForegroundColour();
-  if (!foreground.IsOk())
-  {
-    foreground = *wxBLACK;
-  }
-  bool bold = false;
   switch (state)
   {
   case Point_Execution_State::Moving:
     background = wxColour(218, 235, 255);
-    foreground = wxColour(20, 85, 160);
-    bold = true;
     break;
   case Point_Execution_State::Waiting:
     background = wxColour(255, 238, 190);
-    foreground = wxColour(145, 85, 0);
-    bold = true;
     break;
   case Point_Execution_State::Completed:
     background = wxColour(220, 245, 225);
-    foreground = wxColour(25, 120, 55);
     break;
   case Point_Execution_State::Failed:
     background = wxColour(255, 218, 218);
-    foreground = wxColour(175, 35, 35);
-    bold = true;
     break;
   case Point_Execution_State::None:
   case Point_Execution_State::Pending:
     break;
   }
   m_point_list->SetItemBackgroundColour(item, background);
-  m_point_list->SetItemTextColour(item, foreground);
-  m_point_list->SetItemBold(item, bold);
+  m_point_list->SetItemTextColour(
+    item, m_point_list->GetForegroundColour());
+  m_point_list->SetItemBold(item, false);
 }
 
 void Teach_Point_List_Panel::Set_Dirty(bool dirty)
