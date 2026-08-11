@@ -195,6 +195,7 @@ private:
   void Update_Trajectory_Point_List();
   void Update_Teach_Point_Details();
   void On_Teach_Point_Selection_Changed();
+  void On_Teach_Point_Activated(int point_index);
   void On_Teach_Pose_Coordinate_Changed(int selection);
   void Bind_Template_To_Teach_Point_Cloud(std::size_t point_index);
   void Unbind_Template_From_Teach_Point_Cloud(std::size_t point_index);
@@ -221,7 +222,7 @@ private:
   double Get_Trajectory_Speed_Mps() const;
   int Get_Trajectory_Timer_Interval_Ms() const;
   bool Is_Trajectory_Active() const;
-  void Stop_Trajectory_Playback();
+  void Stop_Trajectory_Playback(bool clear_execution = true);
   void Resize_Right_Tool(int requested_width);
   void Resize_Teach_Point_List(bool collapsed);
   void Load_Model_List();

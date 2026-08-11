@@ -20,6 +20,16 @@ class wxStaticText;
 class Teach_Point_List_Panel : public wxPanel
 {
 public:
+  enum class Point_Execution_State
+  {
+    None,
+    Pending,
+    Moving,
+    Waiting,
+    Completed,
+    Failed
+  };
+
   explicit Teach_Point_List_Panel(wxWindow *parent);
 
   void Set_Point_Names(
@@ -44,9 +54,16 @@ public:
   std::vector<int> Selected_Point_Indices() const;
   void Set_Point_Selection(int selection);
   void Set_Point_Selections(const std::vector<int> &selections);
+  void Begin_Point_Execution();
+  void Reset_Point_Execution();
+  void Set_Point_Execution_State(
+    int point_index,
+    Point_Execution_State state,
+    bool ensure_visible = true);
   void Set_Dirty(bool dirty);
   void Set_List_Enabled(bool enabled);
   void Set_On_Selection_Changed(std::function<void()> callback);
+  void Set_On_Point_Activated(std::function<void(int)> callback);
   void Set_On_Collapsed_Changed(std::function<void(bool)> callback);
   void Set_On_Bind_Cloud_Template(
     std::function<void(int)> callback);
@@ -58,6 +75,7 @@ public:
 private:
   void Toggle_Collapsed();
   void Update_Collapsed_State();
+  void Update_Point_Execution_Appearance(int point_index);
 
 private:
   wxStaticText *m_title = nullptr;
@@ -68,6 +86,7 @@ private:
   wxChoice *m_pose_coordinate_choice = nullptr;
   wxGrid *m_pose_grid = nullptr;
   std::function<void()> m_on_selection_changed;
+  std::function<void(int)> m_on_point_activated;
   std::function<void(bool)> m_on_collapsed_changed;
   std::function<void(int)> m_on_bind_cloud_template;
   std::function<void(int)> m_on_unbind_cloud_template;
@@ -76,6 +95,9 @@ private:
   bool m_dirty = false;
   bool m_updating_selection = false;
   std::set<std::string> m_collapsed_group_keys;
+  std::vector<wxString> m_point_names;
+  std::vector<robot_model::Robot_Teach_Point_Type> m_point_types;
+  std::vector<Point_Execution_State> m_point_execution_states;
 };
 
 #endif

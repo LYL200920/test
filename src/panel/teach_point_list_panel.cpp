@@ -73,6 +73,22 @@ wxTreeItemId find_point_item(
   return {};
 }
 
+wxString execution_prefix(
+  Teach_Point_List_Panel::Point_Execution_State state)
+{
+  using State = Teach_Point_List_Panel::Point_Execution_State;
+  switch (state)
+  {
+  case State::Pending: return "[ ] ";
+  case State::Moving: return ">> ";
+  case State::Waiting: return "[..] ";
+  case State::Completed: return "[OK] ";
+  case State::Failed: return "[X] ";
+  case State::None: break;
+  }
+  return {};
+}
+
 void configure_read_only_grid(wxGrid *grid, int rows, int columns)
 {
   grid->CreateGrid(rows, columns);
@@ -182,6 +198,21 @@ Teach_Point_List_Panel::Teach_Point_List_Panel(wxWindow *parent)
       {
         m_on_selection_changed();
       }
+    });
+  m_point_list->Bind(
+    wxEVT_TREE_ITEM_ACTIVATED,
+    [this](wxTreeEvent &event)
+    {
+      const auto *data = item_data(m_point_list, event.GetItem());
+      if (data && data->point_index != wxNOT_FOUND)
+      {
+        if (m_on_point_activated)
+        {
+          m_on_point_activated(data->point_index);
+        }
+        return;
+      }
+      event.Skip();
     });
   m_point_list->Bind(
     wxEVT_TREE_ITEM_MENU,
@@ -368,6 +399,10 @@ void Teach_Point_List_Panel::Set_Point_Names(
     return;
   }
   const std::vector<int> old_selections = Selected_Point_Indices();
+  m_point_names = names;
+  m_point_types = types;
+  m_point_execution_states.assign(
+    names.size(), Point_Execution_State::None);
   m_updating_selection = true;
   m_point_list->DeleteAllItems();
   const wxTreeItemId root = m_point_list->AddRoot("Progress");
@@ -452,6 +487,10 @@ void Teach_Point_List_Panel::Set_Point_Names(
     selections.push_back(static_cast<int>(names.size() - 1));
   }
   Set_Point_Selections(selections);
+  for (std::size_t index = 0; index < names.size(); ++index)
+  {
+    Update_Point_Execution_Appearance(static_cast<int>(index));
+  }
   m_updating_selection = false;
 }
 
@@ -520,6 +559,114 @@ void Teach_Point_List_Panel::Set_Point_Selections(
   m_updating_selection = was_updating;
 }
 
+void Teach_Point_List_Panel::Begin_Point_Execution()
+{
+  m_point_execution_states.assign(
+    m_point_names.size(), Point_Execution_State::Pending);
+  for (std::size_t index = 0; index < m_point_names.size(); ++index)
+  {
+    Update_Point_Execution_Appearance(static_cast<int>(index));
+  }
+}
+
+void Teach_Point_List_Panel::Reset_Point_Execution()
+{
+  m_point_execution_states.assign(
+    m_point_names.size(), Point_Execution_State::None);
+  for (std::size_t index = 0; index < m_point_names.size(); ++index)
+  {
+    Update_Point_Execution_Appearance(static_cast<int>(index));
+  }
+}
+
+void Teach_Point_List_Panel::Set_Point_Execution_State(
+  int point_index,
+  Point_Execution_State state,
+  bool ensure_visible)
+{
+  if (point_index < 0 ||
+      static_cast<std::size_t>(point_index) >=
+        m_point_execution_states.size())
+  {
+    return;
+  }
+  m_point_execution_states[static_cast<std::size_t>(point_index)] = state;
+  Update_Point_Execution_Appearance(point_index);
+  const wxTreeItemId item = find_point_item(m_point_list, point_index);
+  if (ensure_visible && item.IsOk())
+  {
+    m_point_list->EnsureVisible(item);
+  }
+}
+
+void Teach_Point_List_Panel::Update_Point_Execution_Appearance(
+  int point_index)
+{
+  if (!m_point_list || point_index < 0 ||
+      static_cast<std::size_t>(point_index) >= m_point_names.size() ||
+      static_cast<std::size_t>(point_index) >=
+        m_point_execution_states.size())
+  {
+    return;
+  }
+  const auto index = static_cast<std::size_t>(point_index);
+  const wxTreeItemId item = find_point_item(m_point_list, point_index);
+  if (!item.IsOk())
+  {
+    return;
+  }
+
+  const auto state = m_point_execution_states[index];
+  m_point_list->SetItemText(
+    item, execution_prefix(state) + m_point_names[index]);
+  wxColour background = *wxWHITE;
+  if (index < m_point_types.size() &&
+      m_point_types[index] == robot_model::Robot_Teach_Point_Type::Transition)
+  {
+    background = wxColour(255, 249, 196);
+  }
+  else if (index < m_point_types.size() &&
+           m_point_types[index] == robot_model::Robot_Teach_Point_Type::Wait)
+  {
+    background = wxColour(255, 224, 224);
+  }
+
+  wxColour foreground = m_point_list->GetForegroundColour();
+  if (!foreground.IsOk())
+  {
+    foreground = *wxBLACK;
+  }
+  bool bold = false;
+  switch (state)
+  {
+  case Point_Execution_State::Moving:
+    background = wxColour(218, 235, 255);
+    foreground = wxColour(20, 85, 160);
+    bold = true;
+    break;
+  case Point_Execution_State::Waiting:
+    background = wxColour(255, 238, 190);
+    foreground = wxColour(145, 85, 0);
+    bold = true;
+    break;
+  case Point_Execution_State::Completed:
+    background = wxColour(220, 245, 225);
+    foreground = wxColour(25, 120, 55);
+    break;
+  case Point_Execution_State::Failed:
+    background = wxColour(255, 218, 218);
+    foreground = wxColour(175, 35, 35);
+    bold = true;
+    break;
+  case Point_Execution_State::None:
+  case Point_Execution_State::Pending:
+    break;
+  }
+  m_point_list->SetItemBackgroundColour(item, background);
+  m_point_list->SetItemTextColour(item, foreground);
+  m_point_list->SetItemBold(item, bold);
+}
+
 void Teach_Point_List_Panel::Set_Dirty(bool dirty)
 {
   m_dirty = dirty;
@@ -541,6 +688,12 @@ void Teach_Point_List_Panel::Set_On_Selection_Changed(
   std::function<void()> callback)
 {
   m_on_selection_changed = std::move(callback);
+}
+
+void Teach_Point_List_Panel::Set_On_Point_Activated(
+  std::function<void(int)> callback)
+{
+  m_on_point_activated = std::move(callback);
 }
 
 void Teach_Point_List_Panel::Set_On_Collapsed_Changed(
