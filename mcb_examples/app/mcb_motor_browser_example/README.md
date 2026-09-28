@@ -1,6 +1,6 @@
-# MCB Motor Browser：二进制只读服务
+# MCB Motor Browser：二进制只读服务与轴诊断
 
-本应用保留现有 HTTP 马达浏览器，在 `MCB_USE_MCX514` 构建中增加兼容 `machine_controller/mcb_cmd` 的 TCP 55000 服务。本阶段只实现设备探测和轴数据查询，不能通过二进制协议驱动 DD 马达。
+本应用保留现有 HTTP 马达浏览器，在 `MCB_USE_MCX514` 构建中增加兼容 `machine_controller/mcb_cmd` 的 TCP 55000 服务和 HTTP 只读错误来源诊断。本阶段只实现设备探测、轴数据查询和诊断，不能通过二进制协议驱动 DD 马达。
 
 ## 端口和支持范围
 
@@ -55,6 +55,54 @@
 
 零计数、原点输入和 HTTP 软件零点均不证明物理回零成功。多轴状态是 OR，可能同时包含 moving 和 stopped；stopped 为 true 不意味着所有选中轴都停止。寄存器按顺序采样，不保证跨寄存器的原子快照。只读查询不读取会确认/清除 IRQ 的 RR1。
 
+## 四轴错误来源诊断
+
+用户已实测第一阶段的 gantry0 探测及四轴查询。四轴 `status=0x18` 表示 **stopped（0x10）+ error（0x08）**，不是运动就绪。本次增量用于查明 error 的来源，不自动清错、修改极性、使能、停止或回零；原有 HTTP 运动入口仍然保留。
+
+新增入口：`GET /dd_motor_diagnostics?axis=0`，轴索引 0–3 对应 X/Y/Z/U。每个请求只读一轴，HTTP 和 TCP 使用同一后端及状态映射。仅接受一个规范形式的 `axis=0`、`axis=1`、`axis=2` 或 `axis=3`；缺失、重复、未知参数、编码形式和非法值返回 400，不读取硬件。非 GET 返回 405（`Allow: GET`；HEAD 按 HTTP 规则仅返回头、不发送正文），不支持的构建或读取/诊断数据不可用返回 503，序列化容量不足返回 500。响应为 `application/json`，带 `Cache-Control: no-store`。
+
+成功 JSON 的 `schema_version` 为 1：
+
+- `axis_index` / `axis_name` / `axis_mask`：轴身份；`binary_status` 是整数形式的现有二进制状态字节。
+- `logical_position` / `encoder_position`：有符号原始计数；`speed_pps`：非负当前速度。
+- `moving` / `homing` / `error` / `positive_limit` / `negative_limit`：布尔汇总。`home` 和 `homing_ok` 均为 `null`，物理原点及回零完成状态未知。
+- `rr0_raw` / `rr2_raw`：16 位原始寄存器值。
+- `rr3_decoded`：**不是原始 RR3**。`signal_status()` 已按驱动配置处理极性、编码器和限位交换；`rr3_interpretation` 明确标为 `driver_polarity_and_swap_normalized`。
+- `home_search_state`：RR3 自动回零状态号；0 仅表示 idle，不证明成功回零。
+- `error_sources`：下表七个布尔值的 OR，严格保持原有二进制 error 定义。
+- `drive_flags`：RR2 的 alarm、软/硬限位停止、同步停止、STOP0/1/2 停止及正/负限位停止标志；`signal_inputs`：归一化 RR3 的 STOP0/1/2、编码器 A/B 和 in_position。
+
+| error_sources 字段 | 采样来源 |
+| --- | --- |
+| `axis_error` | RR0 当前轴 error 位（bit 4+axis） |
+| `alarm_input` | 归一化 RR3 bit 6 |
+| `home_error` | RR2 bit 6 |
+| `interpolation_error` | RR2 bit 7 |
+| `emergency_input` | RR2 bit 5 |
+| `emergency_stop` | RR2 bit 15 |
+| `alarm_stop` | RR2 bit 14 |
+
+RR2 的 `alarm`（bit 4）另行报告，不增加到原有七项 OR。RR2 的停止原因可能是保留的历史/锁存状态，不能与 RR3 的实时归一化限位、报警输入混为一谈。本入口不读会确认/清除 IRQ 的 RR1，不调用 finish/error 清理方法。读取寄存器需要发送选择/读寄存器命令，但不改变运动控制、计数器或参数。寄存器顺序采样不是原子快照，不把某个标志直接解释为接线损坏或安全许可。
+
+### 上板验收
+
+先自行烧录本次新生成的 MOT。旧固件没有此 HTTP 路由，仅 TCP 查询成功不能证明诊断接口已更新。在 `test` 仓库根目录运行（将 `<MCB-IP>` 替换为实际地址）：
+
+```sh
+python3 mcb_examples/app/mcb_motor_browser_example/tools/mcb_diagnostics.py <MCB-IP>
+```
+
+默认顺序读取四轴；可指定轴、超时和完整 JSON：
+
+```sh
+python3 mcb_examples/app/mcb_motor_browser_example/tools/mcb_diagnostics.py <MCB-IP> --axis 0 --timeout 3
+python3 mcb_examples/app/mcb_motor_browser_example/tools/mcb_diagnostics.py <MCB-IP> --json
+```
+
+脚本只用 Python 标准库，只发送该诊断入口的 GET；不会跟随重定向、使用环境代理或发送控制请求。响应大小和等待时间受限，版本/类型/位映射严格校验；HTTP 错误、旧固件、连接失败或畸形数据非零退出。默认端口 80，必要时可用 `--port` 指定。用户外部 `test_py/mcb_test.py` 无需修改。
+
+重点保存四轴 `error_sources`、RR0/RR2 和 `rr3_decoded` 输出，再结合驱动器报警、MCB 接线和既有极性配置排查。即使诊断没有 error，也不代表已具备运动条件；共用控制权、安全停止、网络掉线保护和有限运动仍是后续工作。
+
 ## 会话限制和生命周期
 
 - 固定 RX：3072 字节；固定 TX：128 字节（16 个响应）。
@@ -84,14 +132,16 @@ cmake --build mcb_examples/build/binary-host-tests -j 8
 ctest --test-dir mcb_examples/build/binary-host-tests --output-on-failure
 ```
 
-四个测试目标：
+准备好 Python3 时共有六个测试目标（未找到时 CMake 明确提示跳过 Python 项）：
 
 1. `mcb_binary_service_tests`：四轴查询、负位置边界、状态、拒绝请求、固定/变长拆包粘包、预算、缓冲与时间边界。
 2. `mcb_binary_server_tests`：实际适配器配合假 socket，测试部分/零发送、接收挂起、异步关闭、进展超时和重连。
 3. `mcb_uip_ack_tests`：直接编译真实 `uip.c`，构造本地 TCP 报文验证旧 ACK 不释放输出、覆盖 ACK 正确释放输出。不发送网络报文。
 4. `mcb_binary_client_tests`：真实 `li5000_mcb_cmd::client` 与假轴服务在 127.0.0.1 临时端口通信，验证探测、X/Y/Z/U、拒绝写命令、批量请求和重连。客户端测试需要 POSIX。
+5. `mcb_axis_diagnostics_tests`：七个错误来源的全部组合、状态与实际二进制响应一致性、四轴/回零状态、输入校验、缺失/失败诊断、极值、有界 JSON 与缓冲复用。
+6. `mcb_diagnostics_python_tests`：解析 C++ 实际 JSON 样本验证版本、类型及位映射；通过本机假 HTTP 服务测试脚本的 GET-only、超时、错误/畸形/超长响应及拒绝重定向。
 
-客户端测试引用已存在的 `3rd/machine_controller/mcb_cmd` 和旁边的 `utils`；不下载依赖、不修改第三方库。不同目录可设置 `-DMCB_CMD_SOURCE_DIR=/absolute/path/to/mcb_cmd`。依赖未准备好时，可用 `-DBUILD_MCB_CLIENT_TESTS=OFF` 仅运行其余三个目标。
+客户端测试引用已存在的 `3rd/machine_controller/mcb_cmd` 和旁边的 `utils`；不下载依赖、不修改第三方库。不同目录可设置 `-DMCB_CMD_SOURCE_DIR=/absolute/path/to/mcb_cmd`。依赖未准备好时，可用 `-DBUILD_MCB_CLIENT_TESTS=OFF` 跳过真实客户端目标，其余核心和诊断目标仍可运行。
 
 可选 ASan/UBSan：
 
@@ -105,7 +155,7 @@ cmake --build mcb_examples/build/binary-host-sanitizers -j 8
 ctest --test-dir mcb_examples/build/binary-host-sanitizers --output-on-failure
 ```
 
-上述测试均使用假轴，不测试实际 MCX 寄存器、以太网设备或 HTTP 并发。假 socket 不是完整 TCP 模拟；真实 uIP 报文测试仅覆盖 ACK 回归路径。
+上述测试均使用假轴，不测试实际 MCX 寄存器、以太网设备或板端 HTTP 并发。Python 假 HTTP 服务验证的是脚本和实际 C++ JSON，不运行整个固件 HTTP server；板端路由接线通过 RX 交叉编译验证，完整上板通信仍需用户验收。假 socket 不是完整 TCP 模拟；真实 uIP 报文测试仅覆盖 ACK 回归路径。
 
 ## RX71M / MCB v2 构建
 

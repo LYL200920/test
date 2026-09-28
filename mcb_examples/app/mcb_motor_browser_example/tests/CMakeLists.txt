@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 enable_testing()
 
-add_library(mcb_binary_service STATIC ../mcb_binary_service.cpp)
+add_library(mcb_binary_service STATIC ../mcb_binary_service.cpp ../mcb_axis_diagnostics.cpp)
 target_include_directories(mcb_binary_service PUBLIC ..)
 target_compile_options(mcb_binary_service PRIVATE -Wall -Wextra -Wpedantic)
 
@@ -27,6 +27,23 @@ target_include_directories(mcb_uip_ack_tests PRIVATE ../../../uip)
 set_property(TARGET mcb_uip_ack_tests PROPERTY C_STANDARD 99)
 add_test(NAME mcb_uip_ack_tests COMMAND mcb_uip_ack_tests)
 set_tests_properties(mcb_uip_ack_tests PROPERTIES TIMEOUT 30)
+
+add_executable(mcb_axis_diagnostics_tests mcb_axis_diagnostics_tests.cpp)
+target_link_libraries(mcb_axis_diagnostics_tests PRIVATE mcb_binary_service)
+target_compile_options(mcb_axis_diagnostics_tests PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME mcb_axis_diagnostics_tests COMMAND mcb_axis_diagnostics_tests)
+set_tests_properties(mcb_axis_diagnostics_tests PROPERTIES TIMEOUT 30)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME mcb_diagnostics_python_tests
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mcb_diagnostics_python_tests.py"
+      $<TARGET_FILE:mcb_axis_diagnostics_tests> -v)
+  set_tests_properties(mcb_diagnostics_python_tests PROPERTIES TIMEOUT 30
+    ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+else()
+  message(STATUS "Python3 not found; diagnostic script and JSON integration tests disabled")
+endif()
 
 option(BUILD_MCB_CLIENT_TESTS "Test compatibility using the existing native MCB client" ON)
 if(BUILD_MCB_CLIENT_TESTS)

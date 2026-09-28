@@ -8,6 +8,15 @@
 namespace mcb_binary
 {
 
+struct axis_diagnostics
+{
+  bool available = false;
+  uint16_t rr0_raw = 0;
+  uint16_t rr2_raw = 0;
+  // signal_status() applies the driver's configured polarity and swapping.
+  uint16_t rr3_decoded = 0;
+};
+
 struct axis_snapshot
 {
   int32_t logical_position = 0;
@@ -18,6 +27,7 @@ struct axis_snapshot
   bool error = false;
   bool positive_limit = false;
   bool negative_limit = false;
+  axis_diagnostics diagnostics;
 };
 
 class read_only_backend

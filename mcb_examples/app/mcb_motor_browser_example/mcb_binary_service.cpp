@@ -1,4 +1,5 @@
 #include "mcb_binary_service.hpp"
+#include "mcb_axis_diagnostics.hpp"
 
 #include <cstring>
 
@@ -92,11 +93,7 @@ void session::dispatch (const read_only_backend& backend, std::array<uint8_t, 8>
     }
 
     if (command == 0x0301)
-    {
-      status |= (axis.homing ? 0x40 : 0) | (axis.moving ? 0x20 : 0)
-              | (!axis.moving && !axis.homing ? 0x10 : 0) | (axis.error ? 0x08 : 0)
-              | (axis.positive_limit ? 0x02 : 0) | (axis.negative_limit ? 0x01 : 0);
-    }
+      status |= axis_status (axis);
     else if (command == 0x0306)
       value = static_cast<uint32_t> (axis.logical_position);
     else if (command == 0x0307)

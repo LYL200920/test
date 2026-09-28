@@ -21,6 +21,7 @@
 #include <dev/soft_pg_motor.hpp>
 
 #include "mcb_binary_server.hpp"
+#include "mcb_axis_diagnostics.hpp"
 
 //--------------------------------------------------------------------------
 // we would like to treat all axes in the GUI equally.  for that we have
@@ -1097,14 +1098,8 @@ public:
     result.logical_position = axis.logical_position_counter ();
     result.encoder_position = axis.real_position_counter ();
     result.speed_pps = static_cast<uint32_t> (axis.current_drive_speed_pps ());
-    result.moving = status.axis_driving ()[index];
-    result.homing = signal.home_search_state () != 0;
-    result.error = status.axis_error ()[index] || signal.alarm ()
-                || drive.home_error () || drive.interpolation_error ()
-                || drive.emergency () || drive.emergency_stop () || drive.alarm_stop ();
-    result.positive_limit = signal.hw_limit_pos ();
-    result.negative_limit = signal.hw_limit_neg ();
-    return true;
+    result.diagnostics = { true, status.value (), drive.value (), signal.value () };
+    return mcb_binary::apply_diagnostics (index, result);
   }
 };
 #endif
@@ -1146,6 +1141,11 @@ static auto g_romfs = fs::romfs::mount_this_image_partition ();
 
 struct http_server_delegate : public net::http::server::delegate
 {
+  explicit http_server_delegate (const mcb_binary::read_only_backend* backend)
+  : diagnostic_backend (backend) { }
+
+  const mcb_binary::read_only_backend* diagnostic_backend;
+
   virtual std::unique_ptr<fs::file>
   handle_file_request (const net::http::server::request& req, std::string_view req_uri) override
   {
@@ -1167,6 +1167,9 @@ struct http_server_delegate : public net::http::server::delegate
     if (req_uri == "/axis_status" && req.request_line ().method () == "GET")
       return get_axis_status (req);
 
+    if (req_uri == "/dd_motor_diagnostics")
+      return get_dd_motor_diagnostics (req);
+
     if (req_uri == "/axis_cmd" && req.request_line ().method () == "POST")
       return do_axis_cmd (req);
 
@@ -1177,6 +1180,29 @@ struct http_server_delegate : public net::http::server::delegate
 			       std::string (req_uri).c_str ());
 
     return { };
+  }
+
+  net::http::response get_dd_motor_diagnostics (const net::http::request& req)
+  {
+    // HTTP delegates run serially in the existing non-reentrant main loop.
+    // Keep the formatter off the small main stack; set_content copies its data.
+    static char buffer[2048];
+    const auto result = mcb_binary::diagnose_axis (
+        req.request_line ().method (), req.request_line ().request_uri_query_str (),
+        diagnostic_backend, buffer, sizeof (buffer));
+    net::http::response response (req.request_line ().http_version (),
+                                 std::to_string (result.status_code), result.reason);
+    response.add_header ({ "Content-Type", "application/json" });
+    response.add_header ({ "Cache-Control", "no-store" });
+    if (result.status_code == 405)
+      response.add_header ({ "Allow", "GET" });
+    // The shared HTTP sender does not strip HEAD bodies. Keep the same 405
+    // metadata, but never leave JSON bytes in a persistent HEAD connection.
+    if (req.request_line ().method () == "HEAD")
+      response.add_header ({ "Content-Length", std::to_string (result.body.size ()) });
+    else
+      response.set_content (result.body);
+    return response;
   }
 
   net::http::response get_axis_status (const net::http::request& req)
@@ -2570,11 +2596,16 @@ int main (void)
 	     use_ifcfg.static_addr, use_ifcfg.static_gateway_addr,
 	     use_ifcfg.static_netmask);
 
-  http_server_delegate httpsrv_delegate;
+#if defined (MCB_USE_MCX514)
+  static dd_binary_read_only_backend binary_backend;
+  const mcb_binary::read_only_backend* diagnostic_backend = &binary_backend;
+#else
+  const mcb_binary::read_only_backend* diagnostic_backend = nullptr;
+#endif
+  http_server_delegate httpsrv_delegate (diagnostic_backend);
   net::http::server httpsrv (80, httpsrv_delegate);
 
 #if defined (MCB_USE_MCX514)
-  static dd_binary_read_only_backend binary_backend;
   static mcb_binary::server binary_server (binary_backend);
 #endif
 
