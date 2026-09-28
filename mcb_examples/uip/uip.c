@@ -717,11 +717,12 @@ uip_process(u8_t flag, struct uip_conn* uip_conn,
        for the connection to time out. If so, we increase the
        connection's timer and remove the connection if it times
        out. */
-    if(uip_connr->tcpstateflags == UIP_TIME_WAIT ||
-       uip_connr->tcpstateflags == UIP_FIN_WAIT_2) {
+    if((uip_connr->tcpstateflags & UIP_TS_MASK) == UIP_TIME_WAIT ||
+       (uip_connr->tcpstateflags & UIP_TS_MASK) == UIP_FIN_WAIT_2) {
       ++(uip_connr->timer);
       if(uip_connr->timer == UIP_TIME_WAIT_TIMEOUT) {
 	uip_connr->tcpstateflags = UIP_CLOSED;
+        uip_tcp_timed_out (uip_connr);
       }
     } else if(uip_connr->tcpstateflags != UIP_CLOSED) {
       /* If the connection has outstanding data or it should send a keep-alive
@@ -1644,7 +1645,9 @@ uip_process(u8_t flag, struct uip_conn* uip_conn,
        send, uip_len must be set to 0. */
     if(uip_flags & (UIP_NEWDATA | UIP_ACKDATA)) {
       uip_tcp_newdata (uip_connr, uip_appdata, uip_len);
-      uip_tcp_ackdata (uip_connr);
+      if(uip_flags & UIP_ACKDATA) {
+        uip_tcp_ackdata (uip_connr);
+      }
       uip_slen = uip_tcp_senddata (uip_connr, uip_appdata);
 
     appsend:

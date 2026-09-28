@@ -20,6 +20,8 @@
 #include <dev/soft_pg.hpp>
 #include <dev/soft_pg_motor.hpp>
 
+#include "mcb_binary_server.hpp"
+
 //--------------------------------------------------------------------------
 // we would like to treat all axes in the GUI equally.  for that we have
 // a base class interface for the GUI and implementations for the particular
@@ -1076,6 +1078,36 @@ std::array<std::unique_ptr<motor_axis>, 4 + 4 + 8> g_axes =
   std::make_unique< soft_pg_axis < soft_pg_axis10_t >> (g_soft_pg_axis10, "SoftPG DO12,DO13"),
   std::make_unique< soft_pg_axis < soft_pg_axis11_t >> (g_soft_pg_axis11, "SoftPG DO14,DO15"),
 };
+
+#if defined (MCB_USE_MCX514)
+class dd_binary_read_only_backend : public mcb_binary::read_only_backend
+{
+public:
+  bool read_axis (unsigned int index, mcb_binary::axis_snapshot& result) const override
+  {
+    if (index >= 4)
+      return false;
+
+    auto& mcx = this_board::inst ().mcx51x;
+    auto& axis = mcx.axis (index);
+    const auto status = mcx.status ();
+    const auto signal = axis.signal_status ();
+    const auto drive = axis.drive_status ();
+
+    result.logical_position = axis.logical_position_counter ();
+    result.encoder_position = axis.real_position_counter ();
+    result.speed_pps = static_cast<uint32_t> (axis.current_drive_speed_pps ());
+    result.moving = status.axis_driving ()[index];
+    result.homing = signal.home_search_state () != 0;
+    result.error = status.axis_error ()[index] || signal.alarm ()
+                || drive.home_error () || drive.interpolation_error ()
+                || drive.emergency () || drive.emergency_stop () || drive.alarm_stop ();
+    result.positive_limit = signal.hw_limit_pos ();
+    result.negative_limit = signal.hw_limit_neg ();
+    return true;
+  }
+};
+#endif
 
 // DD motor browser control configuration.
 #if defined (MCB_USE_MCX514)
@@ -2541,6 +2573,11 @@ int main (void)
   http_server_delegate httpsrv_delegate;
   net::http::server httpsrv (80, httpsrv_delegate);
 
+#if defined (MCB_USE_MCX514)
+  static dd_binary_read_only_backend binary_backend;
+  static mcb_binary::server binary_server (binary_backend);
+#endif
+
   // MCX synchronous action test/demo
   #if 0
   {
@@ -2637,7 +2674,7 @@ int main (void)
   #endif
 
 //  this_board::inst ().led_outputs.write (0b11110000);
-  this_board::inst ().led_outputs.write (0b11000011);
+  this_board::inst ().led_outputs.write (0b10000011);
 
   auto prev_time = std::chrono::high_resolution_clock::now ();
   auto cur_time = prev_time;
@@ -2768,6 +2805,9 @@ int main (void)
 
     net::exec ();
     httpsrv.exec ();
+#if defined (MCB_USE_MCX514)
+    binary_server.exec ();
+#endif
   }
 
   return 0;

@@ -18,6 +18,8 @@ import_library (logging)
 
 set (mcb_motor_browser_example_src
   main.cpp
+  mcb_binary_service.cpp
+  mcb_binary_server.cpp
 )
 
 set (mcb_motor_browser_example_romfs_files

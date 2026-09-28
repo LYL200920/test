@@ -1,0 +1,58 @@
+cmake_minimum_required(VERSION 3.16)
+project(mcb_binary_tests LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+enable_testing()
+
+add_library(mcb_binary_service STATIC ../mcb_binary_service.cpp)
+target_include_directories(mcb_binary_service PUBLIC ..)
+target_compile_options(mcb_binary_service PRIVATE -Wall -Wextra -Wpedantic)
+
+add_executable(mcb_binary_service_tests mcb_binary_service_tests.cpp)
+target_link_libraries(mcb_binary_service_tests PRIVATE mcb_binary_service)
+add_test(NAME mcb_binary_service_tests COMMAND mcb_binary_service_tests)
+set_tests_properties(mcb_binary_service_tests PROPERTIES TIMEOUT 30)
+
+add_executable(mcb_binary_server_tests mcb_binary_server_tests.cpp ../mcb_binary_server.cpp)
+target_include_directories(mcb_binary_server_tests BEFORE PRIVATE fake_net)
+target_link_libraries(mcb_binary_server_tests PRIVATE mcb_binary_service)
+target_compile_options(mcb_binary_server_tests PRIVATE -Wall -Wextra -Wpedantic)
+add_test(NAME mcb_binary_server_tests COMMAND mcb_binary_server_tests)
+set_tests_properties(mcb_binary_server_tests PROPERTIES TIMEOUT 30)
+
+add_executable(mcb_uip_ack_tests mcb_uip_ack_tests.cpp ../../../uip/uip.c)
+target_include_directories(mcb_uip_ack_tests PRIVATE ../../../uip)
+set_property(TARGET mcb_uip_ack_tests PROPERTY C_STANDARD 99)
+add_test(NAME mcb_uip_ack_tests COMMAND mcb_uip_ack_tests)
+set_tests_properties(mcb_uip_ack_tests PROPERTIES TIMEOUT 30)
+
+option(BUILD_MCB_CLIENT_TESTS "Test compatibility using the existing native MCB client" ON)
+if(BUILD_MCB_CLIENT_TESTS)
+  get_filename_component(TEST_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
+  set(MCB_CMD_SOURCE_DIR "${TEST_REPOSITORY_ROOT}/3rd/machine_controller/mcb_cmd"
+      CACHE PATH "Directory containing the original MCB client sources")
+  get_filename_component(MCB_CONTROLLER_SOURCE_DIR "${MCB_CMD_SOURCE_DIR}/.." ABSOLUTE)
+  foreach(SOURCE li5000_mcb_cmd.cpp cmd_exec_dummy.cpp li5000_mcb_cmd_client.cpp)
+    if(NOT EXISTS "${MCB_CMD_SOURCE_DIR}/${SOURCE}")
+      message(FATAL_ERROR "Missing ${MCB_CMD_SOURCE_DIR}/${SOURCE}. Set MCB_CMD_SOURCE_DIR to your local mcb_cmd checkout, or disable BUILD_MCB_CLIENT_TESTS for core tests only.")
+    endif()
+  endforeach()
+  if(NOT EXISTS "${MCB_CONTROLLER_SOURCE_DIR}/utils/byte_stream.hpp")
+    message(FATAL_ERROR "Missing local machine_controller utils headers next to mcb_cmd. Initialize those dependencies before running client tests.")
+  endif()
+  find_package(Threads REQUIRED)
+  add_library(mcb_client_reference STATIC
+    "${MCB_CMD_SOURCE_DIR}/li5000_mcb_cmd.cpp"
+    "${MCB_CMD_SOURCE_DIR}/cmd_exec_dummy.cpp"
+    "${MCB_CMD_SOURCE_DIR}/li5000_mcb_cmd_client.cpp")
+  target_include_directories(mcb_client_reference PUBLIC "${MCB_CONTROLLER_SOURCE_DIR}")
+  if(NOT UNIX)
+    message(FATAL_ERROR "The loopback test currently requires POSIX sockets. Disable BUILD_MCB_CLIENT_TESTS on this platform.")
+  endif()
+  add_executable(mcb_binary_client_tests mcb_binary_client_tests.cpp)
+  target_link_libraries(mcb_binary_client_tests PRIVATE mcb_binary_service mcb_client_reference Threads::Threads)
+  add_test(NAME mcb_binary_client_tests COMMAND mcb_binary_client_tests)
+  set_tests_properties(mcb_binary_client_tests PROPERTIES TIMEOUT 30)
+endif()
