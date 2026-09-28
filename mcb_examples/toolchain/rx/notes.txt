@@ -1,0 +1,7 @@
+
+for 32 bit host, need some additional patches.
+See also https://gcc.gnu.org/bugzilla/show_bug.cgi?id=70162
+
+--------------------
+
+cmake -DCMAKE_TOOLCHAIN_FILE=../../MCBcode/toolchain/rx/toolchain.cmake -DCMAKE_BOARD_DIR=../../board/mcb_v1 -DCMAKE_LIBRARIES_DIR=./../../ ../../MCBcode/app/mcb_ethernet_phy_example

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>TPU Pulse Gen</title>
+ 
+  <script src="webix/codebase/webix.js" type="text/javascript" charset="utf-8"></script>
+<!--  <link rel="stylesheet" href="webix/codebase/webix.css" type="text/css" charset="utf-8"> -->
+  <link rel="stylesheet" href="webix/codebase/skins/mini.css" type="text/css" charset="utf-8">
+
+  <link rel="stylesheet" href="animate-css/animate.css" type="text/css" charset="utf-8">
+  <link rel="stylesheet" href="webix/slidebutton.css" type="text/css" charset="utf-8">
+
+  <script src="webix/konva.js" type="text/javascript" charset="utf-8"></script>
+  <script src="webix/slidebutton.js" type="text/javascript" charset="utf-8"></script>
+  <script src="utils/utils.js" type="text/javascript" charset="utf-8"></script>
+
+  <link rel="stylesheet" href="fontawesome/css/all.css" charset="utf-8">
+
+</head>
+
+<body>
+
+<style>
+
+/* no need to specify inherited style ... (why not?) */
+.jutze_logo_label
+{
+  background-image: url(logo.svg);
+  background-repeat: no-repeat;
+  background-size: contain;
+  height: 100%;
+  background-position: center center;
+}
+
+.separator_btn .webixtype_base:disabled
+{
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: 0px 0px 0px transparent;
+}
+
+.separator_btn .webix_el_box
+{
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: 0px 0px 0px transparent;
+}
+
+
+/* why no need to specify inherited style '.webix_el_label'? */
+.app_name_label
+{
+  font-size: 30px;
+}
+
+.section_text
+{
+  text-transform: none;
+  font-size: 18px;
+}
+
+.section_no_line
+{
+  background-image: none;
+}
+
+
+/* why need to specify the inherited style??
+   need to specify individual style for each icon from font awesome.
+   not very practical. */
+.wifi-icon-css[state=on] .webix_icon_button .fa-wifi:before
+{
+  color: #00F000;
+  text-shadow: 0 0 0.5px #001000, 0 0 16px #50F050, 0 0 8px #00FF00;
+  cursor: default;
+}
+
+.wifi-icon-css[state=off] .webix_icon_button .fa-wifi:before
+{
+  cursor: default;
+}
+
+/*
+.lan-icon-css[state=on] .webix_icon_button .fa-network-wired:before
+*/
+
+.centered_icon
+{
+  text-align: center;
+}
+
+ .webix_img_btn, .webix_img_btn_abs {
+    text-align: center;
+  }
+
+.circle_on_icon
+{
+  color: #00D000;
+  font-size: 12px;
+  text-shadow: 0 0 1.5px #000000, 0 0 16px #20F020, 0 0 8px #00FF00;
+}
+
+.circle_off_icon
+{
+  color: #C0C0C0;
+  font-size: 12px;
+  text-shadow: 0 0 1.5px #000000, 0 0 1px #000000, 0 0 1px #000000;
+}
+
+.toggle_on_icon
+{
+/*  color: #D00000;
+  text-shadow: 0 0 1.5px #000000, 0 0 16px #F02020, 0 0 8px #FF0000;
+ */
+  color: #27AE60;
+  text-shadow: 0 0 1.5px #000000, 0 0 16px #20F020, 0 0 8px #27AE60;
+
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.toggle_off_icon
+{
+  color: #C0C0C0;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.text_align_left { text-align: left; }
+.text_align_right { text-align: right; }
+.text_align_center { text-align: center; }
+
+.clickable_cell { cursor:pointer; }
+
+.no_user_select
+{
+  -moz-user-select:none;
+  -webkit-user-select:none;
+  -ms-user-select:none;
+  user-select:none;
+}
+
+</style>
+
+<script type="text/javascript" charset="utf-8">
+
+/* -----------------------------------------------------------------------
+
+  json object format that is exchanged with the server side
+
+  {
+    func: < function name >
+    
+    obj: < object id >
+    name: < variable name >
+    value: < value data >
+  }
+
+
+  after a client connects to the server, it will subscribe to events.
+  events can be addressed by a path, e.g.
+      "ui/main_panel/start_button"
+
+  or also
+      "ui/main_panel/"
+
+  to subscribe to all events of ui/main_panel.
+
+
+  when a client subscribes to an event it receives the current state of the
+  event from the server.  when data for an event is published on the server,
+  an update event is sent to all subscribers (clients).
+
+  a client can also publish data changes using the same path.
+  the server is automatically subscribed to all events.
+
+  when subscribing to some events, it should be possible to use short integer
+  IDs for the paths instead of the full strings.  either the client (subscriber)
+  tells the server the desired IDs or the server assigns IDs to the client.
+
+  the first way is easier for the client, but requires more memory and house
+  keeping on the server side -- the server has to remember the mapping of
+  string <-> ID for each client, as it is established dynamically.
+
+  the second option is easier for the server, as it can use the same integer
+  IDs for every client when sending out publish messages.
+  essentially it's the same as having global UI element IDs like in MFC GUIs ...
+
+*/
+
+class server_connection
+{
+  constructor ()
+  {
+    this.socket = null;
+  }
+
+  connect ()
+  {
+    if (this.socket)
+    {
+      // already connected
+      return;
+    }
+
+    try
+    {
+      let wsurl = "ws://" + window.location.host;
+      console.log ("connecting websocket to ... " + wsurl);
+      this.socket = new WebSocket (wsurl);
+      this.socket.onclose = this.on_disconnected.bind (this);
+      this.socket.onopen = this.on_connected.bind (this);
+      this.socket.onmessage = this.on_recv.bind (this);
+    }
+    catch (e)
+    {
+      console.log ("connection error");
+      this.on_disconnected ();
+    }
+  }
+
+  on_disconnected ()
+  {
+    this.socket = null;
+    $$("wifi_status_icon").$view.setAttribute ("state", "off");
+return;
+    setTimeout (function ()
+    {
+      console.log ("retrying ...");
+      this.connect ();
+    }.bind (this), 1000);
+  }
+
+  on_connected ()
+  {
+    $$("wifi_status_icon").$view.setAttribute ("state", "on");
+    this.socket.send (JSON.stringify ({
+      cmd: "subscribe",
+      data: [ "pg0", "pg1", "pg2", "pg3" ]
+    }));
+  }
+
+  on_recv (msg)
+  {
+    let json_data = JSON.parse (msg.data);
+    console.log ("data received: " + json_data);
+    if (json_data.cmd === "publish")
+    {
+      let obj_path = json_data.data[0];
+      let value = json_data.data[1];
+      $${obj_path}.setValue (value);
+    }
+  }
+
+  publish (obj_path, value)
+  {
+    let json_data = JSON.stringify ({
+	cmd: "publish",
+	data: [ obj_path, value ]
+      });
+
+    console.log ("publish: " + json_data);
+
+    if (this.socket)
+      this.socket.send (json_data);
+  }
+};
+
+
+var server = new server_connection ();
+
+
+//-----------------------------------------------------------------------
+
+function make_hex_string_textview (id_name, label_text)
+{
+  return {
+    view: "text", type: "text", id: id_name, name: id_name, label: label_text,
+    validate: utils.isxstr,
+    on: {
+      "onTimedKeyPress": function () { this.validate (); },
+      "onChange": function () { this.validate (); },
+      "onKeyPress": function () { this.validate (); },
+    }
+  };
+}
+
+function pin_state_icon (val)
+{
+  return val ? "<span class='circle_on_icon webix_icon fas fa-circle no_user_select'></span>"
+	     : "<span class='circle_off_icon webix_icon fas fa-circle no_user_select'></span>";
+}
+
+function toggle_state_icon (val)
+{
+//  return val ? "<span class='toggle_on_icon webix_icon fa-toggle-on'></span>"
+//	     : "<span class='toggle_off_icon webix_icon fa-toggle-off'></span>";
+
+//  return val ? "<span class='toggle_on_icon webix_icon fa-stop-circle'></span>"
+//	     : "<span class='toggle_off_icon webix_icon fa-play-circle-o'></span>";
+
+  return val ? "<span class='toggle_on_icon webix_icon fas fa-angle-double-up'></span>"
+	     : "<span class='toggle_off_icon webix_icon fas fa-angle-double-up'></span>";
+}
+
+
+
+
+function render_pulse_control (stage, cycle_width, duty_number_control, phase_number_control)
+{
+  // console.log ("render_pulse_control: " + this.$width + " x " + this.$height);
+
+  if (this._konva_layer)
+  {
+    stage.remove (this._konva_layer);
+    this._konva_layer.destroy ();
+  }
+
+  let layer = this._konva_layer = new Konva.Layer ();
+
+  const top = 4;
+  const bottom = this.$height - 4;
+  const height = bottom - top;
+
+  const left = 4;
+  const right = this.$width - 4;
+  const width = right - left;
+
+  const cur_duty_value = duty_number_control.getValue ();
+  const cur_phase_value = phase_number_control.getValue ();
+
+  const pulse_display_repeat_count = 2;
+
+  const drag_range_min = left + 20;
+  const drag_range_width = cycle_width;
+  const drag_range_max = drag_range_min + drag_range_width;
+
+
+  const gen_pulse_line = function (phase, duty, count)
+  {
+    //     _____       _____
+    // ___|     |_____|     |_____
+    //
+
+    const first_edge_offset = 20 + cycle_width * phase * 0.01;
+    const last_edge_tail = 20;
+    const high_width = cycle_width * duty * 0.01;
+    const low_width = cycle_width - high_width;
+
+    let points = [];
+    let x = left;
+    points.push (x, bottom);
+    x += first_edge_offset;
+
+    for (let i = 0; i < count; ++i)
+    {
+      points.push (x, bottom);
+      points.push (x, top);
+      x += high_width;
+      points.push (x, top);
+      points.push (x, bottom);
+      x += low_width;
+    }
+
+    x += last_edge_tail;
+    points.push (x, bottom);
+
+    return points;
+  };
+
+  let pulse_line = new Konva.Line (
+  {
+    stroke: '#808080',
+    strokeWidth: 1.5,
+    points: gen_pulse_line (cur_phase_value, cur_duty_value, pulse_display_repeat_count)
+  });
+
+  let phase_drag_bar = new Konva.Rect (
+  {
+    width: 10, height: this.$height,
+    draggable: true,
+//    stroke: '#b78917',
+    strokeWidth: 0,
+
+    dragBoundFunc: function (pos) {
+      let new_pos = {
+	x: Math.min (Math.max (pos.x, drag_range_min), drag_range_max),
+	y: this.getAbsolutePosition().y
+      };
+
+      let new_val = (new_pos.x - drag_range_min) / cycle_width * 100;
+      new_val = utils.round_to_decimal_points (new_val, 3);
+
+      this.sync_value (new_val);
+      return new_pos;
+    }
+  });
+
+  let duty_drag_bar = new Konva.Rect (
+  {
+    width: 10, height: this.$height,
+    draggable: true,
+//    stroke: '#89b717',
+    strokeWidth: 0,
+
+    dragBoundFunc: function (pos) {
+
+      const duty_drag_range_min = phase_drag_bar.getX ();
+      const duty_drag_range_max = duty_drag_range_min + drag_range_width;
+
+      let new_pos = {
+	x: Math.min (Math.max (pos.x, duty_drag_range_min), duty_drag_range_max),
+	y: this.getAbsolutePosition().y
+      };
+
+      let new_val = (new_pos.x - duty_drag_range_min) / cycle_width * 100;
+      new_val = utils.round_to_decimal_points (new_val, 3);
+
+      this.sync_value (new_val);
+      return new_pos;
+    }
+  });
+
+
+  duty_drag_bar.on ("mouseover", function () {
+    stage.container ().style.cursor = "col-resize";
+  });
+
+  duty_drag_bar.on ("mouseout", function () {
+      stage.container ().style.cursor = "default";
+  });
+
+  phase_drag_bar.on ("mouseover", function () {
+    stage.container ().style.cursor = "col-resize";
+  });
+
+  phase_drag_bar.on ("mouseout", function () {
+      stage.container ().style.cursor = "default";
+  });
+
+
+  phase_drag_bar.sync_value = function (new_val, from_other_control) {
+
+    const cur_duty_value = duty_number_control.getValue ();
+
+    if (!from_other_control)
+      phase_number_control.setValue (new_val);
+
+    const x = drag_range_min + new_val * cycle_width*0.01;
+    this.setX (x);
+    duty_drag_bar.setX (x + cur_duty_value * cycle_width*0.01);
+
+    pulse_line.setPoints (
+	gen_pulse_line (new_val, cur_duty_value, pulse_display_repeat_count));
+
+    layer.draw ();
+  };
+
+  duty_drag_bar.sync_value = function (new_val, from_other_control) {
+
+    const cur_phase_value = phase_number_control.getValue ();
+    const duty_drag_range_min = phase_drag_bar.getX ();
+    const duty_drag_range_max = duty_drag_range_min + drag_range_width;
+
+    if (!from_other_control)
+      duty_number_control.setValue (new_val);
+
+    this.setX (duty_drag_range_min + new_val * cycle_width*0.01);
+
+    pulse_line.setPoints (
+	gen_pulse_line (cur_phase_value, new_val, pulse_display_repeat_count));
+
+    layer.draw ();
+  };
+
+  layer.add (pulse_line);
+  layer.add (duty_drag_bar);
+  layer.add (phase_drag_bar);
+
+  stage.add (layer);
+
+  phase_drag_bar.setX (drag_range_min + cur_phase_value * cycle_width*0.01);
+
+  const duty_drag_range_min = phase_drag_bar.getX ();
+  const duty_drag_range_max = duty_drag_range_min + drag_range_width;
+
+  duty_drag_bar.setX (duty_drag_range_min + cur_duty_value * cycle_width*0.01);
+
+  utils.chain_method (duty_number_control, "setValue", function (val)
+  {
+    duty_drag_bar.sync_value (val, true);
+  });
+
+  utils.chain_method (phase_number_control, "setValue", function (val)
+  {
+    phase_drag_bar.sync_value (val, true);
+  });
+
+  // needed to get mouse events working when the layer has been
+  // re-created.
+  layer.draw ();
+}
+
+
+
+function make_digital_pulse_generator (id_str, delegate)
+{
+  const en_id = id_str + "/enable";
+  const freq_id = id_str + "/freq";
+  const phase_id = id_str + "/phase";
+  const duty_id = id_str + "/duty";
+  const count_set_id = id_str + "/countdown";
+  const count_cur_id = id_str + "/countcur";
+  const bitpattern_id = id_str + "/bitpattern";
+
+  return {
+    rows: [
+      { cols: [
+
+	{ rows: [
+
+	  { view: "toggle", type: "iconButton", id: en_id, width: 64,
+		offIcon: "fa fa-play", onIcon: "fa fa-pause", height: 80,
+	    on : {
+	      onChange: function (val) { delegate.publish (en_id, val ? true : false ); }
+	    }
+	  },
+
+	  { view: "button", type: "iconButton", icon: "fa fa-fast-backward", height:32,
+	    on : {
+	      onItemClick: function (id)
+	      {
+		delegate.publish (id_str + "/rewind");
+/*
+		let i = $$(id);
+		let val = i.custom_value ? true : false;
+
+		i.define ("icon", val ? "fa fa-fast-forward" : "fa fa-fast-backward");
+		i.refresh ();
+
+		i.custom_value = !val;
+*/
+	      },
+	    }
+	  },
+
+	] },
+
+	{ view: "spacer", width: 20 },
+
+	{ rows: [
+	  { cols: [
+	    { view: "text", attributes:{type:"number", min:0.01, max:100000, value:1, step:0.1 }, id: freq_id,
+	      label: "Frequency [Hz]", labelWidth:120, inputWidth:260, inputAlign:"right", width: 280,
+	      on: {
+		onChange: function (val) { delegate.publish (freq_id, val); }
+	      }
+	    },
+
+	    { view: "text", attributes:{type:"number", min:0, max:100, value:0, step:0.1 }, id: phase_id,
+	      label: "Phase Offset [%]", labelWidth:110, inputWidth:200, inputAlign:"right", width: 240,
+	      on: {
+		onChange: function (val) { delegate.publish (phase_id, val); }
+	      }
+	    },
+
+	    { view: "text", attributes:{type:"number", min:0, max:100, value:50, step:0.1 }, id: duty_id,
+	      label: "Duty Cycle [%]", labelWidth:100, inputWidth:200, inputAlign:"right", width: 240,
+	      on: {
+		onChange: function (val) { delegate.publish (duty_id, val); }
+	      }
+	    },
+
+	    { view: "spacer" }
+	  ] },
+
+	  { cols: [
+	    { width: 300, rows: [
+	      { view: "text", attributes:{type:"number", min:0, max:Number.MAX_SAFE_INTEGER, value:0, step:1 }, id: count_set_id,
+		label: "Pulse Countdown", labelWidth:120, inputWidth:260, inputAlign:"right",
+		on: {
+		  onChange: function (val) { delegate.publish (count_set_id, val); }
+		}
+	      },
+
+	      { cols: [
+		{ view: "spacer", width:4 },
+		{ view: "label", label: "Pulse Output Count", labelWidth:120, width:120 },
+		{ view: "label", id: count_cur_id, value: "0", width: 140, align:"right", label:0 },
+	      ] }
+
+
+	    ] },
+
+	    { view: "konva", /*autowidth: true, */borderless: true, cdn : "konva",
+	      ready: function (stage) { render_pulse_control.call (this, stage, 240, $$(duty_id), $$(phase_id)); },
+	      resize: function (stage) { render_pulse_control.call (this, stage, 240, $$(duty_id), $$(phase_id)); }
+	    },
+	  ] },
+
+	] },
+
+    ] },
+
+	{ view: "text", id: bitpattern_id,
+	  pattern: { mask: "#".repeat (1024),  allow:/[0-1]/g },
+	  validate: function (value)
+	  {
+	    // test field input allows only 0 or 1, so it's always valid.
+	    //return /[0-1]/g.test (value);
+	    return true;
+	  },
+	  label: "Bitpattern", labelWidth:80,
+	  on: {
+	    onChange: function (val)
+	    {
+	      delegate.publish (bitpattern_id, val);
+	    },
+
+	    onKeyPress: function (code, e)
+	    {
+	      let view = $$(bitpattern_id);
+	      let val = view.getValue ();
+	      let sel = webix.html.getSelectionRange (view.getInputNode ());
+
+	      if (code == 36)
+	      {
+		// code 36 = home
+		webix.html.setSelectionRange (view.getInputNode (),
+			0, !e.shiftKey ? 0 : sel.start);
+	      }
+	      else if (code == 35)
+	      {
+		// code 35 = end
+		webix.html.setSelectionRange (view.getInputNode (),
+			!e.shiftKey ? val.length : sel.end, val.length);
+	      }
+	      else
+	      {
+		// perhaps should filter a bit more, to avoid setting the
+		// value on every key stroke.
+		view.setValue (val);
+	      }
+	    }
+	  }
+	},
+
+  ] };
+}
+
+
+webix.ui({
+  //container: "root_div",
+  rows: [
+  {
+    view: "toolbar", type: "clear", tooltip:true,
+    cols: [
+	{ view: "label", label: document.getElementsByTagName("title")[0].innerHTML, css:"app_name_label", disabled:true },
+
+	{
+	  id: "wifi_status_icon", view:"icon", icon:"fas fa-wifi", width:40,
+	  tooltip:"Server Link Status",
+	  css: "wifi-icon-css",
+//	  disabled:true,
+	},
+/*
+	{
+	  id: "wifi_status_icon", view:"label", width:40,
+	  label: "<div class='wifi-icon-css fas fa-wifi'></div>",
+	  tooltip:"Server Link Status",
+	  css: "wifi-icon-css",
+	  disabled:true,
+	},
+*/
+	{ view:"label", css:"jutze_logo_label", width:120, align:"right" },
+    ]
+  },
+
+  {
+    id: "pulse_gens",
+    view: "scrollview",
+    scroll: "y",
+
+    body:
+    {
+      on:
+      {
+//	'onShow': function () { server.subscribe_events ("digital_io"); },
+//	'onHide': function () { server.unsubscribe_events ("digital_io"); }
+      },
+
+      rows:
+      [
+	{ view: "template", template: "PULSE GENERATOR 0", type:"section", css: "webix_section section_text" },
+	{ view: "form", borderless: true, elements: [ make_digital_pulse_generator ("pg0", server) ] },
+
+	{ view: "template", template: "PULSE GENERATOR 1", type:"section", css: "webix_section section_text" },
+	{ view: "form", borderless: true, elements: [ make_digital_pulse_generator ("pg1", server) ] },
+
+	{ view: "template", template: "PULSE GENERATOR 2", type:"section", css: "webix_section section_text" },
+	{ view: "form", borderless: true, elements: [ make_digital_pulse_generator ("pg2", server) ] },
+
+	{ view: "template", template: "PULSE GENERATOR 3", type:"section", css: "webix_section section_text" },
+	{ view: "form", borderless: true, elements: [ make_digital_pulse_generator ("pg3", server) ] },
+      ]
+    }
+  }
+
+
+/*
+  {
+    animate: { type: "slide", duration: 200 },
+    //animate:false,
+    cells:
+    [
+      digital_io_view,
+      analog_io_view,
+      system_view,
+      comm_view,
+      pcd_view,
+      mcx_view
+    ]
+  },
+
+  {
+    view:"tabbar", multiview:true, type:"bottom", height:40,
+    options: [
+	{ value: 'Digital IO', id: 'digital_io_view'},
+	{ value: 'Analog IO', id: 'analog_io_view'},
+	{ value: 'System', id: 'system_view'},
+	{ value: 'Comm', id: 'comm_view'},
+	{ value: 'PCD', id: 'pcd_view'},
+	{ value: 'MCX', id: 'mcx_view'},
+    ],
+
+    on: {
+      onAfterRender:function ()
+      {
+	if (!this._firstRender)
+	{
+	  $$(this.getValue ()).callEvent ("onShow");
+	  this._firstRender = true;
+	}
+      },
+
+      onBeforeTabClick:function (id)
+      {
+	$$(this.getValue ()).callEvent ("onHide");
+	$$(id).callEvent ("onShow");
+      }
+    }
+  },
+*/
+
+
+
+  ] // rows
+});
+
+webix.ready (function ()
+{
+  server.connect ();
+
+});
+
+
+</script>
+</body>
+</html>

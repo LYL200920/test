@@ -1,0 +1,48 @@
+
+the board directory contains some board independent source files and
+board support packages (BSPs), which are board dependent.
+
+the board independent files are made available as a "board-library" for
+applications that use the board independent code to do something.  one example
+is firmware flasher tools which need to use some of the board functions to
+build the ROM image or something similar.
+
+each BSP is located in a sub directory:
+
+board   // this directory
+ |
+ +--  mcb_v1     // MCB v1 BSP
+ |
+ +--  my_board   // another BSP
+         |
+         +-- include   // added as include directory for the compiler as
+         |             // the very first place to look for includes.
+         |             // this can override system and toolchain includes.
+         |
+         +-- toolchain_additions.cmake  // if this file is present it will be
+                                        // included into the toolchain file.
+                                        // this can define additional build
+                                        // targets etc.
+
+
+when configuring an app build, one specifies the toolchain file (and directory),
+the board directory for the target BSP and the libraries directory.
+
+if the board directory is specified, doing
+
+  import_library (board)
+
+in an app's CMakeLists.txt will include the board library of the BSP.
+
+if the board directory is not specified, the BSP independent version of the
+board library will be included.
+
+
+example cmake line:
+
+cmake \
+-DCMAKE_TOOLCHAIN_FILE=~/code/toolchain/rx/toolchain.cmake \
+-DCMAKE_BOARD_DIR=~/code/board/mcb_v2 \
+-DBOARD_VARIANT=RX71M_176 \
+-DCMAKE_LIBRARIES_DIR=~/code \
+~/code/my_app

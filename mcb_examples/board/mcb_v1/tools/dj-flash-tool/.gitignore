@@ -1,0 +1,8 @@
+eeprom
+rx
+rxs
+rxusb
+sflash
+uflash
+*.o
+*.d

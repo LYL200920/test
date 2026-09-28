@@ -1,0 +1,61 @@
+
+
+MTIOC2A				Output clock for PCD
+
+MTCLKA, TIOCA6, TMCI2,		LAN9250 Bidirectional Trigger Signal
+
+MTIOC4C				12 MHz clock output for USB HUB
+				only on RX64/RX71 176 pin, not on RX63
+
+MTIOC3C				Clock output A for MCX
+
+all timer channels:
+
+MTU0	- user
+MTU1	- user
+MTU2	- system (PCD clock)
+MTU3	- system (MCX clock)
+MTU4	- user (RX63) | system (RX64/RX71 USB clock)
+MTU5	- user
+MTU6	- user (RX64 / RX71)
+MTU7	- user (RX64 / RX71)
+
+GPTA0	- user (RX64 / RX71)
+GPTA1	- user (RX64 / RX71)
+GPTA2	- user (RX64 / RX71)
+GPTA3	- user (RX64 / RX71)
+
+TPU0	- user
+TPU1	- user
+TPU2	- user
+TPU3	- user
+TPU4	- user
+TPU5	- system (EtherC MDIO)
+
+TMR0	- user/SCI6 (RS485 CH0) baudrate generator
+TMR1	- user/SCI6 (RS485 CH0) baudrate generator
+TMR2	- user/SCI6 (RS485 CH0) baudrate generator
+TMR3	- user/SCI6 (RS485 CH0) baudrate generator
+
+CMT0	- system (free running system clock)
+CMT1	- system (soft timers)
+CMT2	- system (user LED PWM)
+CMT3	- system (soft PWM outputs ?)
+
+=> RX63:      9 TMU/MTU user timer channels
+=> RX64/RX71: 14 TMU/MTU/GPT user timer channels
+
+MDIO can't be implemented with CMT because CMT's period is fixed and it
+needs a 100/200 ns period.
+
+
+
+
+
+
+
+The MSTPC19 bit should be rewritten while the oscillation of the clock to be
+controlled by this bit is stable. For entering software
+standby mode after writing a new value to this bit, wait for two cycles of
+the slowest clock among the clocks output by the
+oscillators actually oscillating, and then execute a WAIT instruction.

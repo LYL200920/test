@@ -1,0 +1,27 @@
+
+--------------------
+binutils 2bbad2ea1102733a2a4143be4afe195caf730cd0 ( 2.26.51.20160525)
+
+../binutils-gdb/configure --target=rl78-elf --prefix=/usr/local --disable-nls --disable-werror
+
+
+--------------------
+gcc 7 dev trunk r236867
++ https://gcc.gnu.org/bugzilla/show_bug.cgi?id=71135#c6
+
+better: gcc 5 r236623
+there are some RL78 regressions after gcc 5
+
+../gcc5/configure --target=rl78-elf --prefix=/usr/local --enable-languages=c,c++ --disable-nls --disable-werror --with-newlib --enable-lto --enable-multilib --with-system-zlib --disable-libstdcxx-verbose --disable-symvers
+
+--------------------
+newlib 2.2.0.20150924
+
+../newlib-2.2.0.20150924/configure --target=rl78-elf --prefix=/usr/local --enable-lto --enable-multilib --disable-newlib-supplied-syscalls --enable-newlib-io-c99-formats --enable-newlib-io-long-long
+
+
+
+
+serial flash utility
+
+https://github.com/msalau/rl78flash

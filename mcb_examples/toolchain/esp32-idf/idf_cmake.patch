@@ -1,0 +1,56 @@
+diff --git a/components/bootloader/project_include.cmake b/components/bootloader/project_include.cmake
+index cdb18a9fa..4d4724071 100644
+--- a/components/bootloader/project_include.cmake
++++ b/components/bootloader/project_include.cmake
+@@ -17,7 +17,7 @@ externalproject_add(bootloader
+     # TODO: support overriding the bootloader in COMPONENT_PATHS
+     SOURCE_DIR "${IDF_PATH}/components/bootloader/subproject"
+     BINARY_DIR "${bootloader_build_dir}"
+-    CMAKE_ARGS -DSDKCONFIG=${SDKCONFIG} -DIDF_PATH=${IDF_PATH}
++    CMAKE_ARGS -DSDKCONFIG=${SDKCONFIG} -DIDF_PATH=${IDF_PATH} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+     INSTALL_COMMAND ""
+     BUILD_ALWAYS 1  # no easy way around this...
+     BUILD_BYPRODUCTS ${bootloader_binary_files}
+diff --git a/components/bootloader/subproject/CMakeLists.txt b/components/bootloader/subproject/CMakeLists.txt
+index 6d3c44c44..7d6b8fcca 100644
+--- a/components/bootloader/subproject/CMakeLists.txt
++++ b/components/bootloader/subproject/CMakeLists.txt
+@@ -16,8 +16,7 @@ add_definitions(-DBOOTLOADER_BUILD=1)
+ 
+ set(COMPONENT_REQUIRES_COMMON log esp32 soc)
+ 
+-include("${IDF_PATH}/tools/cmake/project.cmake")
+-project(bootloader)
++idf_project(bootloader)
+ 
+ target_linker_script(bootloader.elf
+     "main/esp32.bootloader.ld"
+diff --git a/tools/cmake/project.cmake b/tools/cmake/project.cmake
+index 8784a9e9b..5b45fbd81 100644
+--- a/tools/cmake/project.cmake
++++ b/tools/cmake/project.cmake
+@@ -52,7 +52,7 @@ endif()
+ # Therefore, to keep all the IDF "build magic", the cleanest way is to keep the
+ # top-level "project" call but customize it to do what we want in the IDF build.
+ #
+-macro(project name)
++macro(idf_project name)
+     # Set global variables used by rest of the build
+     idf_set_global_variables()
+ 
+@@ -90,13 +90,9 @@ macro(project name)
+     # Include sdkconfig.cmake so rest of the build knows the configuration
+     include(${SDKCONFIG_CMAKE})
+ 
+-    # Now the configuration is loaded, set the toolchain appropriately
+-    #
+-    # TODO: support more toolchains than just ESP32
+-    set(CMAKE_TOOLCHAIN_FILE $ENV{IDF_PATH}/tools/cmake/toolchain-esp32.cmake)
+-
+     # Declare the actual cmake-level project
+-    _project(${name} ASM C CXX)
++    enable_language(ASM)
++    project(${name} ASM C CXX)
+ 
+     # generate compile_commands.json (needs to come after project)
+     set(CMAKE_EXPORT_COMPILE_COMMANDS 1)

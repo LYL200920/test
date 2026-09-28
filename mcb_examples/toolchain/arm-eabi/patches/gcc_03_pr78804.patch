@@ -1,0 +1,110 @@
+Index: libgcc/config/arc/t-arc
+===================================================================
+--- libgcc/config/arc/t-arc	(revision 251045)
++++ libgcc/config/arc/t-arc	(working copy)
+@@ -46,7 +46,6 @@
+ 
+ dp-bit.c: $(srcdir)/fp-bit.c
+ 	echo '#ifndef __big_endian__' > dp-bit.c
+-	echo '#define FLOAT_BIT_ORDER_MISMATCH' >> dp-bit.c
+ 	echo '#endif' >> dp-bit.c
+ 	echo '#include "fp-bit.h"' >> dp-bit.c
+ 	echo '#include "config/arc/dp-hack.h"' >> dp-bit.c
+@@ -55,7 +54,6 @@
+ fp-bit.c: $(srcdir)/fp-bit.c
+ 	echo '#define FLOAT' > fp-bit.c
+ 	echo '#ifndef __big_endian__' >> fp-bit.c
+-	echo '#define FLOAT_BIT_ORDER_MISMATCH' >> fp-bit.c
+ 	echo '#endif' >> fp-bit.c
+ 	echo '#include "config/arc/fp-hack.h"' >> fp-bit.c
+ 	cat $(srcdir)/fp-bit.c >> fp-bit.c
+Index: libgcc/fp-bit.c
+===================================================================
+--- libgcc/fp-bit.c	(revision 251045)
++++ libgcc/fp-bit.c	(working copy)
+@@ -316,12 +316,7 @@
+   /* We previously used bitfields to store the number, but this doesn't
+      handle little/big endian systems conveniently, so use shifts and
+      masks */
+-#ifdef FLOAT_BIT_ORDER_MISMATCH
+-  dst.bits.fraction = fraction;
+-  dst.bits.exp = exp;
+-  dst.bits.sign = sign;
+-#else
+-# if defined TFLOAT && defined HALFFRACBITS
++#if defined TFLOAT && defined HALFFRACBITS
+  {
+    halffractype high, low, unity;
+    int lowsign, lowexp;
+@@ -394,11 +389,10 @@
+      }
+    dst.value_raw = ((fractype) high << HALFSHIFT) | low;
+  }
+-# else
++#else
+   dst.value_raw = fraction & ((((fractype)1) << FRACBITS) - (fractype)1);
+   dst.value_raw |= ((fractype) (exp & ((1 << EXPBITS) - 1))) << FRACBITS;
+   dst.value_raw |= ((fractype) (sign & 1)) << (FRACBITS | EXPBITS);
+-# endif
+ #endif
+ 
+ #if defined(FLOAT_WORD_ORDER_MISMATCH) && !defined(FLOAT)
+@@ -450,12 +444,7 @@
+   src = &swapped;
+ #endif
+   
+-#ifdef FLOAT_BIT_ORDER_MISMATCH
+-  fraction = src->bits.fraction;
+-  exp = src->bits.exp;
+-  sign = src->bits.sign;
+-#else
+-# if defined TFLOAT && defined HALFFRACBITS
++#if defined TFLOAT && defined HALFFRACBITS
+  {
+    halffractype high, low;
+    
+@@ -498,11 +487,10 @@
+ 	 }
+      }
+  }
+-# else
++#else
+   fraction = src->value_raw & ((((fractype)1) << FRACBITS) - 1);
+   exp = ((int)(src->value_raw >> FRACBITS)) & ((1 << EXPBITS) - 1);
+   sign = ((int)(src->value_raw >> (FRACBITS + EXPBITS))) & 1;
+-# endif
+ #endif
+ 
+   dst->sign = sign;
+Index: libgcc/fp-bit.h
+===================================================================
+--- libgcc/fp-bit.h	(revision 251045)
++++ libgcc/fp-bit.h	(working copy)
+@@ -128,10 +128,6 @@
+ #define NO_DI_MODE
+ #endif
+ 
+-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+-#define FLOAT_BIT_ORDER_MISMATCH
+-#endif
+-
+ #if __BYTE_ORDER__ != __FLOAT_WORD_ORDER__
+ #define FLOAT_WORD_ORDER_MISMATCH
+ #endif
+@@ -354,16 +350,6 @@
+ # endif
+ #endif
+ 
+-#ifdef FLOAT_BIT_ORDER_MISMATCH
+-  struct
+-    {
+-      fractype fraction:FRACBITS __attribute__ ((packed));
+-      unsigned int exp:EXPBITS __attribute__ ((packed));
+-      unsigned int sign:1 __attribute__ ((packed));
+-    }
+-  bits;
+-#endif
+-
+ #ifdef _DEBUG_BITFLOAT
+   struct
+     {

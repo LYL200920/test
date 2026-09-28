@@ -1,0 +1,83 @@
+
+Jutze Japan Motion Coordinate Board ver. 1 (PBJP1501A)
+
+The following macros are available to control some BSP options during
+compile time:
+
+MCB_USE_SPI
+  define to enable on-board SPI bus on SCI4.
+
+MCB_USE_I2C
+  define to enable on-board I2C bus on SCI2.
+
+MCB_USE_DAC124S085
+  define to enable the DAC124S085 device.
+
+MCB_USE_RS485
+  define to enable the RS485 ports on SCI6 and SCI7.
+
+MCB_USE_PCA9698
+  define to enable the on-board PCA9698 bus expanders.
+
+MCB_USE_PCA9698_I2C_EXT
+  define to enable the PCA9698 bus expanders on I2C expansion (CN5).
+
+MCB_USE_PCD4641
+  define to enable the PCD4641 device.
+
+MCB_USE_MCX514
+  define to enable the MCX514 device.
+
+MCB_USE_MCX514_I2C_EXT
+  define to enable the MCX514 device on I2C expansion (CN5).
+
+MCB_USE_USB
+  define to enable USB.
+
+MCB_USE_TRIGGER_IO
+  define to enable the board specific trigger_io device.
+
+MCB_USE_LEDS
+  define to enable the board specific led_outputs device.
+
+MCB_USE_DIPSWITCH
+  define to enable the board specific dipswitch_inputs device.
+
+MCB_USE_DIGITAL_IO
+  define to enable the board specific digital_io device.
+
+MCB_USE_ETHERC
+  define to enable the RX63N EtherC device.
+
+MCB_USE_FCU
+  define to enable the FCU.
+
+MCB_USE_SCI_DEBUG
+  define to redirect debugging printf on stdout and stderr to the
+  SCI debugging port.
+
+MCB_USE_SCI0_RS232C
+  define to enable the RS232-C port on CN7 (SCI0).
+
+MCB_NO_CRC
+  define to disable the RX63N hardware CRC accelerator device usage.
+
+MCB_NO_RESET_HW_INIT
+  do not initialize hardware as it is needed for a hard reset/boot.
+  this option can be used to avoid re-initializing the hardware when switching
+  to programs in RAM.
+
+MCB_NO_PERIPHERAL_RESET_RELEASE
+  do not assert or release the peripheral reset line during and after
+  board init.
+
+RX_USER_BOOT_IMAGE
+  has to be set when building an image for the user boot area.
+  the user boot area contains a pointer to the board info structure, which
+  has to be set when building the user boo area image, but not when building
+  a normal image.
+
+RX_TEXT_IN_RAM
+  define this when the .text section will be loaded into RAM, i.e. it is known
+  that the CPU will always execute from RAM.  this is used by the FCU driver
+  to tweak the code.

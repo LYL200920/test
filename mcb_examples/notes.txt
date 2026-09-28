@@ -1,0 +1,47 @@
+-------------------------------------------------------------------
+
+allow non-root access to FTDI tty:
+
+sudoedit /etc/udev/rules.d/50-myusb.rules
+
+add the following:
+
+KERNEL=="ttyUSB[0-9]*",MODE="0666"
+KERNEL=="ttyACM[0-9]*",MODE="0666"
+
+
+-------------------------------------------------------------------
+
+allow non-root access to Renesas USB boot-mode devices and FT232R:
+
+sudoedit /lib/udev/rules.d/99-systemd.rules
+
+add the following as the last command in the rules file:
+
+# Renesas/Hitachi
+SUBSYSTEM=="usb", ATTR{idVendor}=="045b", ATTR{idProduct}=="0025",MODE="0666"
+
+# FTDI
+SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6001",MODE="0666"
+
+(note: usb permissions are set at different stages, so it's best to do it
+at the very end).
+
+
+reload udev rules:
+
+sudo udevadm control --reload-rules
+
+unplug, plug device for the new rules to be applied
+
+-------------------------------------------------------------------
+
+when the FT232R is removed while the device is being used (serial terminal)
+and then replugged, the driver gets confused by the non-default bitrate
+1'500'000.  the only fix for that is to
+- unplug FT232R
+- unload kernel module via "sudo modprobe -r ftdi_sio"
+- plug FT232R again (automatically reloads kernel module)
+
+-------------------------------------------------------------------
+

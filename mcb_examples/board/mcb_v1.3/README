@@ -1,0 +1,113 @@
+
+Jutze Japan Motion Coordinate Board ver. 1.3 (PBJP1702A)
+
+The board has been specifically designed for various pick-and-place board
+options.  This means that the same PCB can be used to get different board
+variants with different amount of functionality.  It is possible to use
+different RX MCU versions and also omit or include most of the functional
+blocks.
+
+The following macros are available to control some BSP options during
+compile time:
+
+MCB_USE_RX631_144
+  use the RX631 144pin MCU.
+
+MCB_USE_RX63N_144
+  use the RX63N 144pin MCU.
+
+MCB_USE_RX64M_144
+  use the RX64M 144pin MCU.
+
+MCB_USE_RX64M_176
+  use the RX64M 176pin MCU.
+
+MCB_USE_RX71M_144
+  use the RX71M 144pin MCU.
+
+MCB_USE_RX71M_176
+  use the RX71M 176pin MCU.
+
+
+the board variant can also be specified when setting up a build directory:
+cmake -DCMAKE_TOOLCHAIN_FILE=~/code/MCBcode/toolchain/rx/toolchain.cmake \
+      -DCMAKE_BOARD_DIR=~/code/MCBcode/board/mcb_v1.3 \
+      -DCMAKE_LIBRARIES_DIR=~/code/MCBcode
+      -DBOARD_VARIANT=RX71M_176 \
+       ~/code/MCBcode/app/mcb13_test
+
+MCB_USE_I2C
+  enable on-board I2C bus on SCI2.
+
+MCB_USE_SPI
+  enable on-board write-only SPI bus on SCI4 for DAC control.
+
+MCB_USE_DAC124S085
+  enable the DAC124S085 device.
+
+MCB_USE_RS485
+  enable the RS485 ports on SCI6 and SCI7 (144pin) / SCIF10 (176pin).
+
+MCB_USE_PCA9698
+  enable the on-board PCA9698 bus expanders.
+
+MCB_USE_PCD4641
+  enable the PCD4641 device.
+
+MCB_USE_MCX514
+  enable the MCX514 device.
+
+MCB_USE_USB_FUNCTION
+  enable USB0 function port (144pin and 176pin).
+
+MCB_USE_USB_HOST
+  enable USBA host port (176pin only).
+
+MCB_USE_TRIGGER_IO
+  enable the board specific trigger_io device.
+
+MCB_USE_LEDS
+  enable the board specific led_outputs device.
+
+MCB_USE_DIPSWITCH
+  enable the board specific dipswitch_inputs device.
+
+MCB_USE_DIGITAL_IO
+  enable the board specific digital_io device.
+
+MCB_USE_RX_ETHERC0
+  enable the RX EtherC 0 device (144pin and 176pin, ETH0) as a normal eth device
+
+MCB_USE_RX_ETHERC0_RAW
+  enable the RX EtherC 0 device (144pin and 176pin, ETH0) as a raw device
+
+MCB_USE_RX_ETHERC1
+  enable the RX EtherC 1 device (176pin, ETH1) as a normal eth device
+
+MCB_USE_RX_ETHERC1_RAW
+  enable the RX EtherC 1 device (176pin, ETH1) as a raw device
+
+MCB_USE_LAN9250
+  enable the LAN9250 device (ETH2) as a normal eth device
+
+MCB_USE_LAN9250_RAW
+  enable the LAN9250 device (ETH2) as a raw device
+
+
+MCB_USE_FCU
+  define to enable the FCU.
+  the drivers for RX63 and RX64/RX71 are different.  depending on the selected
+  MCU, the appropritate FCU drivers will be used.
+
+MCB_USE_SCI_DEBUG
+  define to redirect debugging printf on stdout and stderr to the
+  SCI debugging port.
+
+MCB_NO_CRC
+  define to disable the RX hardware CRC accelerator device usage.
+  normally, it is enabled, depending on the MCU type being used.
+
+MCB_USE_SCI0_UART
+MCB_USE_SCI3_UART
+MCB_USE_SCI5_UART
+

@@ -1,0 +1,7 @@
+*.d
+*.o
+/build/
+build_*
+
+# ignore vscode files
+.vscode/*

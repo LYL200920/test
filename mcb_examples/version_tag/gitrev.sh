@@ -1,0 +1,384 @@
+#!/bin/sh
+
+# Copyright (c) 2012 - 2014 dak180 and contributors. See
+# http://opensource.org/licenses/mit-license.php or the included
+# COPYING.md for licence terms.
+#
+# autorevision - extracts metadata about the head version from your
+# repository.
+
+# Usage message.
+arUsage() {
+	cat > "/dev/stderr" << EOF
+usage: autorevision {-t output-type | -s symbol} [-o cache-file [-f] ] [-V]
+	Options include:
+	-t output-type		= specify output type
+	-s symbol		= specify symbol output
+	-o cache-file		= specify cache file location
+	-f			= force the use of cache data
+	-U			= check for untracked files in svn
+	-V			= emit version and exit
+	-?			= help message
+
+The following are valid output types:
+	clojure			= clojure file
+	h			= Header for use with c/c++
+	hpp			= Alternate C++ header strings with namespace
+	ini			= INI file
+	java			= Java file
+	javaprop		= Java properties file
+	js			= javascript file
+	json			= JSON file
+	lua			= Lua file
+	m4			= m4 file
+	matlab			= matlab file
+	octave			= octave file
+	php			= PHP file
+	pl			= Perl file
+	py			= Python file
+	rpm			= rpm file
+	scheme			= scheme file
+	sh			= Bash sytax
+	swift			= Swift file
+	tex			= (La)TeX file
+	xcode			= Header useful for populating info.plist files
+
+
+The following are valid symbols:
+	VCS_TYPE
+	VCS_BASENAME
+	VCS_UUID
+	VCS_NUM
+	VCS_DATE
+	VCS_BRANCH
+	VCS_TAG
+	VCS_TICK
+	VCS_EXTRA
+	VCS_FULL_HASH
+	VCS_SHORT_HASH
+	VCS_WC_MODIFIED
+EOF
+	exit 1
+}
+
+# Config
+ARVERSION="&&ARVERSION&&"
+TARGETFILE="/dev/stdout"
+while getopts ":p:c:t:o:s:VfU" OPTION; do
+	case "${OPTION}" in
+		p)
+			PRODUCT_NAME="${OPTARG}"
+		;;
+		c)
+			COPYRIGHT_STR="${OPTARG}"
+		;;
+		t)
+			AFILETYPE="${OPTARG}"
+		;;
+		o)
+			CACHEFILE="${OPTARG}"
+		;;
+		f)
+			CACHEFORCE="1"
+		;;
+		s)
+			VAROUT="${OPTARG}"
+		;;
+		U)
+			UNTRACKEDFILES="1"
+		;;
+		V)
+			echo "autorevision ${ARVERSION}"
+			exit 0
+		;;
+		?)
+			# If an unknown flag is used (or -?):
+			arUsage
+		;;
+	esac
+done
+
+if [ ! -z "${VAROUT}" ] && [ ! -z "${AFILETYPE}" ]; then
+	# If both -s and -t are specified:
+	echo "error: Improper argument combination." 1>&2
+	exit 1
+elif [ -z "${VAROUT}" ] && [ -z "${AFILETYPE}" ]; then
+	# If neither -s or -t are specified:
+	arUsage
+elif [ -z "${CACHEFILE}" ] && [ "${CACHEFORCE}" = "1" ]; then
+	# If -f is specified without -o:
+	arUsage
+elif [ ! -f "${CACHEFILE}" ] && [ "${CACHEFORCE}" = "1" ]; then
+	# If we are forced to use the cache but it does not exist.
+	echo "error: Cache forced but no cache found." 1>&2
+	exit 1
+fi
+
+# Make sure that the path we are given is one we can source
+# (dash, we are looking at you).
+if [ ! -z "${CACHEFILE}" ] && ! echo "${CACHEFILE}" | grep -q '^\.*/'; then
+	CACHEFILE="./${CACHEFILE}"
+fi
+
+
+# Functions to extract data from different repo types.
+# For git repos
+# shellcheck disable=SC2155
+gitRepo() {
+	VCS_TYPE="git"
+
+	VCS_BASENAME="$(basename "$(git rev-parse --show-toplevel)")"
+	VCS_SUBNAME="$(basename "${PWD}")"
+
+	VCS_UUID="$(git rev-list --max-parents=0 --date-order --reverse HEAD 2>/dev/null | sed -n 1p)"
+	if [ -z "${VCS_UUID}" ]; then
+		VCS_UUID="$(git rev-list --topo-order HEAD | tail -n 1)"
+	fi
+
+	# Is the working copy clean?
+	test -z "$(git status --untracked-files=no --porcelain)"
+	VCS_WC_MODIFIED="${?}"
+
+	# Enumeration of changesets
+	VCS_NUM="$(git rev-list --count HEAD 2>/dev/null)"
+	if [ -z "${VCS_NUM}" ]; then
+		echo "warning: Counting the number of revisions may be slower due to an outdated git version less than 1.7.2.3. If something breaks, please update it." 1>&2
+		VCS_NUM="$(git rev-list HEAD | wc -l)"
+	fi
+
+	# This may be a git-svn remote.  If so, report the Subversion revision.
+	if [ -z "$(git config svn-remote.svn.url 2>/dev/null)" ]; then
+		# The full revision hash
+		VCS_FULL_HASH="$(git rev-parse HEAD)"
+
+		# The short hash
+		VCS_SHORT_HASH="$(echo "${VCS_FULL_HASH}" | cut -b 1-7)"
+	else
+		# The git-svn revision number
+		VCS_FULL_HASH="$(git svn find-rev HEAD)"
+		VCS_SHORT_HASH="${VCS_FULL_HASH}"
+	fi
+
+	# Current branch
+	VCS_BRANCH="$(git rev-parse --symbolic-full-name --verify "$(git name-rev --name-only --no-undefined HEAD 2>/dev/null)" 2>/dev/null | sed -e 's:refs/heads/::' | sed -e 's:refs/::')"
+
+	# Cache the description
+	local DESCRIPTION="$(git describe --long --tags 2>/dev/null)"
+
+	# Current or last tag ancestor (empty if no tags)
+	VCS_TAG="$(echo "${DESCRIPTION}" | sed -e "s:-g${VCS_SHORT_HASH}\$::" -e 's:-[0-9]*$::')"
+
+	# Distance to last tag or an alias of VCS_NUM if there is no tag
+	if [ ! -z "${DESCRIPTION}" ]; then
+		VCS_TICK="$(echo "${DESCRIPTION}" | sed -e "s:${VCS_TAG}-::" -e "s:-g${VCS_SHORT_HASH}::")"
+	else
+		VCS_TICK="${VCS_NUM}"
+	fi
+
+	# Date of the current commit
+	VCS_DATE="$(git log -1 --pretty=format:%ci | sed -e 's: :T:' -e 's: ::')"
+}
+
+
+
+# Functions to output data in different formats.
+# For header output
+hOutput() {
+	cat > "${TARGETFILE}" << EOF
+/* Generated by autorevision - do not hand-hack! */
+#ifndef AUTOREVISION_H
+#define AUTOREVISION_H
+
+#define VCS_TYPE		"${VCS_TYPE}"
+#define VCS_BASENAME		"${VCS_BASENAME}"
+#define VCS_SUBNAME		"${VCS_SUBNAME}"
+#define VCS_UUID		"${VCS_UUID}"
+#define VCS_NUM			${VCS_NUM}
+#define VCS_DATE		"${VCS_DATE}"
+#define VCS_BRANCH		"${VCS_BRANCH}"
+#define VCS_TAG			"${VCS_TAG}"
+#define VCS_TICK		${VCS_TICK}
+#define VCS_EXTRA		"${VCS_EXTRA}"
+
+#define VCS_FULL_HASH		"${VCS_FULL_HASH}"
+#define VCS_SHORT_HASH		"${VCS_SHORT_HASH}"
+
+#define VCS_WC_MODIFIED		${VCS_WC_MODIFIED}
+
+#endif
+
+/* end */
+EOF
+}
+
+
+asmOutput() {
+	case "${VCS_WC_MODIFIED}" in
+		0) VCS_WC_MODIFIED="" ;;
+		1) VCS_WC_MODIFIED="M" ;;
+	esac
+	cat > "${TARGETFILE}" << EOF
+
+// "${VCS_BASENAME}"
+// "${VCS_SUBNAME}"
+
+	.section .version_tag
+
+	.balign 4
+
+	.string "${PRODUCT_NAME}"
+	.balign 4
+
+	.string "${VCS_TAG}"
+	.balign 4
+
+	.string "${VCS_NUM}"
+	.balign 4
+
+	.string "${VCS_TICK}"
+	.balign 4
+
+	.string "${VCS_WC_MODIFIED}"
+	.balign 4
+
+	.string "${COPYRIGHT_STR}"
+	.balign 4
+
+	.string "${VCS_UUID}"
+	.balign 4
+
+	.string "${VCS_FULL_HASH}"
+	.balign 4
+
+	.string "${VCS_DATE}"
+	.balign 4
+
+	.global __version_tag_build_md5
+	.hidden __version_tag_build_md5
+__version_tag_build_md5:
+	.string "00000000000000000000000000000000"
+	.balign 4
+
+	.end
+;; end
+EOF
+}
+
+
+# Detect which repos we are in and gather data.
+if [ -f "${CACHEFILE}" ] && [ "${CACHEFORCE}" = "1" ]; then
+	# When requested only read from the cache to populate our symbols.
+	. "${CACHEFILE}"
+else
+	# If a value is not set through the environment set VCS_EXTRA to nothing.
+	: "${VCS_EXTRA:=""}"
+	gitRepo
+
+	if [ -f "${CACHEFILE}" ] && [ "${REPONUM}" = "0" ]; then
+		# We are not in a repo; try to use a previously generated cache to populate our symbols.
+		. "${CACHEFILE}"
+		# Do not overwrite the cache if we know we are not going to write anything new.
+		CACHEFORCE="1"
+	elif [ "${REPONUM}" = "0" ]; then
+		echo "error: No repo or cache detected." 1>&2
+		exit 1
+	fi
+fi
+
+
+# -s output is handled here.
+if [ ! -z "${VAROUT}" ]; then
+	if [ "${VAROUT}" = "VCS_TYPE" ]; then
+		echo "${VCS_TYPE}"
+	elif [ "${VAROUT}" = "VCS_BASENAME" ]; then
+		echo "${VCS_BASENAME}"
+	elif [ "${VAROUT}" = "VCS_NUM" ]; then
+		echo "${VCS_NUM}"
+	elif [ "${VAROUT}" = "VCS_DATE" ]; then
+		echo "${VCS_DATE}"
+	elif [ "${VAROUT}" = "VCS_BRANCH" ]; then
+		echo "${VCS_BRANCH}"
+	elif [ "${VAROUT}" = "VCS_TAG" ]; then
+		echo "${VCS_TAG}"
+	elif [ "${VAROUT}" = "VCS_TICK" ]; then
+		echo "${VCS_TICK}"
+	elif [ "${VAROUT}" = "VCS_FULL_HASH" ]; then
+		echo "${VCS_FULL_HASH}"
+	elif [ "${VAROUT}" = "VCS_SHORT_HASH" ]; then
+		echo "${VCS_SHORT_HASH}"
+	elif [ "${VAROUT}" = "VCS_WC_MODIFIED" ]; then
+		echo "${VCS_WC_MODIFIED}"
+	else
+		echo "error: Not a valid output symbol." 1>&2
+		exit 1
+	fi
+fi
+
+
+# Detect requested output type and use it.
+if [ ! -z "${AFILETYPE}" ]; then
+	if [ "${AFILETYPE}" = "h" ]; then
+		hOutput
+	elif [ "${AFILETYPE}" = "xcode" ]; then
+		xcodeOutput
+	elif [ "${AFILETYPE}" = "swift" ]; then
+		swiftOutput
+	elif [ "${AFILETYPE}" = "sh" ]; then
+		shOutput
+	elif [ "${AFILETYPE}" = "py" ] || [ "${AFILETYPE}" = "python" ]; then
+		pyOutput
+	elif [ "${AFILETYPE}" = "pl" ] || [ "${AFILETYPE}" = "perl" ]; then
+		plOutput
+	elif [ "${AFILETYPE}" = "lua" ]; then
+		luaOutput
+	elif [ "${AFILETYPE}" = "php" ]; then
+		phpOutput
+	elif [ "${AFILETYPE}" = "ini" ]; then
+		iniOutput
+	elif [ "${AFILETYPE}" = "js" ]; then
+		jsOutput
+	elif [ "${AFILETYPE}" = "json" ]; then
+		jsonOutput
+	elif [ "${AFILETYPE}" = "java" ]; then
+		javaOutput
+	elif [ "${AFILETYPE}" = "javaprop" ]; then
+		javapropOutput
+	elif [ "${AFILETYPE}" = "tex" ]; then
+		texOutput
+	elif [ "${AFILETYPE}" = "m4" ]; then
+		m4Output
+	elif [ "${AFILETYPE}" = "scheme" ]; then
+		schemeOutput
+	elif [ "${AFILETYPE}" = "clojure" ]; then
+		clojureOutput
+	elif [ "${AFILETYPE}" = "asm" ]; then
+		asmOutput
+	elif [ "${AFILETYPE}" = "rpm" ]; then
+		rpmOutput
+	elif [ "${AFILETYPE}" = "hpp" ]; then
+		hppOutput
+	elif [ "${AFILETYPE}" = "matlab" ]; then
+		matlabOutput
+	elif [ "${AFILETYPE}" = "octave" ]; then
+		octaveOutput
+	else
+		echo "error: Not a valid output type." 1>&2
+		exit 1
+	fi
+fi
+
+
+# If requested, make a cache file.
+if [ ! -z "${CACHEFILE}" ] && [ ! "${CACHEFORCE}" = "1" ]; then
+	TARGETFILE="${CACHEFILE}.tmp"
+	shOutput
+
+	# Check to see if there have been any actual changes.
+	if [ ! -f "${CACHEFILE}" ]; then
+		mv -f "${CACHEFILE}.tmp" "${CACHEFILE}"
+	elif cmp -s "${CACHEFILE}.tmp" "${CACHEFILE}"; then
+		rm -f "${CACHEFILE}.tmp"
+	else
+		mv -f "${CACHEFILE}.tmp" "${CACHEFILE}"
+	fi
+fi

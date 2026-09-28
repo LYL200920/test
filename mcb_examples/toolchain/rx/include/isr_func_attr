@@ -1,0 +1,17 @@
+// ISR functions have to be marked as used, otherwise LTO might strip them.
+// or maybe that was some LTO bug ... it seems not needed anymore.  if marked
+// as used, ISR functions will remain in the final binary even if they are not
+// referenced by anything else.
+
+// somehow specifying this as a compiler option via -Dmacro=definition results
+// in broken ELF files, at least on RX.
+
+#ifndef __isr_func_attr__
+  #define __isr_func_attr__ __attribute__((interrupt, aligned (4)))
+#endif
+
+#define expand_empty_isr_func static inline void __attribute__((aligned (4), naked)) empty_isr_func (void)\
+{\
+  asm ("rte"); \
+}\
+
