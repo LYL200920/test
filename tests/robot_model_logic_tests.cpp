@@ -320,8 +320,8 @@ void test_teach_point_store ( )
   require (store.Delete_Point ("robot-a", 0),
            "Teach point deletion failed");
   const auto third = store.Add_Point ("robot-a", joints_a, pose_a);
-  require (third.id == 2,
-           "Teach point ids should remain continuous after delete and add");
+  require (third.id == 3,
+           "Deleted IDs must not be reused");
   store.Clear_Points ("robot-a");
   const auto fourth = store.Add_Point ("robot-a", joints_a, pose_a);
   require (fourth.id == 1,
@@ -339,12 +339,12 @@ void test_teach_point_store ( )
   edit_store.Add_Point ("robot-edit", joints_a, pose_a);
   const auto inserted = edit_store.Insert_Point (
     "robot-edit", 1, joints_a, pose_a);
-  require (inserted.id == 2, "Inserted point id mismatch");
+  require (inserted.id == 4, "Inserted point id mismatch");
   require (edit_store.Points ("robot-edit")[0].id == 1 &&
-           edit_store.Points ("robot-edit")[1].id == 2 &&
-           edit_store.Points ("robot-edit")[2].id == 3 &&
-           edit_store.Points ("robot-edit")[3].id == 4,
-           "Inserted point ids should follow list order");
+           edit_store.Points ("robot-edit")[1].id == 4 &&
+           edit_store.Points ("robot-edit")[2].id == 2 &&
+           edit_store.Points ("robot-edit")[3].id == 3,
+           "Insertion must preserve existing point IDs");
   const std::array<double, 6> updated_joints = {
     6, 5, 4, 3, 2, 1 };
   require (edit_store.Update_Point (
@@ -360,11 +360,11 @@ void test_teach_point_store ( )
   require (edit_store.Points ("robot-edit").size ( ) == 2 &&
            edit_store.Points ("robot-edit")[0].id == 1 &&
            edit_store.Points ("robot-edit")[1].id == 2,
-           "Batch deletion should renumber the remaining points");
+           "Deletion must preserve surviving IDs");
   const auto after_batch = edit_store.Add_Point (
     "robot-edit", joints_a, pose_a);
-  require (after_batch.id == 3,
-           "Add after batch delete should keep ids continuous");
+  require (after_batch.id == 5,
+           "Add after delete must not reuse old IDs");
   robot_model::Robot_Teach_Point loaded_a;
   loaded_a.id = 7;
   loaded_a.joint_angles_deg = joints_a;
@@ -372,13 +372,13 @@ void test_teach_point_store ( )
   loaded_b.id = 11;
   edit_store.Replace_Points (
     "robot-edit", { loaded_a, loaded_b });
-  require (edit_store.Points ("robot-edit")[0].id == 1 &&
-           edit_store.Points ("robot-edit")[1].id == 2,
-           "Loaded points should be renumbered by list order");
+  require (edit_store.Points ("robot-edit")[0].id == 7 &&
+           edit_store.Points ("robot-edit")[1].id == 11,
+           "Loading must preserve referenced point IDs");
   const auto after_replace = edit_store.Add_Point (
     "robot-edit", joints_a, pose_a);
-  require (after_replace.id == 3,
-           "Add after load should keep ids continuous");
+  require (after_replace.id == 12,
+           "Add after load must allocate above loaded IDs");
 
   robot_model::Robot_Teach_Point_Store template_store;
   template_store.Add_Point(

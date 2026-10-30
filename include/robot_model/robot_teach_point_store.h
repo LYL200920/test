@@ -77,9 +77,10 @@ namespace robot_model
     struct Model_Points
     {
       std::vector<Robot_Teach_Point> points;
+      std::size_t next_id = 1;
     };
 
-    static void Renumber_Points(Model_Points &model_points);
+    static std::size_t Allocate_Id(Model_Points &model_points);
 
     std::map<std::string, Model_Points> m_points_by_model;
   };

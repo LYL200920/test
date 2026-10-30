@@ -8,6 +8,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace
@@ -43,6 +44,26 @@ application::Run_Captured_Frame Capture(int id = 1)
   capture.point.has_world_pose = true;
   capture.point.world_pose = {};
   return capture;
+}
+
+application::Run_Captured_Frame Colored_Capture(int id, unsigned char color)
+{
+  auto capture = Capture(id);
+  const std::vector<std::uint8_t> pixels(12, color);
+  capture.frame = std::make_shared<jutze_camera::camera_frame>(
+    "test", "serial", 2, 2,
+    static_cast<unsigned int>(jutze_camera::pixel_format::rgb8),
+    42, pixels.data(), pixels.size());
+  return capture;
+}
+
+robot_model::Mosaic_Group Group(std::size_t id, std::vector<std::size_t> points)
+{
+  robot_model::Mosaic_Group group;
+  group.id = id;
+  group.name = "group " + std::to_string(id);
+  group.point_ids = std::move(points);
+  return group;
 }
 
 void Test_Save_Only()
@@ -81,6 +102,11 @@ void Test_Mosaic(bool save_originals)
   options.fov_configuration.width_mm = 2;
   const auto result = application::Process_Run_Images({Capture()}, options);
   Require(result.success && result.processed_count == 1, "Mosaic failed");
+  Require(result.groups.size() == 1 && result.groups[0].success &&
+            result.groups[0].group_id == 0 &&
+            result.groups[0].mosaic_path == result.mosaic_path &&
+            result.groups[0].mosaic.rgb == result.mosaic.rgb,
+          "Default group did not preserve legacy result fields");
   Require(result.mosaic.width > 0 && result.mosaic.width <= 360 &&
             result.mosaic.height > 0 && result.mosaic.height <= 260,
           "Preview dimensions invalid");
@@ -178,6 +204,243 @@ void Test_Failures()
   Require(!result.success && result.processed_count == 1,
           "Partial batch count or failure was lost");
 }
+void Test_Group_Isolation_And_Order()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.save_original_images = true;
+  options.fov_configuration.length_mm = 2;
+  options.fov_configuration.width_mm = 2;
+  options.mosaic_configuration.groups = {
+    Group(8, {42}), Group(3, {7}), Group(11, {7, 42})};
+  auto first = Colored_Capture(42, 40);
+  auto second = Colored_Capture(7, 180);
+  second.point.world_pose[1] = -2;
+  auto result = application::Process_Run_Images({first, second}, options);
+  Require(result.success && result.groups.size() == 3 && result.processed_count == 2,
+          "Overlapping group membership failed or processed inputs repeatedly");
+  Require(result.groups[0].group_id == 8 && result.groups[1].group_id == 3 &&
+            result.groups[2].group_id == 11 && result.groups[0].name == "group 8",
+          "Configured group order or names were lost");
+  Require(result.groups[0].mosaic.width == 2 && result.groups[1].mosaic.width == 2 &&
+            result.groups[0].mosaic.rgb[0] == 40 && result.groups[1].mosaic.rgb[0] == 180,
+          "Images leaked between independent groups");
+  Require(result.groups[2].mosaic.width == 4 && result.groups[2].mosaic.rgb[0] == 40 &&
+            result.groups[2].mosaic.rgb[6] == 180,
+          "Point ID membership changed capture order or placement");
+  Require(result.mosaic_path == directory.path / "mosaic_group_8.png" &&
+            result.mosaic.rgb == result.groups[0].mosaic.rgb,
+          "Legacy result does not use the first successful group");
+  Require(!std::filesystem::exists(directory.path / "mosaic.png"),
+          "Explicit groups wrote the implicit mosaic file");
+  std::size_t files = 0;
+  for( const auto& file : std::filesystem::directory_iterator(directory.path) )
+    if( file.is_regular_file() ) ++files;
+  Require(files == 5, "Expected two original files and three group files");
+
+  // At identical poses overlap ties must follow captures, not point_ids order.
+  second.point.world_pose = {};
+  options.mosaic_configuration.groups = {Group(12, {7, 42})};
+  result = application::Process_Run_Images({first, second}, options);
+  Require(result.success && result.mosaic.rgb[0] == 40,
+          "Overlap tie breaking reordered captures by member IDs");
+
+  // A different orientation makes an incorrect first-camera selection visible.
+  second.point.world_pose[1] = -4;
+  second.point.world_pose[3] = 90;
+  result = application::Process_Run_Images({first, second}, options);
+  Require(result.success && result.mosaic.width == 6 && result.mosaic.height <= 3,
+          "First-camera reference did not use the first capture");
+}
+
+void Test_Base_Axes_And_Reversal()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.fov_configuration.length_mm = 4;
+  options.fov_configuration.width_mm = 4;
+  auto capture = Capture(19);
+  std::vector<std::uint8_t> pixels;
+  for( unsigned int y = 0; y < 4; ++y )
+    for( unsigned int x = 0; x < 4; ++x )
+      for( int channel = 0; channel < 3; ++channel )
+        pixels.push_back(static_cast<std::uint8_t>(10 + y * 40 + x * 5));
+  capture.frame = std::make_shared<jutze_camera::camera_frame>(
+    "test", "serial", 4, 4,
+    static_cast<unsigned int>(jutze_camera::pixel_format::rgb8),
+    42, pixels.data(), pixels.size());
+  auto group = Group(1, {19});
+  group.reference = robot_model::Mosaic_Reference::Robot_Base;
+  group.horizontal_axis = robot_model::Coordinate_Axis::Y;
+  group.vertical_axis = robot_model::Coordinate_Axis::X;
+  options.mosaic_configuration.groups = {group};
+  auto result = application::Process_Run_Images({capture}, options);
+  Require(result.success && result.mosaic.width == 4 && result.mosaic.height == 4 &&
+            result.mosaic.rgb[0] == 100 && result.mosaic.rgb[9] == 90,
+          "Base axes did not project camera image vectors");
+  options.mosaic_configuration.groups[0].horizontal_axis = robot_model::Coordinate_Axis::X;
+  options.mosaic_configuration.groups[0].vertical_axis = robot_model::Coordinate_Axis::Y;
+  result = application::Process_Run_Images({capture}, options);
+  Require(result.success && result.mosaic.rgb[0] == 100 && result.mosaic.rgb[9] == 20,
+          "Swapping base axes did not transpose image vectors");
+  options.mosaic_configuration.groups[0] = group;
+  options.mosaic_configuration.groups[0].reverse_horizontal = true;
+  result = application::Process_Run_Images({capture}, options);
+  Require(result.success && result.mosaic.rgb[0] == 90 && result.mosaic.rgb[9] == 100,
+          "Horizontal reversal did not reverse source pixels");
+  options.mosaic_configuration.groups[0].reverse_vertical = true;
+  result = application::Process_Run_Images({capture}, options);
+  Require(result.success && result.mosaic.rgb[0] == 10 && result.mosaic.rgb[9] == 20,
+          "Vertical reversal did not reverse source pixels");
+
+  options.mosaic_configuration.groups[0].reference = robot_model::Mosaic_Reference::First_Camera;
+  result = application::Process_Run_Images({capture}, options);
+  Require(result.success && result.mosaic.rgb[0] == 100,
+          "First-camera reversal did not reverse both pixel directions");
+
+  // Centers must use the same signed basis as both source image vectors.
+  options.fov_configuration.length_mm = 2;
+  options.fov_configuration.width_mm = 2;
+  auto first = Colored_Capture(19, 30);
+  auto second = Colored_Capture(25, 210);
+  second.point.world_pose[1] = 2;
+  group.point_ids = {25, 19};
+  options.mosaic_configuration.groups = {group};
+  result = application::Process_Run_Images({first, second}, options);
+  Require(result.success && result.mosaic.width == 4 && result.mosaic.rgb[0] == 30 &&
+            result.mosaic.rgb[6] == 210, "Base center projection is inconsistent");
+  options.mosaic_configuration.groups[0].reverse_horizontal = true;
+  result = application::Process_Run_Images({first, second}, options);
+  Require(result.success && result.mosaic.rgb[0] == 210 && result.mosaic.rgb[6] == 30,
+          "Horizontal reversal did not reverse center placement");
+
+  // Exercise both other robot-base planes with FOV axes in those planes.
+  for( const auto vertical : {robot_model::Coordinate_Axis::X, robot_model::Coordinate_Axis::Y} )
+  {
+    options.fov_configuration.length_axis = robot_model::Coordinate_Axis::Z;
+    options.fov_configuration.width_axis = vertical;
+    group.horizontal_axis = robot_model::Coordinate_Axis::Z;
+    group.vertical_axis = vertical;
+    options.mosaic_configuration.groups = {group};
+    second.point.world_pose = {};
+    second.point.world_pose[2] = 2;
+    result = application::Process_Run_Images({first, second}, options);
+    Require(result.success && result.mosaic.width == 4 && result.mosaic.rgb[6] == 210,
+            "ZX/ZY plane projection failed");
+  }
+}
+
+void Test_Group_Failures()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.fov_configuration.length_mm = 2;
+  options.fov_configuration.width_mm = 2;
+  options.mosaic_configuration.groups = {Group(4, {77}), Group(5, {1})};
+  auto result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success && result.groups.size() == 2 && !result.groups[0].success &&
+            result.groups[0].message.find("77") != std::string::npos &&
+            result.groups[1].success && result.mosaic_path == result.groups[1].mosaic_path,
+          "Missing member must fail only its group and expose the first success");
+  Require(result.groups[0].mosaic_path.empty() && result.groups[0].mosaic.rgb.empty(),
+          "Failed group exposed a mosaic");
+
+  options.mosaic_configuration.groups = {Group(4, {77, 1}), Group(5, {1})};
+  auto invalid = Capture(77);
+  for( int failure = 0; failure < 5; ++failure )
+  {
+    invalid = Capture(77);
+    if( failure == 0 ) invalid.frame.reset();
+    if( failure == 1 ) invalid.point.has_world_pose = false;
+    if( failure == 2 ) invalid.point.world_pose[0] = std::numeric_limits<double>::quiet_NaN();
+    if( failure == 3 ) invalid.point.world_pose[3] = std::numeric_limits<double>::infinity();
+    if( failure == 4 ) invalid.point.world_pose[0] = std::numeric_limits<double>::max();
+    result = application::Process_Run_Images({Capture(), invalid}, options);
+    Require(!result.success && !result.groups[0].success && result.groups[1].success &&
+              result.groups[0].message.find("77") != std::string::npos,
+            "Invalid member was silently skipped or poisoned another group");
+  }
+
+  auto base = Group(6, {1});
+  base.reference = robot_model::Mosaic_Reference::Robot_Base;
+  base.horizontal_axis = robot_model::Coordinate_Axis::X;
+  base.vertical_axis = robot_model::Coordinate_Axis::Z;
+  options.mosaic_configuration.groups = {base, Group(7, {1})};
+  result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success && !result.groups[0].success && result.groups[1].success &&
+            result.groups[0].message.find("P1") != std::string::npos,
+          "Perpendicular projection was silently dropped");
+  base.vertical_axis = robot_model::Coordinate_Axis::Y;
+  options.mosaic_configuration.groups = {base};
+  invalid = Capture();
+  invalid.point.world_pose[4] = 89.9999999;
+  result = application::Process_Run_Images({invalid}, options);
+  Require(!result.success && result.message.find("P1") != std::string::npos,
+          "Nearly perpendicular projection was accepted");
+
+  for( int failure = 0; failure < 8; ++failure )
+  {
+    auto bad = Group(2, {1});
+    if( failure == 0 ) bad.point_ids.clear();
+    if( failure == 1 ) bad.point_ids = {1, 1};
+    if( failure == 2 ) bad.id = 0;
+    if( failure == 3 ) bad.reference = static_cast<robot_model::Mosaic_Reference>(99);
+    if( failure == 4 )
+    {
+      bad.reference = robot_model::Mosaic_Reference::Robot_Base;
+      bad.horizontal_axis = bad.vertical_axis;
+    }
+    if( failure == 5 ) bad.name.clear();
+    if( failure == 6 ) bad.point_ids = {0};
+    if( failure == 7 )
+    {
+      bad.reference = robot_model::Mosaic_Reference::Robot_Base;
+      bad.horizontal_axis = static_cast<robot_model::Coordinate_Axis>(99);
+    }
+    options.mosaic_configuration.groups = {bad};
+    result = application::Process_Run_Images({Capture()}, options);
+    Require(!result.success && !result.groups[0].message.empty(),
+            "Invalid group configuration was accepted");
+  }
+  options.mosaic_configuration.groups = {Group(2, {1}), Group(2, {1})};
+  result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success && !result.groups[0].success && !result.groups[1].success,
+          "Duplicate group IDs overwrote an output");
+  options.mosaic_configuration.groups = {Group(8, {1}), Group(9, {1})};
+  std::filesystem::create_directory(directory.path / "mosaic_group_8.png");
+  result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success && !result.groups[0].success && result.groups[1].success &&
+            result.mosaic_path == result.groups[1].mosaic_path,
+          "One group save failure prevented another group from completing");
+  options.mosaic_configuration.groups = {Group(10, {77})};
+  invalid = Capture(77);
+  invalid.point.type = robot_model::Robot_Teach_Point_Type::Transition;
+  result = application::Process_Run_Images({invalid}, options);
+  Require(!result.success, "Explicit non-motion member was accepted");
+  options.mosaic_configuration.groups.clear();
+  result = application::Process_Run_Images({Capture(), invalid}, options);
+  Require(result.success && result.mosaic.width == 2,
+          "Default group must include motion points only");
+  invalid = Capture(77);
+  invalid.point.has_world_pose = false;
+  result = application::Process_Run_Images({Capture(), invalid}, options);
+  Require(!result.success && result.message.find("77") != std::string::npos,
+          "Default group silently omitted a member without a pose");
+  options.fov_configuration.length_mm = std::numeric_limits<double>::infinity();
+  result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success, "Infinite FOV was silently normalized");
+  options.fov_configuration.length_mm = 2;
+  options.flange_from_camera_pose[0] = std::numeric_limits<double>::quiet_NaN();
+  result = application::Process_Run_Images({Capture()}, options);
+  Require(!result.success && result.message.find("P1") != std::string::npos,
+          "Invalid camera calibration pose was accepted");
+}
 } // namespace
 
 int main()
@@ -194,6 +457,9 @@ int main()
     Test_Mosaic_Placement();
     Test_Full_Resolution_Path();
     Test_Failures();
+    Test_Group_Isolation_And_Order();
+    Test_Base_Axes_And_Reversal();
+    Test_Group_Failures();
   }
   catch (const std::exception &error)
   {

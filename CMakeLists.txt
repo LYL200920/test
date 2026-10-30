@@ -291,6 +291,7 @@ file(GLOB robot_model_headers CONFIGURE_DEPENDS
 
 # Renderer-independent robot data, kinematics and workflow models.
 set(robot_model_domain_sources
+  src/robot_model/mosaic_configuration.cpp
   src/robot_model/flange_drag_update_coordinator.cpp
   src/robot_model/point_cloud_template_binding.cpp
   src/robot_model/pose_transform.cpp
@@ -609,6 +610,9 @@ if(BUILD_TESTING)
 
   add_project_test(camera_image_converter_tests camera_image_converter_tests.cpp)
   target_link_libraries(camera_image_converter_tests PRIVATE camera)
+
+  add_project_test(mosaic_configuration_tests mosaic_configuration_tests.cpp)
+  target_link_libraries(mosaic_configuration_tests PRIVATE robot_model_io pugixml)
 
   add_project_test(run_image_processing_tests run_image_processing_tests.cpp)
   target_link_libraries(run_image_processing_tests PRIVATE

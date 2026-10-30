@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <unordered_set>
+#include <limits>
+#include <stdexcept>
 
 namespace robot_model
 {
@@ -58,13 +60,11 @@ namespace robot_model
     return false;
   }
 
-  void Robot_Teach_Point_Store::Renumber_Points(
-      Model_Points &model_points)
+  std::size_t Robot_Teach_Point_Store::Allocate_Id(Model_Points &model_points)
   {
-    for (std::size_t index = 0; index < model_points.points.size(); ++index)
-    {
-      model_points.points[index].id = index + 1;
-    }
+    if (model_points.next_id == 0)
+      throw std::overflow_error("Teach point IDs exhausted");
+    return model_points.next_id++;
   }
 
   const Robot_Teach_Point &Robot_Teach_Point_Store::Add_Point(const std::string &robot_model_id,
@@ -82,7 +82,7 @@ namespace robot_model
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
-    point.id = model_points.points.size() + 1;
+    point.id = Allocate_Id(model_points);
     point.robot_model_id = robot_model_id;
     point.joint_angles_deg = joint_angles_deg;
     point.world_pose = world_pose;
@@ -119,6 +119,7 @@ namespace robot_model
   {
     auto &model_points = m_points_by_model[robot_model_id];
     Robot_Teach_Point point;
+    point.id = Allocate_Id(model_points);
     point.robot_model_id = robot_model_id;
     point.joint_angles_deg = joint_angles_deg;
     point.world_pose = world_pose;
@@ -140,7 +141,6 @@ namespace robot_model
     const std::size_t insertion_index =
       static_cast<std::size_t>(insertion - model_points.points.begin());
     model_points.points.insert(insertion, std::move(point));
-    Renumber_Points(model_points);
     return model_points.points[insertion_index];
   }
 
@@ -188,11 +188,12 @@ namespace robot_model
   {
     auto &model_points = m_points_by_model[robot_model_id];
     model_points.points.clear();
+    model_points.next_id = 1;
     model_points.points.reserve(joint_points.size());
     for (const auto &joint_angles : joint_points)
     {
       Robot_Teach_Point point;
-      point.id = model_points.points.size() + 1;
+      point.id = Allocate_Id(model_points);
       point.robot_model_id = robot_model_id;
       point.joint_angles_deg = joint_angles;
       model_points.points.push_back(point);
@@ -209,7 +210,16 @@ namespace robot_model
     {
       point.robot_model_id = robot_model_id;
     }
-    Renumber_Points(model_points);
+    model_points.next_id = 1;
+    for (const auto &point : model_points.points)
+    {
+      if (point.id == std::numeric_limits<std::size_t>::max())
+      {
+        model_points.next_id = 0;
+        break;
+      }
+      model_points.next_id = std::max(model_points.next_id, point.id + 1);
+    }
   }
 
   bool Robot_Teach_Point_Store::Delete_Point(const std::string &robot_model_id,
@@ -219,7 +229,6 @@ namespace robot_model
     if (found == m_points_by_model.end() || index >= found->second.points.size())
       return false;
     found->second.points.erase(found->second.points.begin() + static_cast<std::ptrdiff_t>(index));
-    Renumber_Points(found->second);
     return true;
   }
 
@@ -246,10 +255,6 @@ namespace robot_model
         ++deleted;
       }
     }
-    if (deleted > 0)
-    {
-      Renumber_Points(found->second);
-    }
     return deleted;
   }
 
@@ -257,7 +262,7 @@ namespace robot_model
   {
     auto found = m_points_by_model.find(robot_model_id);
     if (found != m_points_by_model.end())
-      found->second.points.clear();
+      found->second = {};
   }
 
   std::size_t Robot_Teach_Point_Store::Apply_Template_To_Point_Cloud(

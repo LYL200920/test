@@ -125,12 +125,21 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
       Show_Mosaic_Viewer(wxGetTopLevelParent(this), m_mosaic_path);
   });
 
+  m_mosaic_settings = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"拼图设置..."));
+  m_mosaic_settings->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+  { if (m_callbacks.mosaic_settings) m_callbacks.mosaic_settings(); });
+  m_mosaic_groups = new wxChoice(this, wxID_ANY);
+  m_mosaic_groups->Hide();
+  m_mosaic_groups->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { Select_Mosaic_Result(); });
+
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 10);
   sizer->Add(ct_label, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
   sizer->Add(m_ct_value, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 14);
   sizer->Add(m_save_images, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_build_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(m_mosaic_settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(m_mosaic_groups, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(motion_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_run_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
@@ -153,8 +162,56 @@ void Run_Progress_Panel::Set_Mosaic_Path(std::filesystem::path path)
   m_view_mosaic->Enable(!m_mosaic_path.empty());
 }
 
+void Run_Progress_Panel::Set_Mosaic_Settings_Enabled(bool enabled)
+{
+  m_mosaic_settings->Enable(enabled);
+}
+
+void Run_Progress_Panel::Set_Mosaic_Results(
+  std::vector<application::Mosaic_Group_Result> results)
+{
+  Clear_Mosaic();
+  m_mosaic_results = std::move(results);
+  for (const auto &result : m_mosaic_results)
+    m_mosaic_groups->Append(wxString::FromUTF8(result.name) +
+      (result.success ? wxString::FromUTF8(u8" — 成功") : wxString::FromUTF8(u8" — 失败")));
+  if (!m_mosaic_results.empty())
+  {
+    m_mosaic_groups->Show();
+    m_mosaic_groups->SetSelection(0);
+    Select_Mosaic_Result();
+  }
+  Layout();
+}
+
+void Run_Progress_Panel::Select_Mosaic_Result()
+{
+  const int selection = m_mosaic_groups->GetSelection();
+  if (selection < 0 || static_cast<std::size_t>(selection) >= m_mosaic_results.size()) return;
+  const auto &result = m_mosaic_results[selection];
+  m_mosaic_bitmap->SetBitmap(wxNullBitmap);
+  m_mosaic_bitmap->Hide();
+  m_mosaic_title->SetLabel(wxString::FromUTF8(result.name + ": " + result.message));
+  m_mosaic_title->Wrap(360);
+  m_mosaic_title->Show();
+  Set_Mosaic_Path(result.success ? result.mosaic_path : std::filesystem::path{});
+  if (result.success && result.mosaic.width && result.mosaic.height)
+  {
+    wxImage image(static_cast<int>(result.mosaic.width), static_cast<int>(result.mosaic.height));
+    if (image.IsOk() && image.GetData())
+    {
+      std::copy(result.mosaic.rgb.begin(), result.mosaic.rgb.end(), image.GetData());
+      Set_Mosaic_Image(image);
+    }
+  }
+  Layout();
+}
+
 void Run_Progress_Panel::Clear_Mosaic()
 {
+  m_mosaic_results.clear();
+  m_mosaic_groups->Clear();
+  m_mosaic_groups->Hide();
   Set_Mosaic_Path({});
   if (m_mosaic_bitmap)
   {

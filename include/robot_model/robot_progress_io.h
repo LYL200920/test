@@ -2,6 +2,7 @@
 #define includeguard_robot_progress_io_h_includeguard
 
 #include "robot_teach_point.h"
+#include "mosaic_configuration.h"
 
 #include <filesystem>
 #include <string>
@@ -14,6 +15,7 @@ struct Robot_Progress_File
 {
   std::string robot_model_id;
   std::vector<Robot_Teach_Point> points;
+  Mosaic_Configuration mosaic_configuration;
 };
 
 bool Save_Robot_Progress(

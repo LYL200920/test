@@ -2,6 +2,7 @@
 #define includeguard_run_progress_panel_h_includeguard
 
 #include <wx/panel.h>
+#include "run_image_processing.h"
 
 #include <chrono>
 #include <functional>
@@ -29,6 +30,7 @@ public:
   {
     std::function<void()> start;
     std::function<void()> emergency_stop;
+    std::function<void()> mosaic_settings;
   };
 
   explicit Run_Progress_Panel(wxWindow *parent);
@@ -46,6 +48,8 @@ public:
   void Clear_Mosaic();
   void Set_Mosaic_Image(const wxImage &image);
   void Set_Mosaic_Path(std::filesystem::path path);
+  void Set_Mosaic_Results(std::vector<application::Mosaic_Group_Result> results);
+  void Set_Mosaic_Settings_Enabled(bool enabled);
 
 private:
   void Refresh_Run_Button();
@@ -64,6 +68,10 @@ private:
   wxStaticText *m_mosaic_title = nullptr;
   wxStaticBitmap *m_mosaic_bitmap = nullptr;
   wxButton *m_view_mosaic = nullptr;
+  wxButton *m_mosaic_settings = nullptr;
+  wxChoice *m_mosaic_groups = nullptr;
+  std::vector<application::Mosaic_Group_Result> m_mosaic_results;
+  void Select_Mosaic_Result();
   std::filesystem::path m_mosaic_path;
   bool m_progress_ready = false;
   bool m_robot_ready = false;

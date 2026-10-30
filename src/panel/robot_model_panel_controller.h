@@ -30,6 +30,8 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <map>
+#include "mosaic_configuration.h"
 #include <set>
 #include <string>
 #include <thread>
@@ -357,6 +359,8 @@ private:
   bool m_calibration_had_previous_frame = false;
   bool m_run_save_images = false;
   bool m_run_build_mosaic = true;
+  std::map<std::string, robot_model::Mosaic_Configuration> m_mosaic_configurations;
+  robot_model::Mosaic_Configuration m_run_mosaic_configuration;
   bool m_run_linear_motion = false;
   int m_run_motion_speed = 100;
   unsigned long long m_run_previous_frame_number = 0;
