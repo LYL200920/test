@@ -33,6 +33,7 @@ struct Run_Image_Processing_Result
   std::string message;
   Camera_2D_Display_Image mosaic;
   std::size_t processed_count = 0;
+  std::filesystem::path mosaic_path;
 };
 
 // Synchronous worker operation: owns the supplied frames, never accesses a window.

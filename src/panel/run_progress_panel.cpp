@@ -1,4 +1,5 @@
 #include "run_progress_panel.h"
+#include "mosaic_viewer.h"
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
@@ -115,6 +116,14 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_mosaic_bitmap = new wxStaticBitmap(
     this, wxID_ANY, wxNullBitmap);
   m_mosaic_bitmap->Hide();
+  m_view_mosaic = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"独立窗口查看完整拼图..."));
+  m_view_mosaic->Enable(false);
+  m_view_mosaic->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+  {
+    if (!m_mosaic_path.empty())
+      Show_Mosaic_Viewer(wxGetTopLevelParent(this), m_mosaic_path);
+  });
 
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 10);
@@ -131,14 +140,22 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(
     m_mosaic_bitmap, 0,
     wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+  sizer->Add(m_view_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->AddStretchSpacer(1);
   SetSizer(sizer);
   Refresh_Motion_Controls();
   Refresh_Run_Button();
 }
 
+void Run_Progress_Panel::Set_Mosaic_Path(std::filesystem::path path)
+{
+  m_mosaic_path = std::move(path);
+  m_view_mosaic->Enable(!m_mosaic_path.empty());
+}
+
 void Run_Progress_Panel::Clear_Mosaic()
 {
+  Set_Mosaic_Path({});
   if (m_mosaic_bitmap)
   {
     m_mosaic_bitmap->SetBitmap(wxNullBitmap);

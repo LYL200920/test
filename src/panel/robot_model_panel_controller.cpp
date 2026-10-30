@@ -3325,6 +3325,8 @@ void Robot_Model_Panel_Controller::On_Run_Image_Processing_Result(
   {
     m_run_progress_panel->Set_Status(
       result.message, !result.success);
+    m_run_progress_panel->Set_Mosaic_Path(
+      result.success ? result.mosaic_path : std::filesystem::path{});
     if( result.success && result.mosaic.width > 0 &&
         result.mosaic.height > 0 )
     {

@@ -465,6 +465,7 @@ Run_Image_Processing_Result Process_Run_Images(
       else
       {
         result.success = true;
+        result.mosaic_path = image_directory / "mosaic.png";
         result.message =
           "图片与拼图处理完成，共 " +
           std::to_string(converted_count) +

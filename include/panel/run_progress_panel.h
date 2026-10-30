@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <functional>
+#include <filesystem>
 #include <string>
 
 class wxButton;
@@ -44,6 +45,7 @@ public:
   void Set_Status(const std::string &status, bool error = false);
   void Clear_Mosaic();
   void Set_Mosaic_Image(const wxImage &image);
+  void Set_Mosaic_Path(std::filesystem::path path);
 
 private:
   void Refresh_Run_Button();
@@ -61,6 +63,8 @@ private:
   wxStaticText *m_status = nullptr;
   wxStaticText *m_mosaic_title = nullptr;
   wxStaticBitmap *m_mosaic_bitmap = nullptr;
+  wxButton *m_view_mosaic = nullptr;
+  std::filesystem::path m_mosaic_path;
   bool m_progress_ready = false;
   bool m_robot_ready = false;
   bool m_running = false;

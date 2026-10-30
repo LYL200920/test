@@ -10,6 +10,7 @@
 #include "robot_connection_controller.h"
 #include "template_configuration_repository.h"
 #include "template_settings_dialog.h"
+#include "mosaic_viewer.h"
 
 #include <filesystem>
 #include <memory>
@@ -21,7 +22,8 @@ namespace
   {
     ID_3D_CAMERA_CONFIG = wxID_HIGHEST + 1,
     ID_ROBOT_MODEL_CONFIG,
-    ID_TEMPLATE_CONFIG
+    ID_TEMPLATE_CONFIG,
+    ID_MOSAIC_VIEWER
   };
 }
 
@@ -73,7 +75,13 @@ private:
       ID_TEMPLATE_CONFIG,
       wxString::FromUTF8(u8"模板配置...\tCtrl+Shift+T"));
     menu_bar->Append(settings_menu, wxString::FromUTF8(u8"设置"));
+    auto *view_menu = new wxMenu();
+    view_menu->Append(ID_MOSAIC_VIEWER,
+      wxString::FromUTF8(u8"打开拼图...\tCtrl+Shift+M"));
+    menu_bar->Append(view_menu, wxString::FromUTF8(u8"查看"));
     SetMenuBar(menu_bar);
+    Bind(wxEVT_MENU, [this](wxCommandEvent &) { Show_Mosaic_Viewer(this); },
+         ID_MOSAIC_VIEWER);
 
     Bind(wxEVT_MENU, &Test_Frame::On_3D_Camera_Config, this, ID_3D_CAMERA_CONFIG);
     Bind(wxEVT_MENU, &Test_Frame::On_Robot_Model_Config, this, ID_ROBOT_MODEL_CONFIG);
