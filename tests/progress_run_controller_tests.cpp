@@ -91,6 +91,40 @@ void Test_Emergency_Stop_Waits_For_Confirmation()
   transition = controller.Stop_Confirmed();
   Require(transition.state == Progress_Run_State::Failed, "stopped state");
   Require(transition.action == Progress_Run_Action::Finish, "stopped finish action");
+  Require(transition.message.find("physical/safe stop is not confirmed") !=
+            std::string::npos, "STOP DONE must not claim safe stop");
+}
+
+void Test_Stop_Timeout_Failure_And_Disconnect()
+{
+  Progress_Run_Controller controller;
+  controller.Start({false, false});
+  controller.Request_Emergency_Stop();
+  Require(controller.Request_Emergency_Stop().action == Progress_Run_Action::None,
+          "duplicate stop must not resubmit or extend deadline");
+  Require(controller.Motion_Completed().action == Progress_Run_Action::None,
+          "motion completion is not STOP confirmation");
+  auto transition = controller.Stop_Timed_Out();
+  Require(transition.state == Progress_Run_State::Failed &&
+            transition.action == Progress_Run_Action::Finish &&
+            transition.message.find("unconfirmed") != std::string::npos,
+          "STOP timeout must finish with an explicit unconfirmed result");
+  Require(controller.Stop_Confirmed().action == Progress_Run_Action::None,
+          "late STOP DONE must not reopen a timed-out run");
+  controller.Start({false});
+  Require(controller.Stop_Confirmed().action == Progress_Run_Action::None,
+          "old STOP DONE must not stop a newer run");
+  controller.Request_Emergency_Stop();
+  transition = controller.Effect_Failed("STOP FAILED; stop unconfirmed");
+  Require(transition.state == Progress_Run_State::Failed &&
+            transition.message == "STOP FAILED; stop unconfirmed",
+          "STOP FAILED must retain its failure reason");
+  controller.Start({false});
+  controller.Request_Emergency_Stop();
+  transition = controller.Robot_Became_Unavailable("disconnected; stop unconfirmed");
+  Require(transition.state == Progress_Run_State::Failed &&
+            transition.message == "disconnected; stop unconfirmed",
+          "disconnect while stopping is failure, not confirmation");
 }
 
 void Test_Invalid_Events_Do_Not_Advance()
@@ -135,6 +169,7 @@ int main()
     Test_Image_Points_Wait_And_Process();
     Test_Timeout_Fails_Run();
     Test_Emergency_Stop_Waits_For_Confirmation();
+    Test_Stop_Timeout_Failure_And_Disconnect();
     Test_Invalid_Events_Do_Not_Advance();
     Test_Robot_And_Processing_Failures_Are_Explicit();
   }

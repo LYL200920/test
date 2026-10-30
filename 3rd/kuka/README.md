@@ -5,8 +5,9 @@
 
 ## Deployment
 
-1. Copy `TCP_Test.src/.dat`, `KUKA_Server.src/.dat`, and the EKI XML file to
-   the controller using the paths required by the installed KSS/EKI version.
+1. Copy `TCP_Test.src/.dat`, `KUKA_Server.src/.dat`, `PLC_Rotation.src/.dat`,
+   and the EKI XML file to the controller using the paths required by the
+   installed KSS/EKI version.
 2. Confirm that the XML IP and port match the PC running `test`.
 3. Compile/select `KUKA_SERVER` on the controller.
 4. Put the controller in the operating mode required by the site safety
@@ -16,6 +17,13 @@
 
 The application and KRL program both use `;` (ASCII 59) as the frame
 terminator. Do not append CR/LF to KUKA frames.
+
+## PLC rotation
+
+Send `V1,C,<sequence>,PLC_ROTATION;` to execute `PLC_Rotation()`. The server
+reports `ACCEPTED` and `RUNNING`, then reports `DONE` after input `$IN[7]`
+becomes true and the routine clears `$OUT[2]`. The application's TCP test
+field accepts this command and appends the semicolon when it is omitted.
 
 ## Units
 

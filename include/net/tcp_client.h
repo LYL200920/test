@@ -2,7 +2,9 @@
 #define includeguard_tcp_client_h_includeguard
 
 #include <asio/asio.hpp>
+#include <array>
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -33,10 +35,14 @@ public:
   bool is_connected() const;
 
 private:
-  void do_resolve();
-  void do_connect(tcp::resolver::results_type endpoints);
-  void do_read();
-  void do_write();
+  friend struct tcp_client_test_access;
+
+  void do_resolve(std::uint64_t generation);
+  void do_connect(std::uint64_t generation, tcp::resolver::results_type endpoints);
+  void do_read(std::uint64_t generation);
+  void do_write(std::uint64_t generation);
+  bool is_current(std::uint64_t generation) const;
+  void fail_connection(std::uint64_t generation, const std::string &info);
   void close_socket();
   void clear_write_queue();
   void notify_status(bool ok, const std::string &info);
@@ -49,7 +55,7 @@ private:
   std::optional<asio::executor_work_guard<asio::io_context::executor_type>> m_work_guard;
   std::thread m_io_thread;
 
-  tcp::socket m_socket;
+  std::shared_ptr<tcp::socket> m_socket;
   tcp::resolver m_resolver;
 
   std::string m_host;
@@ -57,6 +63,7 @@ private:
 
   std::atomic<bool> m_connected{false};
   std::atomic<bool> m_stop{false};
+  std::atomic<std::uint64_t> m_generation{0};
 
   status_cb m_status_cb;
   recv_cb m_recv_cb;
@@ -65,9 +72,6 @@ private:
   std::queue<std::string> m_write_queue;
   std::recursive_mutex m_write_mtx;
   bool m_writing = false;
-  std::string m_current_write;
-
-  std::array<char, 4096> m_read_buf;
 };
 
 #endif

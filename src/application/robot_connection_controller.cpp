@@ -6,6 +6,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <unordered_map>
+#include <vector>
 
 namespace application
 {
@@ -36,7 +38,12 @@ Robot_Control_State Convert_Control_State(kuka::Control_State state)
 Robot_Connection_Status Convert_Status(const kuka::Service_Status &status)
 {
   return {Convert_Control_State(status.state),
-          status.active_sequence, status.detail};
+          status.active_sequence, status.detail, status.stop_sequence,
+          status.stop_result == kuka::Stop_Result::Done
+            ? Robot_Stop_Result::Done
+            : status.stop_result == kuka::Stop_Result::Failed
+              ? Robot_Stop_Result::Failed : Robot_Stop_Result::None,
+          status.stop_detail};
 }
 
 Robot_Actual_State Convert_State(const kuka::Robot_State &state)
@@ -53,27 +60,51 @@ Robot_Actual_State Convert_State(const kuka::Robot_State &state)
   return result;
 }
 
+// Service snapshots can outlive the backend. Keep their forwarding state alive
+// independently, and never hold its mutex while calling application code.
+struct Backend_Observer_Bridge
+{
+  Robot_Backend_Observer Snapshot() const
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    return observer;
+  }
+
+  void Set(Robot_Backend_Observer value)
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    std::swap(observer, value);
+  }
+
+  mutable std::mutex mutex;
+  Robot_Backend_Observer observer;
+};
+
 class Kuka_Robot_Backend final : public Robot_Connection_Backend
 {
 public:
   Kuka_Robot_Backend()
     : m_service(std::make_shared<kuka::Robot_Service>())
   {
+    const auto bridge = m_observer_bridge;
     kuka::Service_Observer observer;
-    observer.connection = [this](bool connected, const std::string &detail)
+    observer.connection = [bridge](bool connected, const std::string &detail)
     {
-      if( m_observer.connection ) m_observer.connection(connected, detail);
+      const auto target = bridge->Snapshot();
+      if( target.connection ) target.connection(connected, detail);
     };
-    observer.service_status = [this](const kuka::Service_Status &status)
+    observer.service_status = [bridge](const kuka::Service_Status &status)
     {
-      if( m_observer.status ) m_observer.status(Convert_Status(status));
+      const auto target = bridge->Snapshot();
+      if( target.status ) target.status(Convert_Status(status));
     };
     observer.robot_state =
-      [this](const kuka::Robot_State &state, std::uint64_t revision)
+      [bridge](const kuka::Robot_State &state, std::uint64_t revision)
     {
-      if( m_observer.robot_state )
-        m_observer.robot_state(Convert_State(state), revision);
-      if( m_observer.event_log )
+      const auto target = bridge->Snapshot();
+      if( target.robot_state )
+        target.robot_state(Convert_State(state), revision);
+      if( target.event_log )
       {
         std::ostringstream log;
         log << "STATE " << state.motion_state
@@ -92,37 +123,40 @@ public:
         }
         log << "] base=" << state.base << " tool=" << state.tool
             << " ov=" << state.override_percent << '%';
-        m_observer.event_log(log.str());
+        target.event_log(log.str());
       }
     };
-    observer.acknowledgement = [this](const kuka::Acknowledgement &ack)
+    observer.acknowledgement = [bridge](const kuka::Acknowledgement &ack)
     {
-      if( !m_observer.event_log ) return;
+      const auto target = bridge->Snapshot();
+      if( !target.event_log ) return;
       std::ostringstream log;
       log << "ACK seq=" << ack.sequence
           << " state=" << kuka::To_String(ack.state)
           << " code=" << ack.error_code
           << " detail=" << ack.detail;
-      m_observer.event_log(log.str());
+      target.event_log(log.str());
     };
     observer.protocol_error =
-      [this](const std::string &error, const std::string &frame)
+      [bridge](const std::string &error, const std::string &frame)
     {
-      if( m_observer.event_log )
-        m_observer.event_log("Protocol error: " + error + " frame=" + frame);
+      const auto target = bridge->Snapshot();
+      if( target.event_log )
+        target.event_log("Protocol error: " + error + " frame=" + frame);
     };
     m_observer_token = m_service->Subscribe(std::move(observer));
   }
 
   ~Kuka_Robot_Backend() override
   {
+    m_observer_bridge->Set({});
     m_service->Unsubscribe(m_observer_token);
     m_service->Disconnect();
   }
 
   void Set_Observer(Robot_Backend_Observer observer) override
   {
-    m_observer = std::move(observer);
+    m_observer_bridge->Set(std::move(observer));
   }
   void Connect(const std::string &host, unsigned short port) override
   {
@@ -185,9 +219,41 @@ private:
 
   std::shared_ptr<kuka::Robot_Service> m_service;
   kuka::Robot_Service::Observer_Token m_observer_token = 0;
-  Robot_Backend_Observer m_observer;
+  std::shared_ptr<Backend_Observer_Bridge> m_observer_bridge =
+    std::make_shared<Backend_Observer_Bridge>();
 };
 } // namespace
+
+// One recursive gate for the entire dispatch domain avoids lock-order cycles
+// when callbacks unsubscribe themselves or each other. Snapshots contain tokens,
+// not callbacks: a callback removed by an earlier notification is never started.
+// Backend callbacks own this state, not the controller, so stale backend copies
+// can check owner under the gate without dereferencing a destroyed controller.
+struct Robot_Connection_Controller::Observer_Dispatch
+{
+  template<typename Callback, typename... Arguments>
+  void Notify(Callback Robot_Connection_Observer::*member,
+              const Arguments &...arguments)
+  {
+    std::vector<Observer_Token> snapshot;
+    snapshot.reserve(observers.size());
+    for( const auto &entry : observers ) snapshot.push_back(entry.first);
+    for( const auto token : snapshot )
+    {
+      const auto found = observers.find(token);
+      if( found == observers.end() ) continue;
+      // Keep the callable alive if it unsubscribes itself while executing.
+      const auto observer = found->second;
+      if( observer.get()->*member ) (observer.get()->*member)(arguments...);
+    }
+  }
+
+  std::recursive_mutex mutex;
+  Robot_Connection_Controller *owner = nullptr;
+  std::unordered_map<Observer_Token,
+                     std::shared_ptr<Robot_Connection_Observer>> observers;
+  Observer_Token next_token = 1;
+};
 
 Robot_Connection_Controller::Robot_Connection_Controller()
   : Robot_Connection_Controller(std::make_shared<Kuka_Robot_Backend>())
@@ -196,7 +262,8 @@ Robot_Connection_Controller::Robot_Connection_Controller()
 
 Robot_Connection_Controller::Robot_Connection_Controller(
   std::shared_ptr<Robot_Connection_Backend> backend)
-  : m_backend(std::move(backend))
+  : m_backend(std::move(backend)),
+    m_observer_dispatch(std::make_shared<Observer_Dispatch>())
 {
   if( !m_backend )
     throw std::invalid_argument("Robot connection backend is null.");
@@ -206,51 +273,67 @@ Robot_Connection_Controller::Robot_Connection_Controller(
 
 Robot_Connection_Controller::~Robot_Connection_Controller()
 {
+  {
+    const auto dispatch = m_observer_dispatch;
+    std::lock_guard<std::recursive_mutex> lock(dispatch->mutex);
+    dispatch->owner = nullptr;
+    dispatch->observers.clear();
+  }
+  // Disconnect may join a network thread: never hold the dispatch gate here.
   m_backend->Set_Observer({});
   m_backend->Disconnect();
 }
 
 void Robot_Connection_Controller::Bind_Backend()
 {
+  const auto dispatch = m_observer_dispatch;
+  dispatch->owner = this;
   Robot_Backend_Observer observer;
-  observer.connection = [this](bool connected, const std::string &detail)
+  observer.connection = [dispatch](bool connected, const std::string &detail)
   {
+    std::lock_guard<std::recursive_mutex> gate(dispatch->mutex);
+    auto *owner = dispatch->owner;
+    if( !owner ) return;
     {
-      std::lock_guard<std::mutex> lock(m_state_mutex);
-      m_connecting = false;
-      if( !connected ) m_has_latest_state = false;
+      std::lock_guard<std::mutex> lock(owner->m_state_mutex);
+      owner->m_connecting = false;
+      if( !connected ) owner->m_has_latest_state = false;
     }
-    for( const auto &entry : Observer_Snapshot() )
-      if( entry.connection ) entry.connection(connected, detail);
+    dispatch->Notify(&Robot_Connection_Observer::connection, connected, detail);
   };
-  observer.status = [this](const Robot_Connection_Status &status)
+  observer.status = [dispatch](const Robot_Connection_Status &status)
   {
+    std::lock_guard<std::recursive_mutex> gate(dispatch->mutex);
+    auto *owner = dispatch->owner;
+    if( !owner ) return;
     {
-      std::lock_guard<std::mutex> lock(m_state_mutex);
-      m_status = status;
+      std::lock_guard<std::mutex> lock(owner->m_state_mutex);
+      owner->m_status = status;
       if( status.state == Robot_Control_State::Disconnected )
-        m_has_latest_state = false;
+        owner->m_has_latest_state = false;
     }
-    for( const auto &entry : Observer_Snapshot() )
-      if( entry.status ) entry.status(status);
+    dispatch->Notify(&Robot_Connection_Observer::status, status);
   };
   observer.robot_state =
-    [this](const Robot_Actual_State &state, std::uint64_t revision)
+    [dispatch](const Robot_Actual_State &state, std::uint64_t revision)
   {
+    std::lock_guard<std::recursive_mutex> gate(dispatch->mutex);
+    auto *owner = dispatch->owner;
+    if( !owner ) return;
     {
-      std::lock_guard<std::mutex> lock(m_state_mutex);
-      if( revision <= m_state_revision ) return;
-      m_latest_state = state;
-      m_has_latest_state = true;
-      m_state_revision = revision;
+      std::lock_guard<std::mutex> lock(owner->m_state_mutex);
+      if( revision <= owner->m_state_revision ) return;
+      owner->m_latest_state = state;
+      owner->m_has_latest_state = true;
+      owner->m_state_revision = revision;
     }
-    for( const auto &entry : Observer_Snapshot() )
-      if( entry.robot_state ) entry.robot_state(state, revision);
+    dispatch->Notify(&Robot_Connection_Observer::robot_state, state, revision);
   };
-  observer.event_log = [this](const std::string &message)
+  observer.event_log = [dispatch](const std::string &message)
   {
-    for( const auto &entry : Observer_Snapshot() )
-      if( entry.event_log ) entry.event_log(message);
+    std::lock_guard<std::recursive_mutex> gate(dispatch->mutex);
+    if( !dispatch->owner ) return;
+    dispatch->Notify(&Robot_Connection_Observer::event_log, message);
   };
   m_backend->Set_Observer(std::move(observer));
 }
@@ -399,26 +482,19 @@ void Robot_Connection_Controller::Send_Raw(std::string frame)
 Robot_Connection_Controller::Observer_Token
 Robot_Connection_Controller::Subscribe(Robot_Connection_Observer observer)
 {
-  std::lock_guard<std::mutex> lock(m_observer_mutex);
-  const auto token = m_next_observer_token++;
-  m_observers.emplace(token, std::move(observer));
+  const auto dispatch = m_observer_dispatch;
+  std::lock_guard<std::recursive_mutex> lock(dispatch->mutex);
+  const auto token = dispatch->next_token++;
+  dispatch->observers.emplace(token,
+    std::make_shared<Robot_Connection_Observer>(std::move(observer)));
   return token;
 }
 
 void Robot_Connection_Controller::Unsubscribe(Observer_Token token)
 {
-  std::lock_guard<std::mutex> lock(m_observer_mutex);
-  m_observers.erase(token);
-}
-
-std::vector<Robot_Connection_Observer>
-Robot_Connection_Controller::Observer_Snapshot() const
-{
-  std::vector<Robot_Connection_Observer> result;
-  std::lock_guard<std::mutex> lock(m_observer_mutex);
-  result.reserve(m_observers.size());
-  for( const auto &entry : m_observers ) result.push_back(entry.second);
-  return result;
+  const auto dispatch = m_observer_dispatch;
+  std::lock_guard<std::recursive_mutex> lock(dispatch->mutex);
+  dispatch->observers.erase(token);
 }
 
 const char *To_String(Robot_Control_State state)

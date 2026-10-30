@@ -48,7 +48,9 @@ public:
   Progress_Run_Transition Image_Captured();
   Progress_Run_Transition Image_Timed_Out();
   Progress_Run_Transition Request_Emergency_Stop();
+  // Only a matching STOP DONE reply may call this; not a safety guarantee.
   Progress_Run_Transition Stop_Confirmed();
+  Progress_Run_Transition Stop_Timed_Out();
   Progress_Run_Transition Robot_Became_Unavailable(std::string message);
   Progress_Run_Transition Effect_Failed(std::string message);
   Progress_Run_Transition Image_Processing_Completed(

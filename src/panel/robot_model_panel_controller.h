@@ -17,6 +17,7 @@
 #include "camera_calibration_progress_controller.h"
 #include "camera_calibration_progress_host.h"
 #include "progress_run_controller.h"
+#include "run_image_processing.h"
 #include "robot_connection_controller.h"
 
 #include <wx/panel.h>
@@ -244,11 +245,7 @@ private:
     Full
   };
 
-  struct Run_Captured_Frame
-  {
-    std::shared_ptr<const jutze_camera::camera_frame> frame;
-    robot_model::Robot_Teach_Point point;
-  };
+  using Run_Captured_Frame = application::Run_Captured_Frame;
 
   struct Playback_Cloud_Switch
   {
@@ -366,6 +363,9 @@ private:
   bool m_run_had_previous_frame = false;
   std::chrono::steady_clock::time_point m_run_started_at;
   std::chrono::steady_clock::time_point m_run_image_deadline;
+  // Progress and calibration runs are mutually exclusive.
+  std::uint32_t m_progress_stop_sequence = 0;
+  std::chrono::steady_clock::time_point m_progress_stop_deadline;
   std::filesystem::path m_run_image_directory;
   std::vector<Run_Captured_Frame> m_run_captured_frames;
   std::thread m_run_image_processing_thread;

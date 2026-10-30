@@ -3,9 +3,8 @@
 #include <utility>
 
 tcp_client::tcp_client()
-    : m_socket(m_ctx), m_resolver(m_ctx)
+    : m_socket(std::make_shared<tcp::socket>(m_ctx)), m_resolver(m_ctx)
 {
-  m_read_buf.fill(0);
 }
 
 tcp_client::~tcp_client()
@@ -30,19 +29,30 @@ void tcp_client::connect(const std::string &host, unsigned short port)
   if (m_connected)
     return;
 
-  m_host = host;
-  m_port = port;
+  const auto generation = ++m_generation;
   m_stop = false;
-
   start_io_thread();
 
-  asio::post(m_ctx, [this, self = shared_from_this()]
-             { do_resolve(); });
+  asio::post(m_ctx, [this, self = shared_from_this(), generation, host, port]
+             {
+               if (!is_current(generation))
+                 return;
+
+               m_resolver.cancel();
+               close_socket();
+               clear_write_queue();
+               // Composed operations retain the old socket until completion.
+               m_socket = std::make_shared<tcp::socket>(m_ctx);
+               m_host = host;
+               m_port = port;
+               do_resolve(generation);
+             });
 }
 
 void tcp_client::disconnect()
 {
   m_stop = true;
+  ++m_generation;
   if (m_io_thread.joinable())
   {
     asio::post(m_ctx,
@@ -65,16 +75,20 @@ void tcp_client::disconnect()
 
 void tcp_client::send(const std::string &msg)
 {
+  const auto generation = m_generation.load();
   if (!m_connected || msg.empty())
     return;
 
   asio::post(m_ctx,
-             [this, self = shared_from_this(), msg]
+             [this, self = shared_from_this(), generation, msg]
              {
+               if (!is_current(generation) || !m_connected)
+                 return;
+
                std::lock_guard<std::recursive_mutex> lock(m_write_mtx);
                m_write_queue.push(msg);
                if (!m_writing)
-                 do_write();
+                 do_write(generation);
              });
 }
 
@@ -83,101 +97,115 @@ bool tcp_client::is_connected() const
   return m_connected;
 }
 
-void tcp_client::do_resolve()
+bool tcp_client::is_current(std::uint64_t generation) const
 {
-  if (m_stop)
+  return !m_stop && generation == m_generation.load();
+}
+
+void tcp_client::fail_connection(std::uint64_t generation, const std::string &info)
+{
+  if (!is_current(generation))
+    return;
+
+  ++m_generation;
+  m_connected = false;
+  m_resolver.cancel();
+  close_socket();
+  clear_write_queue();
+  // Finish cleanup before callbacks are allowed to request a new connection.
+  notify_status(false, info);
+}
+
+void tcp_client::do_resolve(std::uint64_t generation)
+{
+  if (!is_current(generation))
     return;
 
   auto self = shared_from_this();
   m_resolver.async_resolve(m_host, std::to_string(m_port),
-                           [this, self](std::error_code ec, tcp::resolver::results_type results)
+                           [this, self, generation](std::error_code ec, tcp::resolver::results_type results)
                            {
+                             if (!is_current(generation))
+                               return;
                              if (ec)
                              {
-                               if (!m_stop)
-                                 notify_status(false, "Resolve failed: " + ec.message());
+                               fail_connection(generation, "Resolve failed: " + ec.message());
                                return;
                              }
-                             do_connect(results);
+                             do_connect(generation, results);
                            });
 }
 
-void tcp_client::do_connect(tcp::resolver::results_type endpoints)
+void tcp_client::do_connect(std::uint64_t generation, tcp::resolver::results_type endpoints)
 {
-  if (m_stop)
+  if (!is_current(generation))
     return;
 
   auto self = shared_from_this();
-  asio::async_connect(m_socket, endpoints,
-                      [this, self](std::error_code ec, const tcp::endpoint &)
+  auto socket = m_socket;
+  asio::async_connect(*socket, endpoints,
+                      [this, self, socket, generation](std::error_code ec, const tcp::endpoint &)
                       {
+                        if (!is_current(generation))
+                          return;
                         if (ec)
                         {
-                          if (!m_stop)
-                            notify_status(false, "Connect failed: " + ec.message());
-                          return;
-                        }
-
-                        if (m_stop)
-                        {
-                          close_socket();
+                          fail_connection(generation, "Connect failed: " + ec.message());
                           return;
                         }
 
                         // Robot-control messages are short and latency-sensitive.
                         // Disable Nagle aggregation once the connection is ready.
                         std::error_code option_ec;
-                        m_socket.set_option(tcp::no_delay(true), option_ec);
+                        socket->set_option(tcp::no_delay(true), option_ec);
                         if (option_ec)
                         {
-                          close_socket();
-                          notify_status(false, "TCP_NODELAY failed: " +
-                                                   option_ec.message());
+                          fail_connection(generation, "TCP_NODELAY failed: " +
+                                                          option_ec.message());
                           return;
                         }
 
                         m_connected = true;
                         notify_status(true, "Connected to " + m_host + ":" + std::to_string(m_port));
-                        do_read();
+                        do_read(generation);
                       });
 }
 
-void tcp_client::do_read()
+void tcp_client::do_read(std::uint64_t generation)
 {
-  if (!m_connected || m_stop)
+  if (!is_current(generation) || !m_connected)
     return;
 
   auto self = shared_from_this();
-  m_socket.async_read_some(asio::buffer(m_read_buf),
-                           [this, self](std::error_code ec, std::size_t bytes)
+  auto socket = m_socket;
+  auto buffer = std::make_shared<std::array<char, 4096>>();
+  socket->async_read_some(asio::buffer(*buffer),
+                           [this, self, socket, buffer, generation](std::error_code ec, std::size_t bytes)
                            {
+                             if (!is_current(generation))
+                               return;
                              if (ec)
                              {
-                               m_connected = false;
-                               if (!m_stop)
-                               {
-                                 if (ec == asio::error::eof)
-                                   notify_status(false, "Disconnected (EOF)");
-                                 else
-                                   notify_status(false, "Read error: " + ec.message());
-                               }
-                               close_socket();
+                               fail_connection(generation,
+                                               ec == asio::error::eof
+                                                   ? "Disconnected (EOF)"
+                                                   : "Read error: " + ec.message());
                                return;
                              }
 
                              if (bytes > 0)
                              {
-                               std::string msg(m_read_buf.data(), bytes);
+                               std::string msg(buffer->data(), bytes);
                                notify_recv(msg);
                              }
 
-                             do_read();
+                             do_read(generation);
                            });
 }
 
-void tcp_client::do_write()
+void tcp_client::do_write(std::uint64_t generation)
 {
-  if (!m_connected || m_stop)
+  if (!is_current(generation) || !m_connected)
     return;
 
   std::lock_guard<std::recursive_mutex> lock(m_write_mtx);
@@ -188,32 +216,32 @@ void tcp_client::do_write()
   }
 
   m_writing = true;
-  m_current_write = std::move(m_write_queue.front());
+  // Queue cleanup must not invalidate buffers still owned by async_write.
+  auto buffer = std::make_shared<std::string>(std::move(m_write_queue.front()));
   m_write_queue.pop();
 
   auto self = shared_from_this();
-  asio::async_write(m_socket, asio::buffer(m_current_write),
-                    [this, self](std::error_code ec, std::size_t)
+  auto socket = m_socket;
+  asio::async_write(*socket, asio::buffer(*buffer),
+                    [this, self, socket, buffer, generation](std::error_code ec, std::size_t)
                     {
-                      m_current_write.clear();
+                      if (!is_current(generation))
+                        return;
                       if (ec)
                       {
-                        m_connected = false;
-                        if (!m_stop)
-                          notify_status(false, "Write error: " + ec.message());
-                        close_socket();
+                        fail_connection(generation, "Write error: " + ec.message());
                         return;
                       }
 
-                      do_write();
+                      do_write(generation);
                     });
 }
 
 void tcp_client::close_socket()
 {
   std::error_code ec;
-  m_socket.shutdown(tcp::socket::shutdown_both, ec);
-  m_socket.close(ec);
+  m_socket->shutdown(tcp::socket::shutdown_both, ec);
+  m_socket->close(ec);
 }
 
 void tcp_client::clear_write_queue()
@@ -221,7 +249,6 @@ void tcp_client::clear_write_queue()
   std::lock_guard<std::recursive_mutex> lock(m_write_mtx);
   std::queue<std::string> empty;
   m_write_queue.swap(empty);
-  m_current_write.clear();
   m_writing = false;
 }
 

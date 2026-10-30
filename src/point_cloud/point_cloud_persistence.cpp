@@ -1,10 +1,13 @@
 #include "point_cloud_persistence.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <utility>
 
 namespace point_cloud
 {
@@ -13,6 +16,14 @@ namespace point_cloud
 
     constexpr const char *kApplicationMarker = "comment application robot_point_cloud_overlay";
     constexpr std::size_t kMaximumFilePoints = 10000000;
+    constexpr std::size_t kMaximumHeaderBytes = 65536;
+
+    template<typename Integer>
+    bool parse_integer(const std::string &text, Integer *value)
+    {
+      const auto result = std::from_chars(text.data(), text.data() + text.size(), *value);
+      return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+    }
 
     void set_error(std::string *error_message, const std::string &message)
     {
@@ -22,7 +33,9 @@ namespace point_cloud
 
     bool is_safe_comment_value(const std::string &value)
     {
-      return value.find('\n') == std::string::npos && value.find('\r') == std::string::npos;
+      return value.find('\n') == std::string::npos &&
+             value.find('\r') == std::string::npos &&
+             value.find('\0') == std::string::npos;
     }
 
     bool starts_with(const std::string &text, const std::string &prefix)
@@ -71,14 +84,8 @@ namespace point_cloud
       return false;
     }
 
-    const auto temporary_path = path.string() + ".tmp";
-    std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
-    if (!file)
-    {
-      set_error(error_message, "Unable to create point-cloud file");
-      return false;
-    }
-    file << "ply\n"
+    std::ostringstream header;
+    header << "ply\n"
          << "format binary_little_endian 1.0\n"
          << kApplicationMarker << '\n'
          << "comment coordinate_frame " << metadata.coordinate_frame << '\n'
@@ -92,10 +99,24 @@ namespace point_cloud
          << "property float x\nproperty float y\nproperty float z\n";
     if (cloud.Has_Color())
     {
-      file << "property uchar red\nproperty uchar green\nproperty uchar blue\n";
+      header << "property uchar red\nproperty uchar green\nproperty uchar blue\n";
     }
-    file << "end_header\n";
+    header << "end_header\n";
+    const auto header_text = header.str();
+    if (header_text.size() > kMaximumHeaderBytes)
+    {
+      set_error(error_message, "PLY header is too large");
+      return false;
+    }
 
+    const auto temporary_path = path.string() + ".tmp";
+    std::ofstream file(temporary_path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+      set_error(error_message, "Unable to create point-cloud file");
+      return false;
+    }
+    file << header_text;
     for (std::size_t index = 0; index < cloud.Point_Count(); ++index)
     {
       const float *xyz = cloud.xyz.data() + index * 3;
@@ -138,13 +159,15 @@ namespace point_cloud
   {
     if (error_message)
       error_message->clear();
+    if (cloud)
+      *cloud = {};
+    if (metadata)
+      *metadata = {};
     if (cloud == nullptr || metadata == nullptr)
     {
       set_error(error_message, "Point-cloud output is null");
       return false;
     }
-    *cloud = {};
-    *metadata = {};
     std::ifstream file(path, std::ios::binary);
     if (!file)
     {
@@ -152,37 +175,69 @@ namespace point_cloud
       return false;
     }
 
+    Point_Cloud_Data loaded;
+    Point_Cloud_File_Metadata loaded_metadata;
     std::string line;
     bool saw_ply = false;
     bool saw_format = false;
     bool saw_application = false;
     bool saw_end_header = false;
-    bool has_color = false;
+    bool saw_vertex = false;
     std::size_t vertex_count = 0;
     std::size_t property_count = 0;
-    while (std::getline(file, line))
+    std::size_t header_bytes = 0;
+    const std::array<const char *, 6> properties = {
+        "property float x", "property float y", "property float z",
+        "property uchar red", "property uchar green", "property uchar blue"};
+    // Bound line reads as well as the total header before allocating point data.
+    std::array<char, kMaximumHeaderBytes + 1> header_line{};
+    while (file.getline(header_line.data(), header_line.size()))
     {
+      header_bytes += static_cast<std::size_t>(file.gcount());
+      if (header_bytes > kMaximumHeaderBytes)
+      {
+        set_error(error_message, "PLY header is too large");
+        return false;
+      }
+      line.assign(header_line.data(), static_cast<std::size_t>(file.gcount()) -
+                  (file.eof() ? 0 : 1));
+      if (line.find('\0') != std::string::npos)
+      {
+        set_error(error_message, "PLY header contains a null byte");
+        return false;
+      }
       if (!line.empty() && line.back() == '\r')
         line.pop_back();
-      if (line == "ply")
+      if (!saw_ply)
+      {
+        if (line != "ply")
+        {
+          set_error(error_message, "Invalid PLY signature");
+          return false;
+        }
         saw_ply = true;
-      else if (line == "format binary_little_endian 1.0")
+      }
+      else if (!saw_format)
+      {
+        if (line != "format binary_little_endian 1.0")
+        {
+          set_error(error_message, "Unsupported PLY format");
+          return false;
+        }
         saw_format = true;
+      }
       else if (line == kApplicationMarker)
         saw_application = true;
       else if (starts_with(line, "comment coordinate_frame "))
-        metadata->coordinate_frame = comment_value(line, "coordinate_frame");
+        loaded_metadata.coordinate_frame = comment_value(line, "coordinate_frame");
       else if (starts_with(line, "comment unit "))
-        metadata->unit = comment_value(line, "unit");
+        loaded_metadata.unit = comment_value(line, "unit");
       else if (starts_with(line, "comment robot_model "))
-        metadata->robot_model = comment_value(line, "robot_model");
+        loaded_metadata.robot_model = comment_value(line, "robot_model");
       else if (starts_with(line, "comment source_frame_number "))
       {
-        try
-        {
-          metadata->source_frame_number = static_cast<std::uint32_t>(std::stoul(comment_value(line, "source_frame_number")));
-        }
-        catch (...)
+        if (!parse_integer(comment_value(line, "source_frame_number"),
+                           &loaded_metadata.source_frame_number))
         {
           set_error(error_message, "Invalid source frame metadata");
           return false;
@@ -190,11 +245,8 @@ namespace point_cloud
       }
       else if (starts_with(line, "comment saved_unix_milliseconds "))
       {
-        try
-        {
-          metadata->saved_unix_milliseconds = std::stoll(comment_value(line, "saved_unix_milliseconds"));
-        }
-        catch (...)
+        if (!parse_integer(comment_value(line, "saved_unix_milliseconds"),
+                           &loaded_metadata.saved_unix_milliseconds))
         {
           set_error(error_message, "Invalid save-time metadata");
           return false;
@@ -202,60 +254,84 @@ namespace point_cloud
       }
       else if (starts_with(line, "element vertex "))
       {
-        try
+        if (saw_vertex || !parse_integer(line.substr(15), &vertex_count))
         {
-          vertex_count = std::stoull(line.substr(15));
-        }
-        catch (...)
-        {
-          set_error(error_message, "Invalid PLY vertex count");
+          set_error(error_message, "Invalid or repeated PLY vertex element");
           return false;
         }
+        saw_vertex = true;
       }
       else if (starts_with(line, "property "))
       {
+        if (!saw_vertex || property_count >= properties.size() ||
+            line != properties[property_count])
+        {
+          set_error(error_message, "PLY vertex property type or order is unsupported");
+          return false;
+        }
         ++property_count;
-        if (line == "property uchar red" || line == "property uchar green" || line == "property uchar blue")
-          has_color = true;
       }
       else if (line == "end_header")
       {
         saw_end_header = true;
         break;
       }
+      else if (line != "comment" && !starts_with(line, "comment "))
+      {
+        set_error(error_message, "Unsupported PLY header declaration");
+        return false;
+      }
     }
 
     if (!saw_ply || !saw_format || !saw_application || !saw_end_header ||
-        metadata->coordinate_frame != "robot_base" ||
-        metadata->unit != "millimeter")
+        loaded_metadata.coordinate_frame != "robot_base" ||
+        loaded_metadata.unit != "millimeter")
     {
       set_error(error_message, "PLY is not a robot-base/millimeter overlay file created by this application");
       return false;
     }
-    const std::size_t expected_properties = has_color ? 6 : 3;
-    if (vertex_count == 0 || vertex_count > kMaximumFilePoints || property_count != expected_properties)
+    if (!saw_vertex || vertex_count == 0 || vertex_count > kMaximumFilePoints ||
+        (property_count != 3 && property_count != 6))
     {
       set_error(error_message, "PLY vertex layout is unsupported or empty");
       return false;
     }
+    const bool has_color = property_count == 6;
+    const auto data_start = file.tellg();
+    file.seekg(0, std::ios::end);
+    const auto data_end = file.tellg();
+    const auto expected_bytes = static_cast<std::streamoff>(
+        vertex_count * (sizeof(float) * 3 + (has_color ? 3 : 0)));
+    if (data_start == std::streampos(-1) || data_end == std::streampos(-1) ||
+        data_end - data_start != expected_bytes)
+    {
+      set_error(error_message, "PLY point data size does not match the vertex layout");
+      return false;
+    }
+    file.seekg(data_start);
 
-    cloud->xyz.resize(vertex_count * 3);
+    loaded.xyz.resize(vertex_count * 3);
     if (has_color)
-      cloud->rgb.resize(vertex_count * 3);
+      loaded.rgb.resize(vertex_count * 3);
     for (std::size_t index = 0; index < vertex_count; ++index)
     {
-      file.read(reinterpret_cast<char *>(cloud->xyz.data() + index * 3), sizeof(float) * 3);
+      float *xyz = loaded.xyz.data() + index * 3;
+      file.read(reinterpret_cast<char *>(xyz), sizeof(float) * 3);
       if (has_color)
-      {
-        file.read(reinterpret_cast<char *>(cloud->rgb.data() + index * 3), 3);
-      }
+        file.read(reinterpret_cast<char *>(loaded.rgb.data() + index * 3), 3);
       if (!file)
       {
-        *cloud = {};
         set_error(error_message, "PLY point data is truncated");
         return false;
       }
+      if (!std::isfinite(xyz[0]) || !std::isfinite(xyz[1]) || !std::isfinite(xyz[2]))
+      {
+        set_error(error_message, "PLY contains a non-finite coordinate");
+        return false;
+      }
     }
+    *cloud = std::move(loaded);
+    *metadata = std::move(loaded_metadata);
     return true;
   }
 

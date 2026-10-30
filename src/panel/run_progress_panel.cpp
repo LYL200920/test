@@ -283,8 +283,8 @@ void Run_Progress_Panel::Refresh_Run_Button()
   {
     m_run_button->SetLabel(
       m_stopping
-        ? wxString::FromUTF8(u8"正在急停...")
-        : wxString::FromUTF8(u8"紧急停止"));
+        ? wxString::FromUTF8(u8"等待 STOP 回执...")
+        : wxString::FromUTF8(u8"请求停止"));
     m_run_button->SetBackgroundColour(STOP_RED);
     m_run_button->SetForegroundColour(TEXT_WHITE);
     m_run_button->Enable(!m_stopping);

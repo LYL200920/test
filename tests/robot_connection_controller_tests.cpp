@@ -1,5 +1,8 @@
 #include "robot_connection_controller.h"
 
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -183,8 +186,186 @@ void Test_State_Cache_And_Command_Forwarding()
           backend->last_cartesian_options.velocity == 450,
           "linear forwarding");
   Require(controller.Request_Stop() == 15, "stop forwarding");
+  Robot_Connection_Status stop_status{Robot_Control_State::Running, 14, "moving"};
+  stop_status.stop_sequence = 15;
+  stop_status.stop_result = application::Robot_Stop_Result::Done;
+  stop_status.stop_detail = "STOPPED";
+  backend->Emit_Status(stop_status);
+  Require(controller.Status().stop_sequence == 15 &&
+            controller.Status().stop_result == application::Robot_Stop_Result::Done &&
+            controller.Status().stop_detail == "STOPPED" &&
+            controller.Status().state == Robot_Control_State::Running,
+          "STOP result must propagate independently of motion state");
   controller.Send_Raw("PING");
   Require(backend->last_frame == "PING", "raw forwarding");
+}
+void Test_Unsubscribe_Invalidates_Snapshot_And_All_Callbacks()
+{
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  Robot_Connection_Controller controller(backend);
+  Robot_Connection_Controller::Observer_Token first = 0;
+  Robot_Connection_Controller::Observer_Token second = 0;
+  int calls = 0;
+  auto cancel = [&]
+  {
+    ++calls;
+    controller.Unsubscribe(first);
+    controller.Unsubscribe(second);
+  };
+  Robot_Connection_Observer observer;
+  observer.event_log = [&](const std::string &) { cancel(); };
+  observer.connection = [&](bool, const std::string &) { cancel(); };
+  observer.status = [&](const Robot_Connection_Status &) { cancel(); };
+  observer.robot_state = [&](const Robot_Actual_State &, std::uint64_t)
+  {
+    cancel();
+  };
+  // Whichever unordered-map entry runs first removes both entries. The other
+  // token is already in the notification snapshot, but must not be invoked.
+  first = controller.Subscribe(observer);
+  second = controller.Subscribe(observer);
+  backend->Emit_Log("cancel both");
+  backend->Emit_Connection(true, "ignored");
+  backend->Emit_Status({Robot_Control_State::Ready, 0, "ignored"});
+  backend->Emit_State({}, 1);
+  Require(calls == 1, "unsubscribe invalidates copied notification entries");
+}
+
+void Test_Self_Unsubscribe_And_Reentrant_Notification()
+{
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  Robot_Connection_Controller controller(backend);
+  Robot_Connection_Controller::Observer_Token token = 0;
+  int calls = 0;
+  Robot_Connection_Observer observer;
+  observer.event_log = [&](const std::string &)
+  {
+    ++calls;
+    controller.Unsubscribe(token);
+    backend->Emit_Log("nested after cancellation");
+    // The callback object must still exist after erasing its registration.
+    ++calls;
+  };
+  token = controller.Subscribe(std::move(observer));
+  backend->Emit_Log("self cancel");
+  Require(calls == 2, "self unsubscribe preserves current callable only");
+}
+
+void Test_Unsubscribe_Waits_For_In_Flight_Callback()
+{
+  using namespace std::chrono_literals;
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  Robot_Connection_Controller controller(backend);
+  std::promise<void> entered;
+  std::promise<void> release;
+  const auto released = release.get_future().share();
+  std::atomic<int> calls{0};
+  Robot_Connection_Observer observer;
+  observer.event_log = [&](const std::string &)
+  {
+    ++calls;
+    entered.set_value();
+    released.wait();
+  };
+  const auto token = controller.Subscribe(std::move(observer));
+  const auto copied_backend = backend->observer;
+  auto notification = std::async(std::launch::async, [&]
+  {
+    copied_backend.event_log("in flight");
+  });
+  entered.get_future().wait();
+  std::promise<void> cancelling;
+  auto cancellation = std::async(std::launch::async, [&]
+  {
+    cancelling.set_value();
+    controller.Unsubscribe(token);
+  });
+  cancelling.get_future().wait();
+  const bool waited = cancellation.wait_for(50ms) == std::future_status::timeout;
+  release.set_value();
+  notification.get();
+  cancellation.get();
+  copied_backend.event_log("after cancellation");
+  Require(waited, "unsubscribe must wait for an in-flight callback");
+  Require(calls == 1, "cancelled callback cannot restart");
+}
+
+void Test_Destruction_Invalidates_Copied_Backend_Callbacks()
+{
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  int calls = 0;
+  Robot_Backend_Observer copied;
+  {
+    Robot_Connection_Controller controller(backend);
+    Robot_Connection_Observer observer;
+    observer.event_log = [&](const std::string &) { ++calls; };
+    controller.Subscribe(std::move(observer));
+    copied = backend->observer;
+  }
+  copied.connection(true, "late connection");
+  copied.status({Robot_Control_State::Ready, 0, "late status"});
+  copied.robot_state({}, 1);
+  copied.event_log("late log");
+  Require(calls == 0, "backend snapshots cannot access destroyed controller");
+  Require(backend->disconnect_count == 1, "destruction disconnects backend");
+}
+
+void Test_Destruction_Waits_For_In_Flight_Callback()
+{
+  using namespace std::chrono_literals;
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  auto controller = std::make_unique<Robot_Connection_Controller>(backend);
+  std::promise<void> entered;
+  std::promise<void> release;
+  const auto released = release.get_future().share();
+  Robot_Connection_Observer observer;
+  observer.event_log = [&](const std::string &)
+  {
+    entered.set_value();
+    released.wait();
+  };
+  controller->Subscribe(std::move(observer));
+  const auto copied = backend->observer;
+  auto notification = std::async(std::launch::async, [&]
+  {
+    copied.event_log("in flight during destruction");
+  });
+  entered.get_future().wait();
+  std::promise<void> destroying;
+  auto destruction = std::async(std::launch::async, [&]
+  {
+    destroying.set_value();
+    controller.reset();
+  });
+  destroying.get_future().wait();
+  const bool waited = destruction.wait_for(50ms) == std::future_status::timeout;
+  release.set_value();
+  notification.get();
+  destruction.get();
+  copied.event_log("after destruction");
+  Require(waited, "controller destruction must drain active notifications");
+}
+
+void Test_Callback_Exception_Releases_Dispatch_Gate()
+{
+  auto backend = std::make_shared<Fake_Robot_Backend>();
+  Robot_Connection_Controller controller(backend);
+  Robot_Connection_Observer observer;
+  observer.event_log = [](const std::string &)
+  {
+    throw std::runtime_error("observer failure");
+  };
+  const auto token = controller.Subscribe(std::move(observer));
+  bool threw = false;
+  try { backend->Emit_Log("throw"); }
+  catch( const std::runtime_error & ) { threw = true; }
+  auto cancellation = std::async(std::launch::async, [&]
+  {
+    controller.Unsubscribe(token);
+  });
+  cancellation.get();
+  backend->Emit_Log("ignored");
+  Require(threw, "callback exceptions propagate without retaining the gate");
 }
 } // namespace
 
@@ -194,6 +375,12 @@ int main()
   {
     Test_Connection_And_Observer_State();
     Test_State_Cache_And_Command_Forwarding();
+    Test_Unsubscribe_Invalidates_Snapshot_And_All_Callbacks();
+    Test_Self_Unsubscribe_And_Reentrant_Notification();
+    Test_Unsubscribe_Waits_For_In_Flight_Callback();
+    Test_Destruction_Invalidates_Copied_Backend_Callbacks();
+    Test_Destruction_Waits_For_In_Flight_Callback();
+    Test_Callback_Exception_Releases_Dispatch_Gate();
   }
   catch( const std::exception &error )
   {

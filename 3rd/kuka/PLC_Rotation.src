@@ -1,0 +1,9 @@
+&ACCESS RV
+DEF  PLC_Rotation ( )
+   $OUT[2]=TRUE
+   WAIT SEC 0.15
+   REPEAT
+      WAIT SEC 0.15
+   UNTIL  ( $IN[7]==TRUE )
+   $OUT[2]=FALSE
+END

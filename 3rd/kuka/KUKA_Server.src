@@ -107,6 +107,10 @@ GLOBAL DEF KS_HANDLE_COMMAND(Buffer[]:IN)
       KS_MOVECART(Sequence, Rest[], TRUE)
       RETURN
    ENDIF
+   IF STRCOMP(Command[], "PLC_ROTATION", #CASE_SENS) THEN
+      KS_PLC_ROTATION(Sequence, Rest[])
+      RETURN
+   ENDIF
    IF STRCOMP(Command[], "GET_STATE", #CASE_SENS) THEN
       KS_SEND_ACK(Sequence, "DONE", 0, "OK")
       KS_SEND_STATE(Sequence)
@@ -126,6 +130,29 @@ GLOBAL DEF KS_HANDLE_COMMAND(Buffer[]:IN)
    ENDIF
 
    KS_SEND_ACK(Sequence, "REJECTED", 1005, "UNKNOWN_COMMAND")
+END
+
+GLOBAL DEF KS_PLC_ROTATION(Sequence:IN, Rest[]:IN)
+   DECL INT Sequence
+   DECL CHAR Rest[]
+
+   IF STRLEN(Rest[]) <> 0 THEN
+      KS_SEND_ACK(Sequence, "REJECTED", 1301, "PLC_ROTATION_EXTRA_DATA")
+      RETURN
+   ENDIF
+
+   KS_SEQUENCE = Sequence
+   KS_ACTIVE_SEQUENCE = Sequence
+   KS_MOTION_STATE[] = "ACCEPTED"
+   KS_SEND_ACK(Sequence, "ACCEPTED", 0, "OK")
+
+   KS_MOTION_STATE[] = "RUNNING"
+   KS_SEND_ACK(Sequence, "RUNNING", 0, "OK")
+   PLC_Rotation()
+
+   KS_ACTIVE_SEQUENCE = 0
+   KS_MOTION_STATE[] = "IDLE"
+   KS_SEND_ACK(Sequence, "DONE", 0, "OK")
 END
 
 GLOBAL DEF KS_MOVEJ(Sequence:IN, Rest[]:IN)

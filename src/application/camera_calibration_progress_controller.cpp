@@ -124,7 +124,17 @@ Camera_Calibration_Progress_Controller::Stop_Confirmed()
   {
     return Transition(Camera_Calibration_Progress_Action::None);
   }
-  return Fail("Calibration progress was stopped.");
+  return Fail("Calibration progress ended: STOP DONE received (protocol "
+              "acknowledgement only; physical/safe stop is not confirmed).");
+}
+
+Camera_Calibration_Progress_Transition
+Camera_Calibration_Progress_Controller::Stop_Timed_Out()
+{
+  if (state_ != Camera_Calibration_Progress_State::Stopping)
+    return Transition(Camera_Calibration_Progress_Action::None);
+  return Fail("Timed out waiting for STOP acknowledgement; robot stop is "
+              "unconfirmed. Check the controller and use its safety stop if needed.");
 }
 
 Camera_Calibration_Progress_Transition

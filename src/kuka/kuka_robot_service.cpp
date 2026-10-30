@@ -49,53 +49,32 @@ bool Robot_Service::Is_Connected() const
 
 std::uint32_t Robot_Service::Synchronize()
 {
-  if (!Is_Connected())
-    throw std::runtime_error("KUKA robot is not connected.");
-
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_status.state == Control_State::Running ||
-        m_status.state == Control_State::Command_Sent)
-      throw std::runtime_error("KUKA robot is executing a motion command.");
-  }
-
-  const auto sequence = m_client->Get_State();
-  Track_Command(sequence, Pending_Kind::Synchronize);
-  Set_Status(Control_State::Connected_Unsynced,
-             sequence,
-             "Waiting for robot state");
-  return sequence;
-}
-
-void Robot_Service::Require_Ready() const
-{
-  std::lock_guard<std::mutex> lock(m_mutex);
-  if (m_status.state != Control_State::Ready)
-    throw std::runtime_error(
-        std::string("KUKA robot is not ready (") +
-        To_String(m_status.state) + ").");
+  return Submit_Command(
+      Pending_Kind::Synchronize,
+      [](std::uint32_t sequence) { return Encode_Get_State(sequence); },
+      "Waiting for robot state");
 }
 
 std::uint32_t Robot_Service::Move_Joint(
     const Axis &target,
     const Joint_Motion_Options &options)
 {
-  Require_Ready();
-  const auto sequence = m_client->Move_Joint(target, options);
-  Track_Command(sequence, Pending_Kind::Motion);
-  Set_Status(Control_State::Command_Sent, sequence, "MOVEJ sent");
-  return sequence;
+  return Submit_Command(
+      Pending_Kind::Motion,
+      [&](std::uint32_t sequence)
+      { return Encode_Move_Joint(sequence, target, options); },
+      "MOVEJ sent");
 }
 
 std::uint32_t Robot_Service::Move_Pose_Ptp(
     const Pose &target,
     const Cartesian_Motion_Options &options)
 {
-  Require_Ready();
-  const auto sequence = m_client->Move_Pose_Ptp(target, options);
-  Track_Command(sequence, Pending_Kind::Motion);
-  Set_Status(Control_State::Command_Sent, sequence, "MOVEPTP sent");
-  return sequence;
+  return Submit_Command(
+      Pending_Kind::Motion,
+      [&](std::uint32_t sequence)
+      { return Encode_Move_Pose_Ptp(sequence, target, options); },
+      "MOVEPTP sent");
 }
 
 std::uint32_t Robot_Service::Move_Pose_Ptp(
@@ -103,33 +82,30 @@ std::uint32_t Robot_Service::Move_Pose_Ptp(
     const Axis &joint_solution,
     const Cartesian_Motion_Options &options)
 {
-  Require_Ready();
-  const auto sequence =
-      m_client->Move_Pose_Ptp(target, joint_solution, options);
-  Track_Command(sequence, Pending_Kind::Motion);
-  Set_Status(
-      Control_State::Command_Sent, sequence, "MOVEPTP axis-guided sent");
-  return sequence;
+  return Submit_Command(
+      Pending_Kind::Motion,
+      [&](std::uint32_t sequence)
+      { return Encode_Move_Pose_Ptp(sequence, target, joint_solution, options); },
+      "MOVEPTP axis-guided sent");
 }
 
 std::uint32_t Robot_Service::Move_Linear(
     const Pose &target,
     const Cartesian_Motion_Options &options)
 {
-  Require_Ready();
-  const auto sequence = m_client->Move_Linear(target, options);
-  Track_Command(sequence, Pending_Kind::Motion);
-  Set_Status(Control_State::Command_Sent, sequence, "MOVEL sent");
-  return sequence;
+  return Submit_Command(
+      Pending_Kind::Motion,
+      [&](std::uint32_t sequence)
+      { return Encode_Move_Linear(sequence, target, options); },
+      "MOVEL sent");
 }
 
 std::uint32_t Robot_Service::Request_Stop()
 {
-  if (!Is_Connected())
-    throw std::runtime_error("KUKA robot is not connected.");
-  const auto sequence = m_client->Stop(true);
-  Track_Command(sequence, Pending_Kind::Stop);
-  return sequence;
+  return Submit_Command(
+      Pending_Kind::Stop,
+      [](std::uint32_t sequence) { return Encode_Stop(sequence, true); },
+      "STOP sent");
 }
 
 void Robot_Service::Send_Raw(std::string frame)
@@ -141,7 +117,7 @@ void Robot_Service::Send_Raw(std::string frame)
     throw std::invalid_argument(
         error.empty() ? "Only KUKA command frames are accepted." : error);
 
-  if (message.name == "PING")
+  if (message.name == "PING" || message.name == "PLC_ROTATION")
   {
     m_client->Send_Raw(std::move(frame));
     return;
@@ -230,70 +206,97 @@ void Robot_Service::On_Connection(bool connected,
 void Robot_Service::On_Acknowledgement(
     const Acknowledgement &acknowledgement)
 {
-  Pending_Kind kind = Pending_Kind::Synchronize;
-  bool tracked = false;
+  bool notify = false;
+  Service_Status status;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     const auto found = m_pending.find(acknowledgement.sequence);
     if (found != m_pending.end())
     {
-      tracked = true;
-      kind = found->second;
+      const auto kind = found->second;
+      const bool terminal =
+          acknowledgement.state == Acknowledgement_State::Done ||
+          acknowledgement.state == Acknowledgement_State::Rejected ||
+          acknowledgement.state == Acknowledgement_State::Failed ||
+          acknowledgement.state == Acknowledgement_State::Cancelled;
+      if (kind == Pending_Kind::Stop)
+      {
+        if (terminal)
+        {
+          m_pending.erase(found);
+          // STOP replies describe only this protocol request. In particular,
+          // neither DONE nor FAILED may replace a newer motion's state.
+          if (m_latest_stop_sequence == acknowledgement.sequence)
+          {
+            m_status.stop_sequence = acknowledgement.sequence;
+            m_status.stop_result =
+                acknowledgement.state == Acknowledgement_State::Done
+                    ? Stop_Result::Done : Stop_Result::Failed;
+            m_status.stop_detail = acknowledgement.detail;
+            notify = true;
+          }
+        }
+      }
+      else if (acknowledgement.state == Acknowledgement_State::Running &&
+               kind == Pending_Kind::Motion)
+      {
+        m_status = {Control_State::Running, acknowledgement.sequence,
+                    acknowledgement.detail};
+        notify = true;
+      }
+      else if (acknowledgement.state == Acknowledgement_State::Done)
+      {
+        if (kind == Pending_Kind::Motion)
+        {
+          m_status = {Control_State::Completed, acknowledgement.sequence,
+                      "Motion completed; waiting for state"};
+          notify = true;
+        }
+        m_pending.erase(found);
+      }
+      else if (acknowledgement.state == Acknowledgement_State::Rejected ||
+               acknowledgement.state == Acknowledgement_State::Failed ||
+               acknowledgement.state == Acknowledgement_State::Cancelled)
+      {
+        m_pending.erase(found);
+        m_status = {Control_State::Fault, acknowledgement.sequence,
+                    acknowledgement.detail};
+        notify = true;
+      }
+      status = m_status;
     }
   }
-
-  if (tracked)
-  {
-    if (acknowledgement.state == Acknowledgement_State::Running &&
-        kind == Pending_Kind::Motion)
-    {
-      Set_Status(Control_State::Running,
-                 acknowledgement.sequence,
-                 acknowledgement.detail);
-    }
-    else if (acknowledgement.state == Acknowledgement_State::Done)
-    {
-      if (kind == Pending_Kind::Motion)
-      {
-        Set_Status(Control_State::Completed,
-                   acknowledgement.sequence,
-                   "Motion completed; waiting for state");
-      }
-      std::lock_guard<std::mutex> lock(m_mutex);
-      m_pending.erase(acknowledgement.sequence);
-    }
-    else if (acknowledgement.state == Acknowledgement_State::Rejected ||
-             acknowledgement.state == Acknowledgement_State::Failed ||
-             acknowledgement.state == Acknowledgement_State::Cancelled)
-    {
-      {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_pending.erase(acknowledgement.sequence);
-      }
-      Set_Status(Control_State::Fault,
-                 acknowledgement.sequence,
-                 acknowledgement.detail);
-    }
-  }
+  if (notify)
+    Notify_Service_Status(status);
   Notify_Acknowledgement(acknowledgement);
 }
 
 void Robot_Service::On_Robot_State(const Robot_State &state)
 {
   std::uint64_t revision = 0;
-  bool ready = false;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_latest_state = state;
     m_has_latest_state = true;
     revision = ++m_state_revision;
-    ready = state.motion_state == "IDLE" &&
-            m_status.state != Control_State::Running &&
-            m_status.state != Control_State::Command_Sent;
   }
   Notify_Robot_State(state, revision);
+
+  bool ready = false;
+  Service_Status status;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    ready = Is_Connected() && state.motion_state == "IDLE" &&
+            m_status.state != Control_State::Running &&
+            m_status.state != Control_State::Command_Sent;
+    if (ready)
+    {
+      m_status = {Control_State::Ready, 0, "Robot synchronized"};
+      status = m_status;
+    }
+  }
   if (ready)
-    Set_Status(Control_State::Ready, 0, "Robot synchronized");
+    Notify_Service_Status(status);
 }
 
 void Robot_Service::On_Protocol_Error(const std::string &error,
@@ -302,10 +305,80 @@ void Robot_Service::On_Protocol_Error(const std::string &error,
   Notify_Protocol_Error(error, frame);
 }
 
-void Robot_Service::Track_Command(std::uint32_t sequence, Pending_Kind kind)
+std::uint32_t Robot_Service::Submit_Command(
+    Pending_Kind kind,
+    const std::function<std::string(std::uint32_t)> &encoder,
+    const std::string &detail)
 {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  m_pending[sequence] = kind;
+  if (!Is_Connected())
+    throw std::runtime_error("KUKA robot is not connected.");
+
+  const auto sequence = m_client->Next_Sequence();
+  // Validate/encode before reserving the service state.
+  const auto frame = encoder(sequence);
+  Service_Status status;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!Is_Connected())
+      throw std::runtime_error("KUKA robot is not connected.");
+    if (kind == Pending_Kind::Motion && m_status.state != Control_State::Ready)
+      throw std::runtime_error(
+          std::string("KUKA robot is not ready (") +
+          To_String(m_status.state) + ").");
+    if (kind == Pending_Kind::Synchronize &&
+        (m_status.state == Control_State::Running ||
+         m_status.state == Control_State::Command_Sent))
+      throw std::runtime_error("KUKA robot is executing a motion command.");
+
+    m_pending.emplace(sequence, kind);
+    if (kind == Pending_Kind::Stop)
+    {
+      m_latest_stop_sequence = sequence;
+      m_status.stop_sequence = sequence;
+      m_status.stop_result = Stop_Result::None;
+      m_status.stop_detail.clear();
+    }
+    if (kind != Pending_Kind::Stop)
+    {
+      m_status = {kind == Pending_Kind::Motion
+                      ? Control_State::Command_Sent
+                      : Control_State::Connected_Unsynced,
+                  sequence, detail};
+    }
+    status = m_status;
+  }
+
+  try
+  {
+    // Publish before enqueueing: a fast reply must never precede Command_Sent.
+    // Observers run outside the state lock and may query the service.
+    if (kind != Pending_Kind::Stop)
+      Notify_Service_Status(status);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_pending.find(sequence) == m_pending.end())
+      throw std::runtime_error("KUKA command cancelled before sending.");
+    m_client->Send_Raw(frame);
+  }
+  catch (...)
+  {
+    bool notify = false;
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      m_pending.erase(sequence);
+      if (m_status.active_sequence == sequence)
+      {
+        m_status = {Is_Connected() ? Control_State::Fault
+                                   : Control_State::Disconnected,
+                    0, "Command submission failed"};
+        status = m_status;
+        notify = true;
+      }
+    }
+    if (notify)
+      Notify_Service_Status(status);
+    throw;
+  }
+  return sequence;
 }
 
 void Robot_Service::Set_Status(Control_State state,

@@ -7,8 +7,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace application
 {
@@ -34,11 +32,17 @@ struct Robot_Connection_Config
   std::string model_id = "KR10_R1100_2";
 };
 
+// DONE confirms handling of a STOP protocol command, not physical/safe stop.
+enum class Robot_Stop_Result { None, Done, Failed };
+
 struct Robot_Connection_Status
 {
   Robot_Control_State state = Robot_Control_State::Disconnected;
   std::uint32_t active_sequence = 0;
   std::string detail;
+  std::uint32_t stop_sequence = 0;
+  Robot_Stop_Result stop_result = Robot_Stop_Result::None;
+  std::string stop_detail;
 };
 
 struct Robot_Actual_State
@@ -163,11 +167,15 @@ public:
   void Send_Raw(std::string frame);
 
   Observer_Token Subscribe(Robot_Connection_Observer observer);
+  // Callbacks for this controller are serialized, but may reenter it.
+  // On return no callback for token can start or remain on another thread.
+  // Self-unsubscription invalidates pending calls; the current call continues.
+  // Do not wait in a callback for another thread to dispatch or unsubscribe.
   void Unsubscribe(Observer_Token token);
 
 private:
+  struct Observer_Dispatch;
   void Bind_Backend();
-  std::vector<Robot_Connection_Observer> Observer_Snapshot() const;
 
 private:
   std::shared_ptr<Robot_Connection_Backend> m_backend;
@@ -178,9 +186,7 @@ private:
   Robot_Actual_State m_latest_state;
   bool m_has_latest_state = false;
   std::uint64_t m_state_revision = 0;
-  mutable std::mutex m_observer_mutex;
-  std::unordered_map<Observer_Token, Robot_Connection_Observer> m_observers;
-  Observer_Token m_next_observer_token = 1;
+  std::shared_ptr<Observer_Dispatch> m_observer_dispatch;
 };
 
 const char *To_String(Robot_Control_State state);

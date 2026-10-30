@@ -42,6 +42,16 @@ int main()
     Require(acknowledgement.state == kuka::Acknowledgement_State::Accepted,
             "Acknowledgement state mismatch");
 
+    Require(kuka::Decode_Message("V1,C,9001,PLC_ROTATION;",
+                                 &message,
+                                 &error),
+            "PLC_ROTATION command decode failed");
+    Require(message.type == kuka::Message_Type::Command &&
+                message.sequence == 9001 &&
+                message.name == "PLC_ROTATION" &&
+                message.fields.empty(),
+            "PLC_ROTATION command mismatch");
+
     kuka::Axis axis{0.0, -90.0, 90.0, 0.0, 45.0, 0.0};
     const std::string move_joint = kuka::Encode_Move_Joint(42, axis);
     Require(move_joint == "V1,C,42,MOVEJ,20,50,0,0,-90,90,0,45,0;",

@@ -24,6 +24,8 @@ namespace point_cloud
                                        const Point_Cloud_File_Metadata &metadata,
                                        std::string *error_message = nullptr);
 
+  // Accepts this application's binary little-endian XYZ[RGB] layout only.
+  // On failure, both non-null outputs are empty; partial data is never published.
   bool Load_Robot_Base_Point_Cloud_Ply(const std::filesystem::path &path,
                                        Point_Cloud_Data *cloud,
                                        Point_Cloud_File_Metadata *metadata,

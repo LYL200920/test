@@ -1,6 +1,7 @@
 /build/
 /build_core_no_hardware/
 /vtk_build/
+/.claude/worktrees/
 /.vs/
 *.exe
 *.ilk

@@ -56,7 +56,9 @@ public:
   Camera_Calibration_Progress_Transition Image_Processed(bool accepted);
   Camera_Calibration_Progress_Transition Image_Timed_Out();
   Camera_Calibration_Progress_Transition Request_Stop();
+  // A matching STOP DONE confirms protocol handling, not physical/safe stop.
   Camera_Calibration_Progress_Transition Stop_Confirmed();
+  Camera_Calibration_Progress_Transition Stop_Timed_Out();
   Camera_Calibration_Progress_Transition Effect_Failed(std::string message);
   void Reset();
 

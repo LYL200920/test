@@ -94,6 +94,40 @@ void Test_Timeout_And_Stop_Fail_Safely()
     "confirmed stop");
 }
 
+void Test_Stop_Timeout_And_Late_Reply()
+{
+  using State = Camera_Calibration_Progress_State;
+  using Action = Camera_Calibration_Progress_Action;
+  Camera_Calibration_Progress_Controller controller;
+  controller.Start({true});
+  controller.Motion_Completed();
+  controller.Settling_Completed();
+  controller.Request_Stop();
+  Require(controller.Request_Stop().action == Action::None,
+          "duplicate stop must not extend the wait");
+  Require(controller.Image_Arrived().action == Action::None,
+          "late image must not advance a stopping run");
+  const auto timeout = controller.Stop_Timed_Out();
+  Require(timeout.state == State::Failed && timeout.action == Action::Finish &&
+            timeout.message.find("unconfirmed") != std::string::npos,
+          "stop timeout must report unconfirmed stop");
+  Require(controller.Stop_Confirmed().action == Action::None,
+          "late STOP DONE must not reopen a timed-out run");
+  controller.Start({false});
+  Require(controller.Stop_Confirmed().action == Action::None,
+          "old STOP DONE must not end a new run");
+  controller.Request_Stop();
+  const auto failed = controller.Effect_Failed("Disconnected; stop unconfirmed");
+  Require(failed.state == State::Failed &&
+            failed.message == "Disconnected; stop unconfirmed",
+          "disconnect must not confirm stop");
+  controller.Start({false});
+  controller.Request_Stop();
+  const auto done = controller.Stop_Confirmed();
+  Require(done.message.find("physical/safe stop is not confirmed") !=
+            std::string::npos, "STOP DONE must not claim physical stop");
+}
+
 } // namespace
 
 int main()
@@ -103,6 +137,7 @@ int main()
     Test_Transition_And_Capture_Points();
     Test_Detection_Retry_Then_Continue();
     Test_Timeout_And_Stop_Fail_Safely();
+    Test_Stop_Timeout_And_Late_Reply();
   }
   catch (const std::exception &error)
   {

@@ -315,6 +315,16 @@ add_library(robot_model_domain STATIC ${robot_model_domain_sources})
 target_include_directories(robot_model_domain PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/include/robot_model")
 
+# Synchronous run-image processing, independent of panels and event delivery.
+add_library(run_image_processing STATIC
+  src/application/run_image_processing.cpp
+  include/application/run_image_processing.h)
+target_include_directories(run_image_processing PUBLIC
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/application")
+target_link_libraries(run_image_processing
+  PUBLIC camera_core robot_model_domain
+  PRIVATE wx::base wx::core)
+
 # Filesystem and XML adapters. Public APIs expose domain values, not VTK/wx.
 set(robot_model_io_sources
   src/robot_model/eye_to_hand_calibration.cpp
@@ -416,6 +426,7 @@ if(BUILD_DESKTOP_APP)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/panel")
   target_link_libraries(panel PUBLIC
     application_core
+    run_image_processing
     app_paths
     robot_connection_controller
     camera
@@ -447,6 +458,7 @@ if(MSVC)
   set(msvc_project_targets
       app_paths
       application_core
+      run_image_processing
       robot_connection_controller
       camera_core
       net
@@ -585,6 +597,10 @@ if(BUILD_TESTING)
     target_link_libraries(camera_stream_config_tests PRIVATE camera_mv3d_adapter)
   endif()
 
+  add_project_test(tcp_client_tests tcp_client_tests.cpp)
+  target_link_libraries(tcp_client_tests PRIVATE net)
+  set_tests_properties(tcp_client_tests PROPERTIES TIMEOUT 45)
+
   add_project_test(kuka_protocol_tests kuka_protocol_tests.cpp)
   target_link_libraries(kuka_protocol_tests PRIVATE kuka)
 
@@ -593,6 +609,10 @@ if(BUILD_TESTING)
 
   add_project_test(camera_image_converter_tests camera_image_converter_tests.cpp)
   target_link_libraries(camera_image_converter_tests PRIVATE camera)
+
+  add_project_test(run_image_processing_tests run_image_processing_tests.cpp)
+  target_link_libraries(run_image_processing_tests PRIVATE
+    run_image_processing wx::base wx::core)
 
   add_project_test(camera_2d_image_converter_tests
                    camera_2d_image_converter_tests.cpp)

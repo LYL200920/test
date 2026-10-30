@@ -70,7 +70,16 @@ Progress_Run_Transition Progress_Run_Controller::Stop_Confirmed()
 {
   if( m_state != Progress_Run_State::Stopping )
     return Transition(Progress_Run_Action::None);
-  return Fail("Progress was stopped.");
+  return Fail("Progress ended: STOP DONE received (protocol acknowledgement only; "
+              "physical/safe stop is not confirmed).");
+}
+
+Progress_Run_Transition Progress_Run_Controller::Stop_Timed_Out()
+{
+  if( m_state != Progress_Run_State::Stopping )
+    return Transition(Progress_Run_Action::None);
+  return Fail("Timed out waiting for STOP acknowledgement; robot stop is "
+              "unconfirmed. Check the controller and use its safety stop if needed.");
 }
 
 Progress_Run_Transition Progress_Run_Controller::Robot_Became_Unavailable(

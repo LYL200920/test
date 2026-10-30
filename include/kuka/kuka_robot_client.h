@@ -63,6 +63,8 @@ public:
   bool Get_Latest_State(Robot_State *state) const;
 
 private:
+  friend class Robot_Service;
+
   std::uint32_t Next_Sequence();
   std::uint32_t Send_Command(
       const std::function<std::string(std::uint32_t)> &encoder);

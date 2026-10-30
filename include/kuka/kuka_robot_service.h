@@ -24,11 +24,17 @@ enum class Control_State
   Fault
 };
 
+// These are protocol replies only, never evidence of a safety-rated stop.
+enum class Stop_Result { None, Done, Failed };
+
 struct Service_Status
 {
   Control_State state = Control_State::Disconnected;
   std::uint32_t active_sequence = 0;
   std::string detail;
+  std::uint32_t stop_sequence = 0;
+  Stop_Result stop_result = Stop_Result::None;
+  std::string stop_detail;
 };
 
 struct Service_Observer
@@ -97,8 +103,10 @@ private:
   void Set_Status(Control_State state,
                   std::uint32_t active_sequence,
                   const std::string &detail);
-  void Track_Command(std::uint32_t sequence, Pending_Kind kind);
-  void Require_Ready() const;
+  std::uint32_t Submit_Command(
+      Pending_Kind kind,
+      const std::function<std::string(std::uint32_t)> &encoder,
+      const std::string &detail);
 
   void Notify_Connection(bool connected, const std::string &detail);
   void Notify_Acknowledgement(const Acknowledgement &acknowledgement);
@@ -117,6 +125,7 @@ private:
   bool m_has_latest_state = false;
   std::uint64_t m_state_revision = 0;
   std::unordered_map<std::uint32_t, Pending_Kind> m_pending;
+  std::uint32_t m_latest_stop_sequence = 0;
 
   mutable std::mutex m_observer_mutex;
   std::unordered_map<Observer_Token, Service_Observer> m_observers;
