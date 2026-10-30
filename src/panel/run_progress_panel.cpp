@@ -121,7 +121,16 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_view_mosaic->Enable(false);
   m_view_mosaic->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
   {
-    if (!m_mosaic_path.empty())
+    if (!m_mosaic_results.empty())
+    {
+      std::vector<Mosaic_Viewer_Item> items;
+      for (const auto &result : m_mosaic_results)
+        items.push_back({result.name,
+          result.success ? result.mosaic_path : std::filesystem::path{}, result.message});
+      Show_Mosaic_Group_Viewer(wxGetTopLevelParent(this), std::move(items),
+        static_cast<std::size_t>(std::max(0, m_mosaic_groups->GetSelection())));
+    }
+    else if (!m_mosaic_path.empty())
       Show_Mosaic_Viewer(wxGetTopLevelParent(this), m_mosaic_path);
   });
 
@@ -155,7 +164,7 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
 void Run_Progress_Panel::Set_Mosaic_Path(std::filesystem::path path)
 {
   m_mosaic_path = std::move(path);
-  m_view_mosaic->Enable(!m_mosaic_path.empty());
+  m_view_mosaic->Enable(!m_mosaic_results.empty() || !m_mosaic_path.empty());
 }
 
 void Run_Progress_Panel::Set_Mosaic_Results(

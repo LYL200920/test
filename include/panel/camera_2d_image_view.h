@@ -52,6 +52,7 @@ public:
   void Fit_To_Window();
 
 private:
+  void Zoom_At(const wxPoint &anchor, double factor);
   void On_Paint(wxPaintEvent &event);
   void On_Size(wxSizeEvent &event);
   void On_Left_Down(wxMouseEvent &event);

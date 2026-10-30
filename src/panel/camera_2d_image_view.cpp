@@ -198,26 +198,35 @@ double Camera_2D_Bitmap_Canvas::Display_Scale() const
       static_cast<double>(area.y) / m_image_height));
 }
 
+void Camera_2D_Bitmap_Canvas::Zoom_At(const wxPoint &anchor, double factor)
+{
+  if (!m_bitmap.IsOk()) return;
+  const double previous = Display_Scale();
+  const double next = std::clamp(previous * factor, 0.01, 8.0);
+  if ((factor > 1.0 && next <= previous) ||
+      (factor < 1.0 && next >= previous)) return;
+  const wxPoint old_offset = Display_Offset(previous);
+  m_zoom = next;
+  m_fit_to_window = false;
+  const wxPoint new_offset = Display_Offset(next);
+  // Keep the image coordinate under the cursor at the same screen location.
+  m_pan_offset.x += static_cast<int>(std::lround(
+    anchor.x - (anchor.x - old_offset.x) * next / previous)) - new_offset.x;
+  m_pan_offset.y += static_cast<int>(std::lround(
+    anchor.y - (anchor.y - old_offset.y) * next / previous)) - new_offset.y;
+  Refresh(false);
+}
+
 void Camera_2D_Bitmap_Canvas::Zoom_In()
 {
-  if (m_fit_to_window)
-  {
-    m_zoom = Display_Scale();
-    m_fit_to_window = false;
-  }
-  m_zoom = std::min(8.0, m_zoom * 1.25);
-  Refresh(false);
+  const auto area = GetClientSize();
+  Zoom_At(wxPoint(area.x / 2, area.y / 2), 1.25);
 }
 
 void Camera_2D_Bitmap_Canvas::Zoom_Out()
 {
-  if (m_fit_to_window)
-  {
-    m_zoom = Display_Scale();
-    m_fit_to_window = false;
-  }
-  m_zoom = std::max(0.05, m_zoom / 1.25);
-  Refresh(false);
+  const auto area = GetClientSize();
+  Zoom_At(wxPoint(area.x / 2, area.y / 2), 1.0 / 1.25);
 }
 
 void Camera_2D_Bitmap_Canvas::Fit_To_Window()
@@ -544,9 +553,9 @@ void Camera_2D_Bitmap_Canvas::On_Mouse_Move(wxMouseEvent &event)
 void Camera_2D_Bitmap_Canvas::On_Mouse_Wheel(wxMouseEvent &event)
 {
   if (event.GetWheelRotation() > 0)
-    Zoom_In();
+    Zoom_At(event.GetPosition(), 1.25);
   else if (event.GetWheelRotation() < 0)
-    Zoom_Out();
+    Zoom_At(event.GetPosition(), 1.0 / 1.25);
 }
 
 void Camera_2D_Bitmap_Canvas::On_Left_Up(wxMouseEvent &event)

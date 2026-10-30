@@ -4,6 +4,9 @@
 #include "camera_2d_image_view.h"
 
 #include <wx/button.h>
+#include <wx/choice.h>
+#include <utility>
+#include <algorithm>
 #include <wx/filedlg.h>
 #include <wx/frame.h>
 #include <wx/image.h>
@@ -32,7 +35,7 @@ class Mosaic_Viewer : public wxFrame
 public:
   explicit Mosaic_Viewer(wxWindow *parent)
     : wxFrame(parent, wxID_ANY, wxString::FromUTF8(u8"拼图查看器"),
-              wxDefaultPosition, wxSize(1100, 800))
+              wxDefaultPosition, wxSize(760, 560))
   {
     auto *panel = new wxPanel(this);
     auto *layout = new wxBoxSizer(wxVERTICAL);
@@ -44,6 +47,11 @@ public:
     for (auto *button : {open, zoom_in, zoom_out, fit})
       tools->Add(button, 0, wxRIGHT, 8);
     layout->Add(tools, 0, wxALL, 8);
+    m_groups = new wxChoice(panel, wxID_ANY);
+    layout->Add(m_groups, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+    m_groups->Hide();
+    m_groups->Bind(wxEVT_CHOICE, [this](wxCommandEvent &)
+    { Select_Group(static_cast<std::size_t>(m_groups->GetSelection())); });
     layout->Add(new wxStaticText(panel, wxID_ANY,
       wxString::FromUTF8(u8"滚轮缩放 · 按住鼠标右键拖动平移 · 查看的是保存的完整分辨率图片")),
       0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
@@ -58,11 +66,50 @@ public:
     open->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
     {
       auto path = m_path;
-      if (Select_Mosaic(this, &path)) Load(path);
+      if (Select_Mosaic(this, &path) && Load(path))
+      {
+        m_items.clear(); m_groups->Clear(); m_groups->Hide(); Layout();
+      }
     });
     zoom_in->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { m_canvas->Zoom_In(); });
     zoom_out->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { m_canvas->Zoom_Out(); });
     fit->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { m_canvas->Fit_To_Window(); });
+  }
+
+  void Set_Groups(std::vector<Mosaic_Viewer_Item> groups, std::size_t selected)
+  {
+    m_items = std::move(groups);
+    m_groups->Clear();
+    for (const auto &item : m_items)
+      m_groups->Append(wxString::FromUTF8(item.name) +
+        (item.path.empty() ? wxString::FromUTF8(u8" — 未生成") : wxString{}));
+    m_groups->Show(!m_items.empty());
+    if (!m_items.empty())
+    {
+      selected = std::min(selected, m_items.size() - 1);
+      m_groups->SetSelection(static_cast<int>(selected));
+      Select_Group(selected);
+    }
+    Layout();
+  }
+
+  void Select_Group(std::size_t index)
+  {
+    if (index >= m_items.size()) return;
+    // Never leave the previous group's picture visible under a failed group.
+    m_canvas->Clear_Bitmap();
+    m_path.clear();
+    const auto &item = m_items[index];
+    SetTitle(wxString::FromUTF8(u8"拼图查看器 — ") + wxString::FromUTF8(item.name));
+    if (item.path.empty())
+    {
+      SetStatusText(wxString::FromUTF8(item.error));
+      return;
+    }
+    if (Load(item.path))
+      SetTitle(wxString::FromUTF8(u8"拼图查看器 — ") + wxString::FromUTF8(item.name));
+    else
+      SetStatusText(wxString::FromUTF8(u8"该组图片读取失败"));
   }
 
   bool Load(const std::filesystem::path &path)
@@ -98,9 +145,21 @@ public:
 
 private:
   Camera_2D_Bitmap_Canvas *m_canvas = nullptr;
+  wxChoice *m_groups = nullptr;
+  std::vector<Mosaic_Viewer_Item> m_items;
   std::filesystem::path m_path;
 };
 } // namespace
+
+void Show_Mosaic_Group_Viewer(wxWindow *parent,
+  std::vector<Mosaic_Viewer_Item> groups, std::size_t selected)
+{
+  if (groups.empty()) return;
+  auto *viewer = new Mosaic_Viewer(parent);
+  viewer->Set_Groups(std::move(groups), selected);
+  viewer->CentreOnParent();
+  viewer->Show();
+}
 
 void Show_Mosaic_Viewer(wxWindow *parent, const std::filesystem::path &path)
 {
