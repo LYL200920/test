@@ -9,6 +9,7 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/spinctrl.h>
 #include <algorithm>
 #include <limits>
 
@@ -81,6 +82,29 @@ public:
     m_reverse_v = new wxCheckBox(this, wxID_ANY, wxString::FromUTF8(u8"垂直反向"));
     right->Add(m_reverse_h);
     right->Add(m_reverse_v);
+    right->Add(new wxStaticText(this, wxID_ANY,
+      wxString::FromUTF8(u8"逐点纠偏：选择上方已勾选点，ΔU向右 / ΔV向下（mm）")),
+      0, wxTOP | wxBOTTOM, 6);
+    auto *correction_row = new wxBoxSizer(wxHORIZONTAL);
+    m_u = new wxSpinCtrlDouble(this, wxID_ANY, "0", wxDefaultPosition, wxSize(110, -1),
+      wxSP_ARROW_KEYS, -10000, 10000, 0, 0.1);
+    m_v = new wxSpinCtrlDouble(this, wxID_ANY, "0", wxDefaultPosition, wxSize(110, -1),
+      wxSP_ARROW_KEYS, -10000, 10000, 0, 0.1);
+    m_u->SetDigits(3); m_v->SetDigits(3);
+    correction_row->Add(new wxStaticText(this, wxID_ANY, "U"), 0, wxALIGN_CENTER_VERTICAL);
+    correction_row->Add(m_u, 1, wxRIGHT, 4);
+    correction_row->Add(new wxStaticText(this, wxID_ANY, "V"), 0, wxALIGN_CENTER_VERTICAL);
+    correction_row->Add(m_v, 1);
+    right->Add(correction_row, 0, wxEXPAND);
+    auto *zero = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"当前点归零"));
+    right->Add(zero, 0, wxTOP, 4);
+    zero->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { m_u->SetValue(0); m_v->SetValue(0); Store_Correction(); });
+    m_selection->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &) { Store_Correction(); Load_Correction(); });
+    m_selection->Bind(wxEVT_CHECKLISTBOX, [this](wxCommandEvent &) { Store_Correction(); Load_Correction(); });
+    auto *correction_help = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
+      u8"仅补偿此组内该点图片，不改机器人运动。应用后下次生成拼图生效，已有PNG不变。建议保留一张图为零补偿参考。"));
+    correction_help->Wrap(350);
+    right->Add(correction_help, 0, wxTOP, 6);
     body->Add(right, 0, wxEXPAND);
     root->Add(body, 0, wxEXPAND | wxLEFT | wxRIGHT, 10);
     auto *apply = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"应用拼图设置"));
@@ -176,14 +200,40 @@ public:
   std::function<bool(const robot_model::Mosaic_Configuration &)> m_on_apply;
 
 private:
+  void Store_Correction()
+  {
+    if (m_current < 0 || !m_correction_id) return;
+    auto &values = m_configuration.groups[m_current].corrections;
+    values.erase(std::remove_if(values.begin(), values.end(), [this](const auto &v)
+      { return v.point_id == m_correction_id; }), values.end());
+    if (m_u->GetValue() != 0 || m_v->GetValue() != 0)
+      values.push_back({m_correction_id, m_u->GetValue(), m_v->GetValue()});
+  }
+  void Load_Correction()
+  {
+    m_correction_id = 0;
+    m_u->SetValue(0); m_v->SetValue(0);
+    const int selected = m_selection->GetSelection();
+    if (m_current >= 0 && selected >= 0 && m_selection->IsChecked(selected))
+    {
+      m_correction_id = m_point_ids[selected];
+      for (const auto &value : m_configuration.groups[m_current].corrections)
+        if (value.point_id == m_correction_id)
+        { m_u->SetValue(value.offset_u_mm); m_v->SetValue(value.offset_v_mm); }
+    }
+    m_u->Enable(m_correction_id != 0); m_v->Enable(m_correction_id != 0);
+  }
   void Store()
   {
     if (m_current < 0) return;
+    Store_Correction();
     auto &group = m_configuration.groups[m_current];
     group.name = m_name->GetValue().ToStdString(wxConvUTF8);
     group.point_ids.clear();
     for (unsigned int i = 0; i < m_point_ids.size(); ++i)
       if (m_selection->IsChecked(i)) group.point_ids.push_back(m_point_ids[i]);
+    group.corrections.erase(std::remove_if(group.corrections.begin(), group.corrections.end(),
+      [&group](const auto &value) { return std::find(group.point_ids.begin(), group.point_ids.end(), value.point_id) == group.point_ids.end(); }), group.corrections.end());
     group.reference = m_reference->GetSelection() == 1
       ? robot_model::Mosaic_Reference::Robot_Base : robot_model::Mosaic_Reference::First_Camera;
     group.horizontal_axis = static_cast<robot_model::Coordinate_Axis>(m_horizontal->GetSelection());
@@ -217,6 +267,7 @@ private:
     m_reverse_h->SetValue(group.reverse_horizontal); m_reverse_v->SetValue(group.reverse_vertical);
     for (unsigned int i = 0; i < m_point_ids.size(); ++i)
       m_selection->Check(i, std::find(group.point_ids.begin(), group.point_ids.end(), m_point_ids[i]) != group.point_ids.end());
+    Load_Correction();
     Enable_Axes();
   }
   void Set_Status(const wxString &text)
@@ -224,6 +275,8 @@ private:
     m_status->SetLabel(text); m_status->Wrap(350); Layout();
     static_cast<wxScrolledWindow *>(GetParent())->FitInside();
   }
+  wxSpinCtrlDouble *m_u = nullptr, *m_v = nullptr;
+  std::size_t m_correction_id = 0;
   std::string m_model;
   std::vector<robot_model::Robot_Teach_Point> m_points;
   wxChoice *m_first = nullptr, *m_last = nullptr;

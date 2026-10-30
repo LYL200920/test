@@ -5,6 +5,7 @@
 #include <wx/init.h>
 #include <wx/log.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -334,6 +335,145 @@ void Test_Base_Axes_And_Reversal()
   }
 }
 
+void Test_Point_Corrections()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.save_original_images = true;
+  options.fov_configuration.length_mm = 4;
+  options.fov_configuration.width_mm = 4;
+  options.fov_configuration.length_axis = robot_model::Coordinate_Axis::X;
+  options.fov_configuration.width_axis = robot_model::Coordinate_Axis::Y;
+  auto first = Colored_Capture(19, 30);
+  auto second = Capture(25);
+  std::vector<std::uint8_t> pixels;
+  for( unsigned int y = 0; y < 4; ++y )
+    for( unsigned int x = 0; x < 4; ++x )
+      for( int channel = 0; channel < 3; ++channel )
+        pixels.push_back(static_cast<std::uint8_t>(80 + y * 20 + x * 5));
+  second.frame = std::make_shared<jutze_camera::camera_frame>(
+    "test", "serial", 4, 4,
+    static_cast<unsigned int>(jutze_camera::pixel_format::rgb8),
+    42, pixels.data(), pixels.size());
+  // Both images use one pixel/mm, so integer millimetre shifts are exact.
+  const std::vector<std::uint8_t> first_pixels(4 * 4 * 3, 30);
+  first.frame = std::make_shared<jutze_camera::camera_frame>(
+    "test", "serial", 4, 4,
+    static_cast<unsigned int>(jutze_camera::pixel_format::rgb8),
+    42, first_pixels.data(), first_pixels.size());
+  first.point.joint_angles_deg = {1, 2, 3, 4, 5, 6};
+  second.point.joint_angles_deg = {6, 5, 4, 3, 2, 1};
+  const std::vector<application::Run_Captured_Frame> captures = {first, second};
+  const auto before = captures;
+  for( const auto reference : {robot_model::Mosaic_Reference::First_Camera,
+       robot_model::Mosaic_Reference::Robot_Base} )
+  {
+    for( int flags = 0; flags < 4; ++flags )
+    {
+      auto group = Group(1, {25, 19});
+      group.reference = reference;
+      group.reverse_horizontal = (flags & 1) != 0;
+      group.reverse_vertical = (flags & 2) != 0;
+      auto unchanged = group;
+      unchanged.id = 2;
+      auto single = group;
+      single.id = 3;
+      single.point_ids = {25};
+      options.mosaic_configuration.groups = {group, unchanged, single};
+      const auto baseline = application::Process_Run_Images(captures, options);
+      Require(baseline.success, "Correction baseline failed");
+      for( const double sign : {-1.0, 1.0} )
+      {
+        options.mosaic_configuration.groups[0].corrections = {{25, sign * 8, sign * 4}};
+        const auto result = application::Process_Run_Images(captures, options);
+        Require(result.success, "Corrected mosaic failed");
+        const auto& mosaic = result.groups[0].mosaic;
+        Require(mosaic.width == 12 && mosaic.height == 8,
+                "Correction was not applied in final-plane millimetres");
+        const unsigned int second_x = sign > 0 ? 8 : 0;
+        const unsigned int second_y = sign > 0 ? 4 : 0;
+        const unsigned int first_x = sign > 0 ? 0 : 8;
+        const unsigned int first_y = sign > 0 ? 0 : 4;
+        for( unsigned int y = 0; y < 4; ++y )
+          for( unsigned int x = 0; x < 4; ++x )
+            for( unsigned int channel = 0; channel < 3; ++channel )
+            {
+              Require(mosaic.rgb[((y + second_y) * mosaic.width + x + second_x) * 3 + channel] ==
+                        baseline.groups[2].mosaic.rgb[(y * 4 + x) * 3 + channel],
+                      "Correction changed source basis, orientation or target point");
+              Require(mosaic.rgb[((y + first_y) * mosaic.width + x + first_x) * 3 + channel] == 30,
+                      "Correction moved or changed the uncorrected point");
+            }
+        Require(mosaic.rgb[(3 * mosaic.width + 5) * 3] == 0,
+                "Correction gap was not preserved");
+        Require(result.groups[1].mosaic.width == baseline.groups[1].mosaic.width &&
+                  result.groups[1].mosaic.height == baseline.groups[1].mosaic.height &&
+                  result.groups[1].mosaic.rgb == baseline.groups[1].mosaic.rgb,
+                "Correction leaked into another group sharing the same point");
+        wxImage original(wxString((directory.path / "P025_frame_42.png").wstring()),
+          wxBITMAP_TYPE_PNG);
+        Require(original.IsOk() && original.GetWidth() == 4 && original.GetHeight() == 4 &&
+                  std::equal(pixels.begin(), pixels.end(), original.GetData()),
+                "Mosaic correction changed the original image");
+      }
+    }
+  }
+  auto translated = second;
+  translated.point.world_pose[0] = -4;
+  auto additive = Group(4, {19, 25});
+  additive.corrections = {{25, 8, 4}};
+  options.mosaic_configuration.groups = {additive};
+  const auto translated_result = application::Process_Run_Images({first, translated}, options);
+  Require(translated_result.success && translated_result.mosaic.width == 16 &&
+            translated_result.mosaic.height == 8 &&
+            translated_result.mosaic.rgb[(4 * 16 + 12) * 3] == pixels[0],
+          "Correction replaced rather than added to the projected center");
+
+  for( std::size_t i = 0; i < captures.size(); ++i )
+  {
+    const auto& actual = captures[i].point;
+    const auto& expected = before[i].point;
+    Require(actual.id == expected.id && actual.type == expected.type &&
+              actual.robot_model_id == expected.robot_model_id &&
+              actual.joint_angles_deg == expected.joint_angles_deg &&
+              actual.world_pose == expected.world_pose &&
+              actual.has_world_pose == expected.has_world_pose &&
+              actual.flange_from_coordinate_pose == expected.flange_from_coordinate_pose &&
+              actual.template_reference_pose == expected.template_reference_pose &&
+              captures[i].frame == before[i].frame,
+            "Mosaic correction modified input point/motion data");
+  }
+}
+
+void Test_Invalid_Point_Corrections()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.fov_configuration.length_mm = 2;
+  options.fov_configuration.width_mm = 2;
+  const std::vector<std::vector<robot_model::Mosaic_Point_Correction>> invalid = {
+    {{0, 0, 0}}, {{2, 0, 0}}, {{1, 0, 0}, {1, 1, 2}},
+    {{1, std::numeric_limits<double>::quiet_NaN(), 0}},
+    {{1, 0, std::numeric_limits<double>::quiet_NaN()}},
+    {{1, std::numeric_limits<double>::infinity(), 0}},
+    {{1, 0, -std::numeric_limits<double>::infinity()}}
+  };
+  for( const auto& corrections : invalid )
+  {
+    auto group = Group(1, {1});
+    group.corrections = corrections;
+    options.mosaic_configuration.groups = {group, Group(2, {1})};
+    const auto result = application::Process_Run_Images({Capture(1), Capture(2)}, options);
+    Require(!result.success && !result.groups[0].success && result.groups[1].success &&
+              !result.groups[0].message.empty() && result.groups[0].mosaic.rgb.empty(),
+            "Invalid correction accepted or prevented another group from completing");
+  }
+}
+
 void Test_Group_Failures()
 {
   Temporary_Directory directory;
@@ -460,6 +600,8 @@ int main()
     Test_Group_Isolation_And_Order();
     Test_Base_Axes_And_Reversal();
     Test_Group_Failures();
+    Test_Point_Corrections();
+    Test_Invalid_Point_Corrections();
   }
   catch (const std::exception &error)
   {

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <locale>
+#include <sstream>
 #include <unordered_set>
 #include <utility>
 
@@ -80,6 +82,27 @@ bool Parse_Mosaic_Id(const pugi::xml_attribute attribute, std::size_t *id)
     return false;
   }
   *id = value;
+  return true;
+}
+
+bool Parse_Mosaic_Offset(const pugi::xml_attribute attribute, double *value)
+{
+  if (!attribute)
+  {
+    return false;
+  }
+  const std::string text = attribute.value();
+  if (text.empty() || text.find_first_not_of("0123456789+-.eE") != std::string::npos)
+    return false;
+  std::istringstream input(text);
+  input.imbue(std::locale::classic());
+  double parsed = 0;
+  input >> std::noskipws >> parsed;
+  if (!input || !input.eof() || !std::isfinite(parsed))
+  {
+    return false;
+  }
+  *value = parsed;
   return true;
 }
 
@@ -189,6 +212,22 @@ bool Load_Mosaic_Groups(
     }
     for (const auto point : node.children())
     {
+      if (point.type() == pugi::node_element &&
+          std::string(point.name()) == "Correction")
+      {
+        Mosaic_Point_Correction correction;
+        if (!Has_Only_Attributes(point, {"pointId", "u", "v"}) ||
+            point.first_child() ||
+            !Parse_Mosaic_Id(point.attribute("pointId"), &correction.point_id) ||
+            !Parse_Mosaic_Offset(point.attribute("u"), &correction.offset_u_mm) ||
+            !Parse_Mosaic_Offset(point.attribute("v"), &correction.offset_v_mm))
+        {
+          return fail("point " + std::string(point.attribute("pointId").value()) +
+            " correction XML is invalid");
+        }
+        group.corrections.push_back(correction);
+        continue;
+      }
       std::size_t id = 0;
       if (point.type() != pugi::node_element ||
           std::string(point.name()) != "PointRef" ||
@@ -329,6 +368,16 @@ bool Save_Robot_Progress(
     {
       node.append_child("PointRef").append_attribute("id") =
         static_cast<unsigned long long>(id);
+    }
+    for (const auto &correction : group.corrections)
+    {
+      auto entry = node.append_child("Correction");
+      entry.append_attribute("pointId") =
+        static_cast<unsigned long long>(correction.point_id);
+      entry.append_attribute("u").set_value(
+        correction.offset_u_mm, std::numeric_limits<double>::max_digits10);
+      entry.append_attribute("v").set_value(
+        correction.offset_v_mm, std::numeric_limits<double>::max_digits10);
     }
   }
   if (!document.save_file(path.wstring().c_str(), "  "))

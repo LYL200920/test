@@ -19,6 +19,7 @@
 #include "net_panel.h"
 #include "run_progress_panel.h"
 #include "mosaic_settings_panel.h"
+#include "mosaic_preview_panel.h"
 #include "camera_2d_image_converter.h"
 #include "camera_params.h"
 #include "point_cloud_view.h"
@@ -535,6 +536,15 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Run));
   Run_Progress_Panel::Callbacks run_callbacks;
   run_callbacks.start = [this] { Start_Progress_Run ( ); };
+  run_callbacks.view_mosaic = [this](std::size_t index)
+  {
+    Ensure_Camera_2D_Floating_Preview();
+    if (m_mosaic_preview) m_mosaic_preview->Select_Group(index);
+    Select_Camera_Preview(Main_Display_Page::Mosaic);
+    if (m_camera_preview_state == Camera_Preview_State::Launcher)
+      m_camera_preview_state = Camera_Preview_State::Quarter;
+    Layout_Camera_2D_Preview();
+  };
   run_callbacks.emergency_stop =
     [this] { Request_Progress_Emergency_Stop ( ); };
   m_mosaic_settings_panel = new Mosaic_Settings_Panel(
@@ -1317,6 +1327,8 @@ void Robot_Model_Panel_Controller::Layout_Camera_2D_Preview ( )
     m_camera_preview_2d_button->Show (!launcher || show_menu);
   if( m_camera_preview_cloud_button )
     m_camera_preview_cloud_button->Show (!launcher || show_menu);
+  if (m_camera_preview_mosaic_button)
+    m_camera_preview_mosaic_button->Show(!launcher || show_menu);
   if( m_camera_2d_preview_toggle )
     m_camera_2d_preview_toggle->Show (!launcher);
   if( m_camera_preview_collapse_button )
@@ -1414,6 +1426,8 @@ void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
   m_camera_preview_book->AddPage (m_camera_image_view, wxEmptyString, false);
   m_camera_preview_book->AddPage (m_camera_2d_image_view, wxEmptyString, true);
   m_camera_preview_book->AddPage (m_point_cloud_view, wxEmptyString, false);
+  m_mosaic_preview = new Mosaic_Preview_Panel(m_camera_preview_book);
+  m_camera_preview_book->AddPage(m_mosaic_preview, wxEmptyString, false);
 
   m_camera_preview_3d_button = new wxButton (
     m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"3D图像"));
@@ -1427,11 +1441,21 @@ void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
     m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"100%显示"));
   m_camera_preview_collapse_button = new wxButton (
     m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8 (u8"收起"));
+  m_camera_preview_mosaic_button = new wxButton(m_camera_2d_preview_frame, wxID_ANY, wxString::FromUTF8(u8"拼图"));
+  m_camera_preview_mosaic_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+  {
+    Select_Camera_Preview(Main_Display_Page::Mosaic);
+    if (m_camera_preview_state == Camera_Preview_State::Launcher)
+      m_camera_preview_state = Camera_Preview_State::Quarter;
+    m_camera_preview_menu_visible = false;
+    Layout_Camera_2D_Preview();
+  });
   auto* controls = new wxBoxSizer (wxHORIZONTAL);
   controls->Add (m_camera_preview_launcher_button, 1, wxEXPAND | wxRIGHT, 3);
   controls->Add (m_camera_preview_3d_button, 1, wxEXPAND | wxRIGHT, 3);
   controls->Add (m_camera_preview_2d_button, 1, wxEXPAND | wxRIGHT, 3);
   controls->Add (m_camera_preview_cloud_button, 1, wxEXPAND | wxRIGHT, 3);
+  controls->Add(m_camera_preview_mosaic_button, 1, wxEXPAND | wxRIGHT, 3);
   controls->Add (m_camera_2d_preview_toggle, 1, wxEXPAND | wxRIGHT, 3);
   controls->Add (m_camera_preview_collapse_button, 1, wxEXPAND);
   auto* sizer = new wxBoxSizer (wxVERTICAL);
@@ -1492,6 +1516,7 @@ void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
   bind_menu_leave (m_camera_preview_3d_button);
   bind_menu_leave (m_camera_preview_2d_button);
   bind_menu_leave (m_camera_preview_cloud_button);
+  bind_menu_leave(m_camera_preview_mosaic_button);
   m_camera_2d_preview_frame->Bind (
     wxEVT_CLOSE_WINDOW,
     [this] (wxCloseEvent& event)
@@ -1502,6 +1527,15 @@ void Robot_Model_Panel_Controller::Ensure_Camera_2D_Floating_Preview ( )
   Select_Camera_Preview (m_camera_preview_page);
 }
 
+void Robot_Model_Panel_Controller::Show_Mosaic_Preview()
+{
+  Ensure_Camera_2D_Floating_Preview();
+  Select_Camera_Preview(Main_Display_Page::Mosaic);
+  if (m_camera_preview_state == Camera_Preview_State::Launcher)
+    m_camera_preview_state = Camera_Preview_State::Quarter;
+  Layout_Camera_2D_Preview();
+}
+
 void Robot_Model_Panel_Controller::Select_Camera_Preview (
   Main_Display_Page page)
 {
@@ -1509,10 +1543,13 @@ void Robot_Model_Panel_Controller::Select_Camera_Preview (
   int selection = 1;
   if( page == Main_Display_Page::Camera_Image ) selection = 0;
   else if( page == Main_Display_Page::Point_Cloud ) selection = 2;
+  else if (page == Main_Display_Page::Mosaic) selection = 3;
   else page = Main_Display_Page::Camera_2D_Image;
   m_camera_preview_page = page;
   m_camera_preview_book->SetSelection (selection);
   const wxColour selected_colour (210, 230, 250);
+  if (m_camera_preview_mosaic_button)
+    m_camera_preview_mosaic_button->SetBackgroundColour(selection == 3 ? selected_colour : wxNullColour);
   if( m_camera_preview_3d_button )
     m_camera_preview_3d_button->SetBackgroundColour (
       selection == 0 ? selected_colour : wxNullColour);
@@ -3359,6 +3396,13 @@ void Robot_Model_Panel_Controller::On_Run_Image_Processing_Result(
   {
     m_run_progress_panel->Set_Status(
       result.message, !result.success);
+    if (m_mosaic_preview)
+    {
+      std::vector<Mosaic_Viewer_Item> items;
+      for (const auto &group : result.groups)
+        items.push_back({group.name, group.success ? group.mosaic_path : std::filesystem::path{}, group.message});
+      m_mosaic_preview->Set_Groups(std::move(items));
+    }
     m_run_progress_panel->Set_Mosaic_Results(std::move(result.groups));
   }
   Refresh_Run_Readiness();

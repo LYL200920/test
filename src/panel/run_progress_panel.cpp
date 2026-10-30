@@ -117,21 +117,12 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
     this, wxID_ANY, wxNullBitmap);
   m_mosaic_bitmap->Hide();
   m_view_mosaic = new wxButton(
-    this, wxID_ANY, wxString::FromUTF8(u8"独立窗口查看完整拼图..."));
+    this, wxID_ANY, wxString::FromUTF8(u8"在画面预览中查看拼图"));
   m_view_mosaic->Enable(false);
   m_view_mosaic->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
   {
-    if (!m_mosaic_results.empty())
-    {
-      std::vector<Mosaic_Viewer_Item> items;
-      for (const auto &result : m_mosaic_results)
-        items.push_back({result.name,
-          result.success ? result.mosaic_path : std::filesystem::path{}, result.message});
-      Show_Mosaic_Group_Viewer(wxGetTopLevelParent(this), std::move(items),
-        static_cast<std::size_t>(std::max(0, m_mosaic_groups->GetSelection())));
-    }
-    else if (!m_mosaic_path.empty())
-      Show_Mosaic_Viewer(wxGetTopLevelParent(this), m_mosaic_path);
+    if (m_callbacks.view_mosaic)
+      m_callbacks.view_mosaic(static_cast<std::size_t>(std::max(0, m_mosaic_groups->GetSelection())));
   });
 
   m_mosaic_groups = new wxChoice(this, wxID_ANY);

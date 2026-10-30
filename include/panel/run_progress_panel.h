@@ -30,6 +30,7 @@ public:
   {
     std::function<void()> start;
     std::function<void()> emergency_stop;
+    std::function<void(std::size_t)> view_mosaic;
   };
 
   explicit Run_Progress_Panel(wxWindow *parent);

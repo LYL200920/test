@@ -10,6 +10,13 @@ namespace robot_model
 {
 enum class Mosaic_Reference { First_Camera, Robot_Base };
 
+struct Mosaic_Point_Correction
+{
+  std::size_t point_id = 0;
+  double offset_u_mm = 0;
+  double offset_v_mm = 0;
+};
+
 struct Mosaic_Group
 {
   std::size_t id = 1;
@@ -20,6 +27,7 @@ struct Mosaic_Group
   Coordinate_Axis vertical_axis = Coordinate_Axis::Y;
   bool reverse_horizontal = false;
   bool reverse_vertical = false;
+  std::vector<Mosaic_Point_Correction> corrections;
 };
 
 // Empty groups preserve the legacy all-motion-points, first-camera-plane mode.

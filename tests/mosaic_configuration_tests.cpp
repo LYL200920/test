@@ -82,6 +82,14 @@ void Require_Equal_Groups(
       a.reverse_horizontal == e.reverse_horizontal &&
       a.reverse_vertical == e.reverse_vertical,
       "Group identity, order, selection, reference, axes or directions changed");
+    Require(a.corrections.size() == e.corrections.size(), "Correction count changed");
+    for (std::size_t correction = 0; correction < e.corrections.size(); ++correction)
+    {
+      const auto &ac = a.corrections[correction];
+      const auto &ec = e.corrections[correction];
+      Require(ac.point_id == ec.point_id && ac.offset_u_mm == ec.offset_u_mm &&
+        ac.offset_v_mm == ec.offset_v_mm, "Point correction changed");
+    }
   }
 }
 
@@ -164,6 +172,44 @@ void Test_Validation()
     "Shared selections or unused points incorrectly rejected");
 }
 
+void Test_Correction_Validation(const std::filesystem::path &path)
+{
+  const Mosaic_Point_Correction zero;
+  Require(zero.point_id == 0 && zero.offset_u_mm == 0 && zero.offset_v_mm == 0,
+    "Correction defaults changed");
+  auto progress = Make_Progress();
+  progress.mosaic_configuration.groups[0].corrections = {{3, 1.25, -2.5}};
+  auto second = progress.mosaic_configuration.groups[0];
+  second.id = 42;
+  second.corrections = {{3, -4, 0}};
+  progress.mosaic_configuration.groups.push_back(second);
+  std::string error;
+  Require(Validate_Mosaic_Configuration(
+    progress.mosaic_configuration, progress.points, &error),
+    "Independent corrections on a shared point rejected");
+  const std::vector<std::vector<Mosaic_Point_Correction>> invalid = {
+    {{0, 0, 0}}, {{12, 0, 0}}, {{999, 0, 0}}, {{3, 0, 0}, {3, 1, 2}},
+    {{3, std::numeric_limits<double>::quiet_NaN(), 0}},
+    {{3, 0, std::numeric_limits<double>::quiet_NaN()}},
+    {{3, std::numeric_limits<double>::infinity(), 0}},
+    {{3, 0, std::numeric_limits<double>::infinity()}},
+    {{3, -std::numeric_limits<double>::infinity(), 0}},
+    {{3, 0, -std::numeric_limits<double>::infinity()}}
+  };
+  for (const auto &corrections : invalid)
+  {
+    auto candidate = progress;
+    candidate.mosaic_configuration.groups[0].corrections = corrections;
+    Require(!Validate_Mosaic_Configuration(
+      candidate.mosaic_configuration, candidate.points, &error) &&
+      error.find("group 17") != std::string::npos &&
+      error.find("point " + std::to_string(corrections[0].point_id)) != std::string::npos,
+      "Invalid correction accepted or missing group/point context");
+    Require(!Save_Robot_Progress(path, candidate, &error),
+      "Invalid correction was saved");
+  }
+}
+
 void Test_Round_Trip(const std::filesystem::path &path)
 {
   auto progress = Make_Progress();
@@ -190,6 +236,7 @@ void Test_Round_Trip(const std::filesystem::path &path)
         group.vertical_axis = vertical;
         group.reverse_horizontal = (flags & 1) != 0;
         group.reverse_vertical = (flags & 2) != 0;
+        group.corrections = {{8, 0.12345678901234566, -2.5}, {12, 0, 3.75}};
         progress.mosaic_configuration.groups.push_back(group);
       }
     }
@@ -208,6 +255,13 @@ void Test_Round_Trip(const std::filesystem::path &path)
   Require(loaded.robot_model_id == progress.robot_model_id &&
     loaded.points.size() == progress.points.size(), "Progress data changed");
   Require_Equal_Groups(loaded.mosaic_configuration, progress.mosaic_configuration);
+  for (std::size_t index = 0; index < progress.points.size(); ++index)
+  {
+    Require(loaded.points[index].id == progress.points[index].id &&
+      loaded.points[index].world_pose == progress.points[index].world_pose &&
+      loaded.points[index].joint_angles_deg == progress.points[index].joint_angles_deg,
+      "Correction serialization modified motion data");
+  }
 
   progress.mosaic_configuration.groups.clear();
   Require(Save_Robot_Progress(path, progress, &error), "Empty groups save failed");
@@ -237,6 +291,21 @@ void Test_Legacy(const std::filesystem::path &path)
       loaded.points[0].type == Robot_Teach_Point_Type::Motion,
       "Legacy Progress must clear any previous configuration");
   }
+}
+
+void Test_Legacy_Group_Without_Corrections(const std::filesystem::path &path)
+{
+  const auto progress = Make_Progress();
+  std::string error;
+  Require(Save_Robot_Progress(path, progress, &error), "Legacy group save failed");
+  pugi::xml_document document;
+  Require(document.load_file(path.wstring().c_str()), "Legacy group parse failed");
+  Require(!document.child("RobotProgress").child("MosaicGroups").child("Group")
+    .child("Correction"), "Empty corrections must remain optional in XML");
+  auto loaded = progress;
+  loaded.mosaic_configuration.groups[0].corrections = {{3, 1, 2}};
+  Require(Load_Robot_Progress(path, &loaded, &error), "Legacy group load failed");
+  Require_Equal_Groups(loaded.mosaic_configuration, progress.mosaic_configuration);
 }
 
 void Require_Rejected_Unchanged(const std::filesystem::path &path)
@@ -372,6 +441,61 @@ void Test_Invalid_Xml(const std::filesystem::path &path)
     "Numeric XML booleans should be accepted");
 }
 
+void Test_Correction_Xml(const std::filesystem::path &path)
+{
+  auto original = Make_Progress();
+  original.mosaic_configuration.groups[0].corrections = {{3, 1.25, -2.5}};
+  const auto check = [&](const std::function<void(pugi::xml_node)> &mutate)
+  {
+    std::string error;
+    Require(Save_Robot_Progress(path, original, &error), "Correction fixture save failed");
+    pugi::xml_document document;
+    Require(document.load_file(path.wstring().c_str()), "Correction fixture parse failed");
+    mutate(document.child("RobotProgress").child("MosaicGroups").child("Group")
+      .child("Correction"));
+    Require(document.save_file(path.wstring().c_str()), "Correction fixture write failed");
+    Require_Rejected_Unchanged(path);
+  };
+  for (const auto text : {"", "0", "-1", "+3", "3tail", "3.0", " 3", "3 ",
+       "184467440737095516160000", "12", "999"})
+  {
+    check([&](auto entry) { entry.attribute("pointId") = text; });
+  }
+  for (const auto field : {"u", "v"})
+  {
+    for (const auto text : {"", "nan", "NaN", "inf", "-inf", "1e9999", "1tail",
+         " 1", "1 ", "1,5", "0x1p2", "--1", "1e"})
+    {
+      try { check([&](auto entry) { entry.attribute(field) = text; }); }
+      catch (const std::exception &error) { throw std::runtime_error(std::string(field) + "=" + text + ": " + error.what()); }
+    }
+  }
+  for (const auto field : {"pointId", "u", "v"})
+  {
+    check([&](auto entry) { entry.remove_attribute(field); });
+    check([&](auto entry) { entry.append_attribute(field) = "3"; });
+  }
+  check([](auto entry) { entry.parent().append_copy(entry); });
+  check([](auto entry) { entry.append_attribute("unknown") = "1"; });
+  check([](auto entry) { entry.append_child("Unknown"); });
+  check([](auto entry) { entry.append_child(pugi::node_pcdata).set_value("text"); });
+
+  std::string error;
+  Require(Save_Robot_Progress(path, original, &error), "Correction fixture save failed");
+  pugi::xml_document document;
+  Require(document.load_file(path.wstring().c_str()), "Correction fixture parse failed");
+  auto entry = document.child("RobotProgress").child("MosaicGroups").child("Group")
+    .child("Correction");
+  entry.attribute("u") = "+1.25e1";
+  entry.attribute("v") = "-2.5E-1";
+  Require(document.save_file(path.wstring().c_str()), "Correction fixture write failed");
+  Robot_Progress_File loaded;
+  Require(Load_Robot_Progress(path, &loaded, &error) &&
+    loaded.mosaic_configuration.groups[0].corrections[0].offset_u_mm == 12.5 &&
+    loaded.mosaic_configuration.groups[0].corrections[0].offset_v_mm == -0.25,
+    "Signed/exponent correction values rejected");
+}
+
 void Test_Invalid_Save(const std::filesystem::path &path)
 {
   auto progress = Make_Progress();
@@ -420,6 +544,9 @@ int main()
     Temporary_Directory temporary;
     const auto path = temporary.path / "progress.xml";
     Test_Validation();
+    Test_Correction_Validation(path);
+    Test_Correction_Xml(path);
+    Test_Legacy_Group_Without_Corrections(path);
     Test_Stable_Selection_After_Edit();
     Test_Round_Trip(path);
     Test_Legacy(path);

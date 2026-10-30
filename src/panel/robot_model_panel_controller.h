@@ -47,6 +47,7 @@ class Camera_2D_Template_Panel;
 class Camera_Service;
 class Run_Progress_Panel;
 class Mosaic_Settings_Panel;
+class Mosaic_Preview_Panel;
 class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class Teach_Point_Command_Panel;
@@ -70,7 +71,8 @@ enum class Main_Display_Page
   Robot = 0,
   Camera_Image = 1,
   Point_Cloud = 2,
-  Camera_2D_Image = 3
+  Camera_2D_Image = 3,
+  Mosaic = 4
 };
 
 class Robot_Model_Panel_Controller :
@@ -90,6 +92,7 @@ public:
 
   void Initialize_After_Layout();
   void Show_Model_Configuration(wxWindow *parent = nullptr);
+  void Show_Mosaic_Preview();
   void Refresh_Template_Configuration();
 
   bool Inspect_Calibration_Progress(
@@ -361,6 +364,8 @@ private:
   bool m_run_save_images = false;
   bool m_run_build_mosaic = true;
   Mosaic_Settings_Panel *m_mosaic_settings_panel = nullptr;
+  Mosaic_Preview_Panel *m_mosaic_preview = nullptr;
+  wxButton *m_camera_preview_mosaic_button = nullptr;
   std::map<std::string, robot_model::Mosaic_Configuration> m_mosaic_configurations;
   robot_model::Mosaic_Configuration m_run_mosaic_configuration;
   bool m_run_linear_motion = false;

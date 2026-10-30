@@ -186,6 +186,22 @@ bool build_pose_mosaic(
     return false;
   }
 
+  std::unordered_map<std::size_t, const robot_model::Mosaic_Point_Correction*> corrections;
+  const std::unordered_set<std::size_t> member_ids(
+    group.point_ids.begin(), group.point_ids.end());
+  for( const auto& correction : group.corrections )
+  {
+    if( member_ids.count(correction.point_id) == 0 ||
+        !corrections.emplace(correction.point_id, &correction).second ||
+        !std::isfinite(correction.offset_u_mm) ||
+        !std::isfinite(correction.offset_v_mm) )
+    {
+      if( error_message ) *error_message = "P" +
+        std::to_string(correction.point_id) + "：拼图补偿必须属于组内点、唯一且为有限数值";
+      return false;
+    }
+  }
+
   struct World_Image
   {
     const Camera_2D_Display_Image* image;
@@ -290,6 +306,14 @@ bool build_pose_mosaic(
     projected.point_id = item.point_id;
     projected.center_u = dot3(relative, basis_u);
     projected.center_v = dot3(relative, basis_v);
+    // Corrections are millimetres in the final signed mosaic plane, not robot
+    // motion offsets: never change the camera basis or the captured point pose.
+    const auto correction = corrections.find(item.point_id);
+    if( correction != corrections.end() )
+    {
+      projected.center_u += correction->second->offset_u_mm;
+      projected.center_v += correction->second->offset_v_mm;
+    }
     projected.horizontal_u = dot3(item.horizontal, basis_u);
     projected.horizontal_v = dot3(item.horizontal, basis_v);
     projected.vertical_u = dot3(item.vertical, basis_u);

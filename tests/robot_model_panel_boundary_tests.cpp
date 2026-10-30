@@ -1,5 +1,6 @@
 #include "robot_model_panel.h"
 #include "mosaic_settings_panel.h"
+#include "mosaic_preview_panel.h"
 #include "right_tool_panel.h"
 #include <wx/dialog.h>
 
@@ -17,6 +18,10 @@ static_assert(!std::is_base_of_v<wxDialog, Mosaic_Settings_Panel>,
 static_assert(static_cast<int>(Right_Tool_Page::Mosaic) ==
                 static_cast<int>(Right_Tool_Page::Tool) + 1,
               "Mosaic page must follow the existing tool page indices");
+
+static_assert(std::is_base_of_v<wxPanel, Mosaic_Preview_Panel> &&
+              !std::is_base_of_v<wxDialog, Mosaic_Preview_Panel>,
+              "Mosaic preview must fit inside the existing preview book");
 
 int main()
 {

@@ -114,6 +114,25 @@ bool Validate_Mosaic_Configuration(
         }
       }
     }
+    std::unordered_set<std::size_t> correction_ids;
+    for (const auto &correction : group.corrections)
+    {
+      const std::string point_context =
+        "point " + std::to_string(correction.point_id) + " correction ";
+      if (point_ids.count(correction.point_id) == 0)
+      {
+        return fail(point_context + "must belong to the group");
+      }
+      if (!correction_ids.insert(correction.point_id).second)
+      {
+        return fail(point_context + "is duplicated");
+      }
+      if (!std::isfinite(correction.offset_u_mm) ||
+          !std::isfinite(correction.offset_v_mm))
+      {
+        return fail(point_context + "must contain finite offsets");
+      }
+    }
   }
   return true;
 }

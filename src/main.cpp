@@ -80,7 +80,8 @@ private:
       wxString::FromUTF8(u8"打开拼图...\tCtrl+Shift+M"));
     menu_bar->Append(view_menu, wxString::FromUTF8(u8"查看"));
     SetMenuBar(menu_bar);
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { Show_Mosaic_Viewer(this); },
+    Bind(wxEVT_MENU, [this](wxCommandEvent &)
+      { if (m_model_panel) m_model_panel->Show_Mosaic_Preview(); },
          ID_MOSAIC_VIEWER);
 
     Bind(wxEVT_MENU, &Test_Frame::On_3D_Camera_Config, this, ID_3D_CAMERA_CONFIG);
