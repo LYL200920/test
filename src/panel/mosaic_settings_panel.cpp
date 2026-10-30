@@ -1,69 +1,43 @@
-#include "mosaic_settings_dialog.h"
+#include "mosaic_settings_panel.h"
 
 #include <wx/button.h>
 #include <wx/checklst.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
-#include <wx/dialog.h>
+#include <wx/panel.h>
 #include <wx/listbox.h>
-#include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <algorithm>
 #include <limits>
 
-namespace
-{
-class Mosaic_Settings_Dialog : public wxDialog
+class Mosaic_Settings_Panel::Editor : public wxPanel
 {
 public:
-  Mosaic_Settings_Dialog(wxWindow *parent,
-    const std::vector<robot_model::Robot_Teach_Point> &points,
-    const robot_model::Mosaic_Configuration &configuration)
-    : wxDialog(parent, wxID_ANY, wxString::FromUTF8(u8"拼图设置"),
-        wxDefaultPosition, wxSize(760, 650), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-      m_points(points), m_configuration(configuration)
+  explicit Editor(wxWindow *parent)
+    : wxPanel(parent, wxID_ANY)
   {
     auto *root = new wxBoxSizer(wxVERTICAL);
-    root->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
+    auto *help = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
       u8"仅影响拼图，不改变运动或采图。无分组时：全部运动采图点 + 首张相机平面。\n"
-      u8"只列出可采图的运动点；非采图点不可选。水平正向向右，垂直正向向下。")),
-      0, wxALL, 10);
-    auto *body = new wxBoxSizer(wxHORIZONTAL);
+      u8"只列出可采图的运动点；非采图点不可选。水平正向向右，垂直正向向下。"));
+    help->Wrap(350);
+    root->Add(help, 0, wxALL, 10);
+    auto *body = new wxBoxSizer(wxVERTICAL);
     auto *left = new wxBoxSizer(wxVERTICAL);
-    m_groups = new wxListBox(this, wxID_ANY);
+    m_groups = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 85));
     left->Add(m_groups, 1, wxEXPAND);
     auto *add = new wxButton(this, wxID_ADD, wxString::FromUTF8(u8"新增组"));
     auto *remove = new wxButton(this, wxID_REMOVE, wxString::FromUTF8(u8"删除组"));
     left->Add(add, 0, wxEXPAND | wxTOP, 6);
     left->Add(remove, 0, wxEXPAND | wxTOP, 6);
-    body->Add(left, 1, wxEXPAND | wxRIGHT, 10);
+    body->Add(left, 0, wxEXPAND | wxBOTTOM, 10);
     auto *right = new wxBoxSizer(wxVERTICAL);
     m_name = new wxTextCtrl(this, wxID_ANY);
     right->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(u8"组名")), 0);
     right->Add(m_name, 0, wxEXPAND | wxBOTTOM, 6);
-    m_selection = new wxCheckListBox(this, wxID_ANY);
-    for (const auto &point : points)
-    {
-      if (point.type != robot_model::Robot_Teach_Point_Type::Motion) continue;
-      m_point_ids.push_back(point.id);
-      const auto label = robot_model::Format_Teach_Point_Name(point.id) +
-        "  XYZ=" + std::to_string(point.world_pose[0]) + ", " +
-        std::to_string(point.world_pose[1]) + ", " + std::to_string(point.world_pose[2]) +
-        (point.has_world_pose ? "" : " [missing pose]");
-      m_selection->Append(wxString::FromUTF8(label));
-    }
-    // Keep stale references visible so opening and accepting the dialog cannot
-    // silently remove deleted/non-capture points from a group.
-    for (const auto &group : configuration.groups)
-      for (const auto id : group.point_ids)
-        if (std::find(m_point_ids.begin(), m_point_ids.end(), id) == m_point_ids.end())
-        {
-          m_point_ids.push_back(id);
-          m_selection->Append(wxString::FromUTF8(
-            robot_model::Format_Teach_Point_Name(id) + " [invalid: missing/non-capture]"));
-        }
+    m_selection = new wxCheckListBox(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 200));
     right->Add(m_selection, 1, wxEXPAND | wxBOTTOM, 6);
     auto *select_row = new wxBoxSizer(wxHORIZONTAL);
     auto *all = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"全选"));
@@ -72,18 +46,8 @@ public:
     select_row->Add(none);
     right->Add(select_row, 0, wxBOTTOM, 6);
     auto *range_row = new wxBoxSizer(wxHORIZONTAL);
-    auto *first = new wxChoice(this, wxID_ANY);
-    auto *last = new wxChoice(this, wxID_ANY);
-    for (const auto id : m_point_ids)
-    {
-      first->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(id)));
-      last->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(id)));
-    }
-    if (!m_point_ids.empty())
-    {
-      first->SetSelection(0);
-      last->SetSelection(static_cast<int>(m_point_ids.size()) - 1);
-    }
+    auto *first = m_first = new wxChoice(this, wxID_ANY);
+    auto *last = m_last = new wxChoice(this, wxID_ANY);
     auto *range = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"选中区间"));
     range_row->Add(first, 1, wxRIGHT, 4);
     range_row->Add(last, 1, wxRIGHT, 4);
@@ -117,11 +81,15 @@ public:
     m_reverse_v = new wxCheckBox(this, wxID_ANY, wxString::FromUTF8(u8"垂直反向"));
     right->Add(m_reverse_h);
     right->Add(m_reverse_v);
-    body->Add(right, 3, wxEXPAND);
-    root->Add(body, 1, wxEXPAND | wxLEFT | wxRIGHT, 10);
-    root->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 10);
+    body->Add(right, 0, wxEXPAND);
+    root->Add(body, 0, wxEXPAND | wxLEFT | wxRIGHT, 10);
+    auto *apply = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"应用拼图设置"));
+    root->Add(apply, 0, wxEXPAND | wxALL, 10);
+    m_status = new wxStaticText(this, wxID_ANY,
+      wxString::FromUTF8(u8"修改后点击应用，再保存 Progress。切换工具页保留草稿。"));
+    m_status->Wrap(350);
+    root->Add(m_status, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
     SetSizer(root);
-    SetMinSize(wxSize(650, 520));
     m_groups->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &)
     { Store(); m_current = m_groups->GetSelection(); Load(); });
     add->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
@@ -150,23 +118,62 @@ public:
     none->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
     { for (unsigned int i = 0; i < m_selection->GetCount(); ++i) m_selection->Check(i, false); });
     m_reference->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { Enable_Axes(); });
-    Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+    apply->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
     {
       Store();
       std::string error;
       if (!robot_model::Validate_Mosaic_Configuration(m_configuration, m_points, &error))
       {
-        wxMessageBox(wxString::FromUTF8(error), wxString::FromUTF8(u8"拼图设置无效"), wxOK | wxICON_WARNING, this);
+        Set_Status(wxString::FromUTF8(error));
         return;
       }
-      EndModal(wxID_OK);
-    }, wxID_OK);
+      if (m_on_apply && m_on_apply(m_configuration))
+        Set_Status(wxString::FromUTF8(u8"已应用；请保存 Progress 以保留设置。"));
+      else
+        Set_Status(wxString::FromUTF8(u8"当前正在运行或处理图像，未应用。"));
+    });
     m_current = m_configuration.groups.empty() ? -1 : 0;
     Refresh_Groups(); Load();
-    CentreOnParent();
+
   }
 
-  const robot_model::Mosaic_Configuration &Configuration() const { return m_configuration; }
+  void Set_Context(const std::string &model,
+    const std::vector<robot_model::Robot_Teach_Point> &points,
+    const robot_model::Mosaic_Configuration &configuration, bool reset)
+  {
+    if (!reset && m_model == model) Store();
+    else
+    {
+      m_configuration = configuration;
+      m_current = m_configuration.groups.empty() ? -1 : 0;
+      Set_Status(wxString::FromUTF8(u8"修改后点击应用，再保存 Progress。"));
+    }
+    m_model = model;
+    m_points = points;
+    m_point_ids.clear(); m_selection->Clear(); m_first->Clear(); m_last->Clear();
+    for (const auto &point : points)
+    {
+      if (point.type != robot_model::Robot_Teach_Point_Type::Motion) continue;
+      m_point_ids.push_back(point.id);
+      m_selection->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(point.id)) +
+        wxString::Format("  XYZ: %.1f, %.1f, %.1f", point.world_pose[0], point.world_pose[1], point.world_pose[2]));
+    }
+    for (const auto &group : m_configuration.groups)
+      for (const auto id : group.point_ids)
+        if (std::find(m_point_ids.begin(), m_point_ids.end(), id) == m_point_ids.end())
+        {
+          m_point_ids.push_back(id);
+          m_selection->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(id) + " [invalid]"));
+        }
+    for (auto id : m_point_ids)
+    {
+      m_first->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(id)));
+      m_last->Append(wxString::FromUTF8(robot_model::Format_Teach_Point_Name(id)));
+    }
+    if (!m_point_ids.empty()) { m_first->SetSelection(0); m_last->SetSelection(m_point_ids.size()-1); }
+    Refresh_Groups(); Load();
+  }
+  std::function<bool(const robot_model::Mosaic_Configuration &)> m_on_apply;
 
 private:
   void Store()
@@ -212,7 +219,15 @@ private:
       m_selection->Check(i, std::find(group.point_ids.begin(), group.point_ids.end(), m_point_ids[i]) != group.point_ids.end());
     Enable_Axes();
   }
-  const std::vector<robot_model::Robot_Teach_Point> &m_points;
+  void Set_Status(const wxString &text)
+  {
+    m_status->SetLabel(text); m_status->Wrap(350); Layout();
+    static_cast<wxScrolledWindow *>(GetParent())->FitInside();
+  }
+  std::string m_model;
+  std::vector<robot_model::Robot_Teach_Point> m_points;
+  wxChoice *m_first = nullptr, *m_last = nullptr;
+  wxStaticText *m_status = nullptr;
   robot_model::Mosaic_Configuration m_configuration;
   int m_current = -1;
   std::vector<std::size_t> m_point_ids;
@@ -222,15 +237,27 @@ private:
   wxChoice *m_reference = nullptr, *m_horizontal = nullptr, *m_vertical = nullptr;
   wxCheckBox *m_reverse_h = nullptr, *m_reverse_v = nullptr;
 };
-}
 
-bool Edit_Mosaic_Settings(wxWindow *parent,
-  const std::vector<robot_model::Robot_Teach_Point> &points,
-  robot_model::Mosaic_Configuration *configuration)
+Mosaic_Settings_Panel::Mosaic_Settings_Panel(wxWindow *parent)
+  : wxScrolledWindow(parent, wxID_ANY)
 {
-  if (!configuration) return false;
-  Mosaic_Settings_Dialog dialog(parent, points, *configuration);
-  if (dialog.ShowModal() != wxID_OK) return false;
-  *configuration = dialog.Configuration();
-  return true;
+  SetScrollRate(0, 12);
+  m_editor = new Editor(this);
+  auto *sizer = new wxBoxSizer(wxVERTICAL);
+  sizer->Add(m_editor, 1, wxEXPAND);
+  SetSizer(sizer);
+  FitInside();
+}
+Mosaic_Settings_Panel::~Mosaic_Settings_Panel() = default;
+void Mosaic_Settings_Panel::Set_Context(const std::string &model,
+  const std::vector<robot_model::Robot_Teach_Point> &points,
+  const robot_model::Mosaic_Configuration &configuration, bool reset)
+{
+  m_editor->Set_Context(model, points, configuration, reset);
+  Layout(); FitInside();
+}
+void Mosaic_Settings_Panel::Set_On_Apply(
+  std::function<bool(const robot_model::Mosaic_Configuration &)> callback)
+{
+  m_editor->m_on_apply = std::move(callback);
 }

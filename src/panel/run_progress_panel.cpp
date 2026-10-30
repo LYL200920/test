@@ -125,9 +125,6 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
       Show_Mosaic_Viewer(wxGetTopLevelParent(this), m_mosaic_path);
   });
 
-  m_mosaic_settings = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"拼图设置..."));
-  m_mosaic_settings->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
-  { if (m_callbacks.mosaic_settings) m_callbacks.mosaic_settings(); });
   m_mosaic_groups = new wxChoice(this, wxID_ANY);
   m_mosaic_groups->Hide();
   m_mosaic_groups->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { Select_Mosaic_Result(); });
@@ -138,7 +135,6 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(m_ct_value, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 14);
   sizer->Add(m_save_images, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_build_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-  sizer->Add(m_mosaic_settings, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_mosaic_groups, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(motion_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
@@ -160,11 +156,6 @@ void Run_Progress_Panel::Set_Mosaic_Path(std::filesystem::path path)
 {
   m_mosaic_path = std::move(path);
   m_view_mosaic->Enable(!m_mosaic_path.empty());
-}
-
-void Run_Progress_Panel::Set_Mosaic_Settings_Enabled(bool enabled)
-{
-  m_mosaic_settings->Enable(enabled);
 }
 
 void Run_Progress_Panel::Set_Mosaic_Results(

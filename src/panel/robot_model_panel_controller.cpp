@@ -18,7 +18,7 @@
 #include "right_tool_panel.h"
 #include "net_panel.h"
 #include "run_progress_panel.h"
-#include "mosaic_settings_dialog.h"
+#include "mosaic_settings_panel.h"
 #include "camera_2d_image_converter.h"
 #include "camera_params.h"
 #include "point_cloud_view.h"
@@ -537,14 +537,16 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   run_callbacks.start = [this] { Start_Progress_Run ( ); };
   run_callbacks.emergency_stop =
     [this] { Request_Progress_Emergency_Stop ( ); };
-  run_callbacks.mosaic_settings = [this]
+  m_mosaic_settings_panel = new Mosaic_Settings_Panel(
+    m_right_tool_panel->Page_Parent(Right_Tool_Page::Mosaic));
+  m_mosaic_settings_panel->Set_On_Apply([this](const robot_model::Mosaic_Configuration &configuration)
   {
     if (m_calibration_progress_controller.Is_Active() ||
-        m_progress_run_controller.Is_Motion_Active() || m_run_image_processing.load()) return;
-    if (Edit_Mosaic_Settings(this, m_teach_point_store.Points(m_current_model_id),
-                            &m_mosaic_configurations[m_current_model_id]))
-      Set_Progress_Dirty(true);
-  };
+        m_progress_run_controller.Is_Motion_Active() || m_run_image_processing.load()) return false;
+    m_mosaic_configurations[m_current_model_id] = configuration;
+    Set_Progress_Dirty(true);
+    return true;
+  });
   m_run_progress_panel->Set_Callbacks (std::move (run_callbacks));
   m_camera_control_panel = new Camera_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
@@ -694,6 +696,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     Right_Tool_Page::PointCloud, m_point_cloud_overlay_toolbar);
   m_right_tool_panel->Add_Page (
     Right_Tool_Page::Tool, m_tool_panel);
+  m_right_tool_panel->Add_Page(Right_Tool_Page::Mosaic, m_mosaic_settings_panel);
   m_camera_control_panel->Set_On_Availability_Changed (
     [this] (bool enabled)
     {
@@ -1794,6 +1797,8 @@ void Robot_Model_Panel_Controller::On_Clear_Trajectory_Points (wxCommandEvent&)
   }
   m_teach_point_store.Clear_Points (m_current_model_id);
   m_mosaic_configurations.erase(m_current_model_id);
+  if (m_mosaic_settings_panel)
+    m_mosaic_settings_panel->Set_Context(m_current_model_id, {}, {}, true);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );
   Set_Progress_Dirty (true);
@@ -2267,6 +2272,9 @@ void Robot_Model_Panel_Controller::On_Load_Trajectory (wxCommandEvent&)
   m_teach_point_store.Replace_Points (
     m_current_model_id, progress.points);
   m_mosaic_configurations[m_current_model_id] = progress.mosaic_configuration;
+  if (m_mosaic_settings_panel)
+    m_mosaic_settings_panel->Set_Context(m_current_model_id, progress.points,
+      progress.mosaic_configuration, true);
   Invalidate_Completed_Progress ( );
   m_last_progress_directory =
     wxFileName (dialog.GetPath ( )).GetPath ( );
@@ -2624,7 +2632,7 @@ bool Robot_Model_Panel_Controller::Is_Robot_At_Home(std::string *reason) const
 void Robot_Model_Panel_Controller::Refresh_Run_Readiness()
 {
   if (m_run_progress_panel)
-    m_run_progress_panel->Set_Mosaic_Settings_Enabled(
+    m_mosaic_settings_panel->Enable(
       !m_progress_run_controller.Is_Motion_Active() &&
       !m_calibration_progress_controller.Is_Active() && !m_run_image_processing.load());
   if( !m_run_progress_panel ||
@@ -2651,7 +2659,7 @@ void Robot_Model_Panel_Controller::Refresh_Run_Readiness()
 void Robot_Model_Panel_Controller::Set_Run_Safety_Lock(bool locked)
 {
   if (m_run_progress_panel)
-    m_run_progress_panel->Set_Mosaic_Settings_Enabled(!locked && !m_run_image_processing.load());
+    m_mosaic_settings_panel->Enable(!locked && !m_run_image_processing.load());
   if( m_right_tool_panel )
     m_right_tool_panel->Set_Run_Locked(locked);
   if( m_robot_display_button ) m_robot_display_button->Enable(!locked);
@@ -4450,6 +4458,9 @@ void Robot_Model_Panel_Controller::Update_Trajectory_Speed_Label ( )
 
 void Robot_Model_Panel_Controller::Update_Trajectory_Point_List ( )
 {
+  if (m_mosaic_settings_panel)
+    m_mosaic_settings_panel->Set_Context(m_current_model_id,
+      m_teach_point_store.Points(m_current_model_id), m_mosaic_configurations[m_current_model_id]);
   if( !m_teach_point_list_panel ) return;
 
   std::vector<wxString> labels;

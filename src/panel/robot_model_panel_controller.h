@@ -46,6 +46,7 @@ class Camera_2D_Image_View;
 class Camera_2D_Template_Panel;
 class Camera_Service;
 class Run_Progress_Panel;
+class Mosaic_Settings_Panel;
 class Point_Cloud_View;
 class Point_Cloud_Overlay_Toolbar;
 class Teach_Point_Command_Panel;
@@ -359,6 +360,7 @@ private:
   bool m_calibration_had_previous_frame = false;
   bool m_run_save_images = false;
   bool m_run_build_mosaic = true;
+  Mosaic_Settings_Panel *m_mosaic_settings_panel = nullptr;
   std::map<std::string, robot_model::Mosaic_Configuration> m_mosaic_configurations;
   robot_model::Mosaic_Configuration m_run_mosaic_configuration;
   bool m_run_linear_motion = false;

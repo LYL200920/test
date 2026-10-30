@@ -18,7 +18,8 @@ enum class Right_Tool_Page
   Camera2D = 5,
   Template2D = 6,
   PointCloud = 7,
-  Tool = 8
+  Tool = 8,
+  Mosaic = 9
 };
 
 class Right_Tool_Panel : public wxPanel
@@ -62,6 +63,7 @@ private:
   wxButton* m_template_2d_button = nullptr;
   wxButton* m_point_cloud_button = nullptr;
   wxButton* m_tool_button = nullptr;
+  wxButton* m_mosaic_button = nullptr;
   wxButton* m_robot_button = nullptr;
   wxSimplebook* m_left_page_book = nullptr;
   wxSimplebook* m_right_page_book = nullptr;

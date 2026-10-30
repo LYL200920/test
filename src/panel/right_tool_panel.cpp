@@ -49,6 +49,10 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   m_tool_button = new wxButton (
     rail_panel, wxID_ANY, "Tool",
     wxDefaultPosition, wxSize (68, 40));
+  m_mosaic_button = new wxButton(rail_panel, wxID_ANY,
+    wxString::FromUTF8(u8"拼图"), wxDefaultPosition, wxSize(68, 40));
+  m_mosaic_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+  { if (!m_run_locked) Toggle_Right_Page(Right_Tool_Page::Mosaic); });
   m_camera_button->Enable (false);
   m_camera_button->SetToolTip (
     wxString::FromUTF8 (u8"请先在设置中选择并打开3D相机"));
@@ -90,7 +94,8 @@ Right_Tool_Panel::Right_Tool_Panel (wxWindow* parent)
   rail_sizer->Add (m_camera_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_template_2d_button, 0, wxEXPAND | wxBOTTOM, 4);
   rail_sizer->Add (m_point_cloud_button, 0, wxEXPAND | wxBOTTOM, 4);
-  rail_sizer->Add (m_tool_button, 0, wxEXPAND);
+  rail_sizer->Add (m_tool_button, 0, wxEXPAND | wxBOTTOM, 4);
+  rail_sizer->Add (m_mosaic_button, 0, wxEXPAND);
   rail_sizer->AddStretchSpacer (1);
   rail_panel->SetSizer (rail_sizer);
 
@@ -234,6 +239,7 @@ void Right_Tool_Panel::Set_Run_Locked (bool locked)
     m_template_2d_button->Enable (!locked && m_template_2d_tool_enabled);
   if( m_point_cloud_button ) m_point_cloud_button->Enable (!locked);
   if( m_tool_button ) m_tool_button->Enable (!locked);
+  if( m_mosaic_button ) m_mosaic_button->Enable (!locked);
 }
 
 void Right_Tool_Panel::Set_On_Width_Changed (
@@ -367,6 +373,9 @@ void Right_Tool_Panel::Notify_Width_Changed ( )
 
 void Right_Tool_Panel::Update_Button_Labels ( )
 {
+  if (m_mosaic_button)
+    m_mosaic_button->SetLabel(m_right_expanded && m_active_page == Right_Tool_Page::Mosaic
+      ? wxString::FromUTF8(u8"拼图 >") : wxString::FromUTF8(u8"拼图"));
   if( m_tcp_button )
   {
     m_tcp_button->SetLabel (
