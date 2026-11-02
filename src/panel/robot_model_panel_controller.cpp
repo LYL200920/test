@@ -62,6 +62,13 @@
 wxDEFINE_EVENT(wxEVT_KUKA_MODEL_STATE, wxThreadEvent);
 wxDEFINE_EVENT(wxEVT_KUKA_SERVICE_STATUS, wxThreadEvent);
 wxDEFINE_EVENT(wxEVT_RUN_IMAGE_PROCESSING_RESULT, wxThreadEvent);
+wxDEFINE_EVENT(wxEVT_MOSAIC_CORRECTION_RESULT, wxThreadEvent);
+
+struct Mosaic_Correction_Result
+{
+  std::uint64_t generation = 0;
+  application::Run_Image_Processing_Result result;
+};
 
 namespace
 {
@@ -277,6 +284,12 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     wxEVT_RUN_IMAGE_PROCESSING_RESULT,
     &Robot_Model_Panel_Controller::On_Run_Image_Processing_Result,
     this);
+
+  Bind(wxEVT_MOSAIC_CORRECTION_RESULT,
+    &Robot_Model_Panel_Controller::On_Mosaic_Correction_Result, this);
+  m_correction_timer.SetOwner(this);
+  Bind(wxEVT_TIMER, [this](wxTimerEvent &) { Start_Mosaic_Correction(); },
+    m_correction_timer.GetId());
 
   application::Robot_Connection_Observer robot_observer;
   robot_observer.robot_state =
@@ -557,6 +570,9 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     Set_Progress_Dirty(true);
     return true;
   });
+  m_mosaic_settings_panel->Set_On_Preview(
+    [this](const robot_model::Mosaic_Configuration &configuration, std::size_t group_index)
+    { Request_Mosaic_Correction(configuration, group_index); });
   m_run_progress_panel->Set_Callbacks (std::move (run_callbacks));
   m_camera_control_panel = new Camera_Control_Panel (
     m_right_tool_panel->Page_Parent (Right_Tool_Page::Camera),
@@ -792,6 +808,8 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
 
 Robot_Model_Panel_Controller::~Robot_Model_Panel_Controller()
 {
+  m_correction_timer.Stop();
+  if (m_correction_thread.joinable()) m_correction_thread.join();
   if( m_camera_2d_preview_frame )
   {
     m_camera_2d_preview_frame->SetEvtHandlerEnabled (false);
@@ -1832,6 +1850,7 @@ void Robot_Model_Panel_Controller::On_Clear_Trajectory_Points (wxCommandEvent&)
   {
     return;
   }
+  Clear_Captured_Image_Session();
   m_teach_point_store.Clear_Points (m_current_model_id);
   m_mosaic_configurations.erase(m_current_model_id);
   if (m_mosaic_settings_panel)
@@ -2306,6 +2325,7 @@ void Robot_Model_Panel_Controller::On_Load_Trajectory (wxCommandEvent&)
     return;
   }
 
+  Clear_Captured_Image_Session();
   m_teach_point_store.Replace_Points (
     m_current_model_id, progress.points);
   m_mosaic_configurations[m_current_model_id] = progress.mosaic_configuration;
@@ -2736,6 +2756,7 @@ void Robot_Model_Panel_Controller::Start_Progress_Run()
   if( m_run_image_processing_thread.joinable() )
     m_run_image_processing_thread.join();
   m_run_captured_frames.clear();
+  Clear_Captured_Image_Session();
   m_run_progress_panel->Clear_Mosaic();
 
   std::string reason;
@@ -3316,6 +3337,90 @@ void Robot_Model_Panel_Controller::Apply_Progress_Run_Transition(
   }
 }
 
+void Robot_Model_Panel_Controller::Clear_Captured_Image_Session()
+{
+  ++m_correction_generation;
+  m_correction_timer.Stop();
+  m_correction_pending = false;
+  m_preview_captures.clear();
+  m_preview_model_id.clear();
+  if (m_camera_2d_image_view) m_camera_2d_image_view->Set_Captured_Frames({});
+  if (m_mosaic_preview) m_mosaic_preview->Set_Groups({});
+  if (m_run_progress_panel) m_run_progress_panel->Clear_Mosaic();
+}
+
+void Robot_Model_Panel_Controller::Request_Mosaic_Correction(
+  const robot_model::Mosaic_Configuration &configuration, std::size_t group_index)
+{
+  ++m_correction_generation;
+  m_correction_pending = false;
+  m_correction_timer.Stop();
+  Ensure_Camera_2D_Floating_Preview();
+  if (m_preview_captures.empty() || m_preview_model_id != m_current_model_id ||
+      !m_preview_options.build_mosaic)
+  {
+    m_mosaic_preview->Set_Status("尚无可纠偏的采集拼图，请先运行采图并生成拼图");
+    return;
+  }
+  if (m_run_image_processing.load() || m_progress_run_controller.Is_Motion_Active() ||
+      m_calibration_progress_controller.Is_Active()) return;
+  m_pending_correction = configuration;
+  m_correction_group_index = group_index;
+  m_correction_pending = true;
+  if (m_camera_preview_book->GetSelection() != 3 ||
+      m_camera_preview_state == Camera_Preview_State::Launcher)
+  {
+    auto *focus = wxWindow::FindFocus();
+    Show_Mosaic_Preview();
+    if (focus) focus->SetFocus();
+  }
+  m_mosaic_preview->Set_Status("正在更新实时纠偏预览...");
+  m_correction_timer.StartOnce(150);
+}
+
+void Robot_Model_Panel_Controller::Start_Mosaic_Correction()
+{
+  if (m_correction_running || !m_correction_pending) return;
+  m_correction_pending = false;
+  auto options = m_preview_options;
+  options.mosaic_configuration = m_pending_correction;
+  const auto generation = m_correction_generation;
+  m_correction_running = true;
+  m_correction_thread = std::thread(
+    [this, captures = m_preview_captures, options = std::move(options), generation]() mutable
+    {
+      Mosaic_Correction_Result completed;
+      completed.generation = generation;
+      try
+      {
+        completed.result = application::Process_Run_Images(std::move(captures), options);
+      }
+      catch (const std::exception &error)
+      {
+        completed.result.message = std::string("实时纠偏失败：") + error.what();
+      }
+      auto *event = new wxThreadEvent(wxEVT_MOSAIC_CORRECTION_RESULT);
+      event->SetPayload(std::make_shared<Mosaic_Correction_Result>(std::move(completed)));
+      wxQueueEvent(this, event);
+    });
+}
+
+void Robot_Model_Panel_Controller::On_Mosaic_Correction_Result(wxThreadEvent &event)
+{
+  auto completed = event.GetPayload<std::shared_ptr<Mosaic_Correction_Result>>();
+  if (m_correction_thread.joinable()) m_correction_thread.join();
+  m_correction_running = false;
+  if (completed->generation == m_correction_generation && m_mosaic_preview)
+  {
+    if (!completed->result.groups.empty())
+      m_mosaic_preview->Set_Corrected_Groups(
+        std::move(completed->result.groups), m_correction_group_index);
+    else
+      m_mosaic_preview->Set_Status(completed->result.message);
+  }
+  if (m_correction_pending && !m_correction_timer.IsRunning()) Start_Mosaic_Correction();
+}
+
 void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
 {
   if( m_run_captured_frames.empty() || m_run_image_processing.load() )
@@ -3352,6 +3457,19 @@ void Robot_Model_Panel_Controller::Start_Run_Image_Processing()
   const robot_model::XyzabcPose flange_from_camera_pose = camera_tool
     ? camera_tool->flange_from_tool_pose
     : robot_model::XyzabcPose{};
+  m_preview_captures = captures;
+  m_preview_model_id = m_current_model_id;
+  m_preview_options = {{}, false, true, fov_configuration,
+    flange_from_camera_pose, m_run_mosaic_configuration, true};
+  // A run without a valid camera transform can still supply the 2D browser.
+  m_preview_options.build_mosaic = camera_tool != nullptr;
+  Ensure_Camera_2D_Floating_Preview();
+  if (m_camera_2d_image_view)
+  {
+    std::vector<std::shared_ptr<const jutze_camera::camera_frame>> frames;
+    for (const auto &capture : m_preview_captures) frames.push_back(capture.frame);
+    m_camera_2d_image_view->Set_Captured_Frames(std::move(frames));
+  }
   m_run_image_processing.store(true);
   if( m_run_progress_panel )
   {
@@ -5500,6 +5618,7 @@ bool Robot_Model_Panel_Controller::Load_Model (
     m_camera_pose_controller.Attach_Renderer (m_view->Scene_Renderer ( ));
   }
 
+  Clear_Captured_Image_Session();
   m_current_model_id = model_id (model);
   Sync_Trajectory_From_Teach_Points ( );
   Update_Trajectory_Point_List ( );

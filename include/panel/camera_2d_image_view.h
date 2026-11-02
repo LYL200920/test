@@ -9,12 +9,14 @@
 #include <wx/timer.h>
 
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace jutze_camera
 {
@@ -23,12 +25,13 @@ struct camera_frame;
 
 class Camera_2D_Service;
 class wxStaticText;
+class wxButton;
 
 class Camera_2D_Bitmap_Canvas : public wxPanel
 {
 public:
   explicit Camera_2D_Bitmap_Canvas(wxWindow *parent);
-  void Set_Bitmap(wxBitmap bitmap);
+  void Set_Bitmap(wxBitmap bitmap, bool preserve_view = false);
   void Set_Frame(
     wxBitmap bitmap,
     std::vector<Camera_2D_Cross_Detection> detections,
@@ -45,6 +48,7 @@ public:
     const Camera_2D_Roi &roi,
     std::function<void(Camera_2D_Roi)> callback);
   bool Has_Editable_Roi() const;
+  bool Is_Roi_Selection_Active() const;
   void Confirm_Roi_Selection();
   void Cancel_Roi_Selection();
   void Zoom_In();
@@ -121,11 +125,15 @@ public:
     const std::vector<std::string> &template_ids,
     const std::string &source_name);
   void Resume_Live_Image();
+  // Call on the UI thread after each run; replaces, rather than appends to, history.
+  void Set_Captured_Frames(
+    std::vector<std::shared_ptr<const jutze_camera::camera_frame>> frames);
 
 private:
   struct Conversion_Result
   {
     unsigned long long job_id = 0;
+    unsigned long long generation = 0;
     bool success = false;
     Camera_2D_Display_Image image;
     std::vector<Camera_2D_Cross_Detection> detections;
@@ -138,17 +146,30 @@ private:
   void Consume_Result();
   void On_Timer(wxTimerEvent &event);
   void On_Fit(wxCommandEvent &event);
+  void On_History_Key(wxKeyEvent &event);
+  void Browse_Captured_Frame(int direction);
+  void Update_History_Controls();
+  void Invalidate_Conversion();
 
   Camera_2D_Service &m_camera_service;
   Camera_2D_Cross_Template_Service &m_template_service;
   Camera_2D_Bitmap_Canvas *m_canvas = nullptr;
   wxStaticText *m_status_text = nullptr;
+  wxStaticText *m_history_text = nullptr;
+  wxButton *m_previous_button = nullptr;
+  wxButton *m_next_button = nullptr;
+  wxButton *m_resume_button = nullptr;
+  std::vector<std::shared_ptr<const jutze_camera::camera_frame>> m_captured_frames;
+  std::optional<std::size_t> m_captured_index;
+  std::optional<unsigned long long> m_captured_frame_number;
   wxTimer m_timer;
   std::thread m_worker;
   std::mutex m_worker_mutex;
   std::mutex m_detection_mutex;
   std::condition_variable m_worker_ready;
   bool m_exit_requested = false;
+  // Protected by m_worker_mutex; changes invalidate in-flight conversions.
+  unsigned long long m_conversion_generation = 0;
   unsigned long long m_next_job_id = 1;
   unsigned long long m_last_displayed_job_id = 0;
   std::shared_ptr<const jutze_camera::camera_frame> m_pending_frame;

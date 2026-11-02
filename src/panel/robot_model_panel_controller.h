@@ -142,6 +142,10 @@ private:
   void Capture_Run_Point_Image();
   void Start_Run_Image_Processing();
   void On_Run_Image_Processing_Result(wxThreadEvent &event);
+  void Request_Mosaic_Correction(const robot_model::Mosaic_Configuration &configuration, std::size_t group_index);
+  void Start_Mosaic_Correction();
+  void On_Mosaic_Correction_Result(wxThreadEvent &event);
+  void Clear_Captured_Image_Session();
   void Finish_Progress_Run(bool success, const std::string &message);
   void Apply_Calibration_Progress_Transition(
     const application::Camera_Calibration_Progress_Transition &transition);
@@ -381,6 +385,16 @@ private:
   std::vector<Run_Captured_Frame> m_run_captured_frames;
   std::thread m_run_image_processing_thread;
   std::atomic<bool> m_run_image_processing{false};
+  std::vector<Run_Captured_Frame> m_preview_captures;
+  application::Run_Image_Processing_Options m_preview_options;
+  std::string m_preview_model_id;
+  wxTimer m_correction_timer;
+  std::thread m_correction_thread;
+  std::uint64_t m_correction_generation = 0;
+  bool m_correction_running = false;
+  bool m_correction_pending = false;
+  std::size_t m_correction_group_index = 0;
+  robot_model::Mosaic_Configuration m_pending_correction;
   int m_expanded_teach_point_width = 240;
 };
 

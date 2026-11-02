@@ -1,18 +1,14 @@
 #include "run_progress_panel.h"
-#include "mosaic_viewer.h"
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
-#include <wx/image.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
-#include <wx/statbmp.h>
 #include <wx/stattext.h>
 
 #include <algorithm>
 #include <cstdint>
-#include <cmath>
 #include <utility>
 
 namespace
@@ -110,24 +106,14 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   m_status = new wxStaticText(
     this, wxID_ANY, wxString::FromUTF8(u8"请先在 Teach 中完成 Progress"));
   m_status->Wrap(360);
-  m_mosaic_title = new wxStaticText(
-    this, wxID_ANY, wxString::FromUTF8(u8"拼图预览"));
-  m_mosaic_title->Hide();
-  m_mosaic_bitmap = new wxStaticBitmap(
-    this, wxID_ANY, wxNullBitmap);
-  m_mosaic_bitmap->Hide();
   m_view_mosaic = new wxButton(
     this, wxID_ANY, wxString::FromUTF8(u8"在画面预览中查看拼图"));
   m_view_mosaic->Enable(false);
   m_view_mosaic->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
   {
     if (m_callbacks.view_mosaic)
-      m_callbacks.view_mosaic(static_cast<std::size_t>(std::max(0, m_mosaic_groups->GetSelection())));
+      m_callbacks.view_mosaic(0);
   });
-
-  m_mosaic_groups = new wxChoice(this, wxID_ANY);
-  m_mosaic_groups->Hide();
-  m_mosaic_groups->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { Select_Mosaic_Result(); });
 
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxEXPAND | wxALL, 10);
@@ -135,16 +121,10 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   sizer->Add(m_ct_value, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 14);
   sizer->Add(m_save_images, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_build_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-  sizer->Add(m_mosaic_groups, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(motion_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(speed_row, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_run_button, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_status, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-  sizer->Add(
-    m_mosaic_title, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
-  sizer->Add(
-    m_mosaic_bitmap, 0,
-    wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->Add(m_view_mosaic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
   sizer->AddStretchSpacer(1);
   SetSizer(sizer);
@@ -152,87 +132,17 @@ Run_Progress_Panel::Run_Progress_Panel(wxWindow *parent)
   Refresh_Run_Button();
 }
 
-void Run_Progress_Panel::Set_Mosaic_Path(std::filesystem::path path)
-{
-  m_mosaic_path = std::move(path);
-  m_view_mosaic->Enable(!m_mosaic_results.empty() || !m_mosaic_path.empty());
-}
-
 void Run_Progress_Panel::Set_Mosaic_Results(
   std::vector<application::Mosaic_Group_Result> results)
 {
-  Clear_Mosaic();
   m_mosaic_results = std::move(results);
-  for (const auto &result : m_mosaic_results)
-    m_mosaic_groups->Append(wxString::FromUTF8(result.name) +
-      (result.success ? wxString::FromUTF8(u8" — 成功") : wxString::FromUTF8(u8" — 失败")));
-  if (!m_mosaic_results.empty())
-  {
-    m_mosaic_groups->Show();
-    m_mosaic_groups->SetSelection(0);
-    Select_Mosaic_Result();
-  }
-  Layout();
-}
-
-void Run_Progress_Panel::Select_Mosaic_Result()
-{
-  const int selection = m_mosaic_groups->GetSelection();
-  if (selection < 0 || static_cast<std::size_t>(selection) >= m_mosaic_results.size()) return;
-  const auto &result = m_mosaic_results[selection];
-  m_mosaic_bitmap->SetBitmap(wxNullBitmap);
-  m_mosaic_bitmap->Hide();
-  m_mosaic_title->SetLabel(wxString::FromUTF8(result.name + ": " + result.message));
-  m_mosaic_title->Wrap(360);
-  m_mosaic_title->Show();
-  Set_Mosaic_Path(result.success ? result.mosaic_path : std::filesystem::path{});
-  if (result.success && result.mosaic.width && result.mosaic.height)
-  {
-    wxImage image(static_cast<int>(result.mosaic.width), static_cast<int>(result.mosaic.height));
-    if (image.IsOk() && image.GetData())
-    {
-      std::copy(result.mosaic.rgb.begin(), result.mosaic.rgb.end(), image.GetData());
-      Set_Mosaic_Image(image);
-    }
-  }
-  Layout();
+  m_view_mosaic->Enable(!m_mosaic_results.empty());
 }
 
 void Run_Progress_Panel::Clear_Mosaic()
 {
   m_mosaic_results.clear();
-  m_mosaic_groups->Clear();
-  m_mosaic_groups->Hide();
-  Set_Mosaic_Path({});
-  if (m_mosaic_bitmap)
-  {
-    m_mosaic_bitmap->SetBitmap(wxNullBitmap);
-    m_mosaic_bitmap->Hide();
-  }
-  if (m_mosaic_title)
-    m_mosaic_title->Hide();
-  Layout();
-}
-
-void Run_Progress_Panel::Set_Mosaic_Image(const wxImage &image)
-{
-  if (!m_mosaic_bitmap || !image.IsOk())
-    return;
-  const double scale = std::min(
-    1.0,
-    std::min(
-      360.0 / static_cast<double>(image.GetWidth()),
-      260.0 / static_cast<double>(image.GetHeight())));
-  const int width = std::max(
-    1, static_cast<int>(std::lround(image.GetWidth() * scale)));
-  const int height = std::max(
-    1, static_cast<int>(std::lround(image.GetHeight() * scale)));
-  m_mosaic_bitmap->SetBitmap(
-    wxBitmap(image.Scale(width, height, wxIMAGE_QUALITY_HIGH)));
-  m_mosaic_bitmap->Show();
-  if (m_mosaic_title)
-    m_mosaic_title->Show();
-  Layout();
+  m_view_mosaic->Enable(false);
 }
 
 void Run_Progress_Panel::Set_Callbacks(Callbacks callbacks)

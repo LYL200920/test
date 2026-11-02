@@ -6,16 +6,13 @@
 
 #include <chrono>
 #include <functional>
-#include <filesystem>
 #include <string>
 
 class wxButton;
 class wxCheckBox;
 class wxChoice;
 class wxSlider;
-class wxStaticBitmap;
 class wxStaticText;
-class wxImage;
 
 class Run_Progress_Panel : public wxPanel
 {
@@ -46,8 +43,6 @@ public:
   void Set_Elapsed(std::chrono::milliseconds elapsed);
   void Set_Status(const std::string &status, bool error = false);
   void Clear_Mosaic();
-  void Set_Mosaic_Image(const wxImage &image);
-  void Set_Mosaic_Path(std::filesystem::path path);
   void Set_Mosaic_Results(std::vector<application::Mosaic_Group_Result> results);
 
 private:
@@ -64,13 +59,8 @@ private:
   wxStaticText *m_motion_speed_label = nullptr;
   wxButton *m_run_button = nullptr;
   wxStaticText *m_status = nullptr;
-  wxStaticText *m_mosaic_title = nullptr;
-  wxStaticBitmap *m_mosaic_bitmap = nullptr;
   wxButton *m_view_mosaic = nullptr;
-  wxChoice *m_mosaic_groups = nullptr;
   std::vector<application::Mosaic_Group_Result> m_mosaic_results;
-  void Select_Mosaic_Result();
-  std::filesystem::path m_mosaic_path;
   bool m_progress_ready = false;
   bool m_robot_ready = false;
   bool m_running = false;

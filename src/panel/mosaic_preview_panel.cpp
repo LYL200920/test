@@ -8,6 +8,7 @@
 #include <wx/log.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
+#include <algorithm>
 
 Mosaic_Preview_Panel::Mosaic_Preview_Panel(wxWindow *parent) : wxPanel(parent)
 {
@@ -41,13 +42,55 @@ Mosaic_Preview_Panel::Mosaic_Preview_Panel(wxWindow *parent) : wxPanel(parent)
 }
 void Mosaic_Preview_Panel::Set_Groups(std::vector<Mosaic_Viewer_Item> groups)
 {
+  m_corrected.clear();
   m_items = std::move(groups); m_groups->Clear(); m_canvas->Clear_Bitmap();
   for (const auto &item : m_items) m_groups->Append(wxString::FromUTF8(item.name));
   if (!m_items.empty()) Select_Group(0);
   else m_status->SetLabel(wxString::FromUTF8(u8"尚无拼图"));
 }
+void Mosaic_Preview_Panel::Set_Status(const std::string &message)
+{
+  m_status->SetLabel(wxString::FromUTF8(message));
+  m_status->SetToolTip(m_status->GetLabel());
+}
+void Mosaic_Preview_Panel::Set_Corrected_Groups(
+  std::vector<application::Mosaic_Group_Result> groups, std::size_t selected_index)
+{
+  m_corrected = std::move(groups);
+  m_items.clear(); m_groups->Clear();
+  for (const auto &group : m_corrected)
+  {
+    m_items.push_back({group.name, {}, group.message});
+    m_groups->Append(wxString::FromUTF8(group.name));
+  }
+  if (!m_items.empty()) Select_Group(std::min(selected_index, m_items.size()-1));
+  else
+  {
+    m_canvas->Clear_Bitmap();
+    Set_Status("尚无拼图");
+  }
+}
 void Mosaic_Preview_Panel::Select_Group(std::size_t index)
 {
+  if (index < m_corrected.size())
+  {
+    m_groups->SetSelection(static_cast<int>(index));
+    const auto &group = m_corrected[index];
+    const auto &rgb = group.mosaic;
+    if (!group.success || !rgb.width || !rgb.height ||
+        rgb.rgb.size() != static_cast<std::size_t>(rgb.width) * rgb.height * 3)
+    {
+      m_canvas->Clear_Bitmap(); Set_Status(group.message); return;
+    }
+    wxImage image(static_cast<int>(rgb.width), static_cast<int>(rgb.height));
+    if (image.IsOk())
+    {
+      std::copy(rgb.rgb.begin(), rgb.rgb.end(), image.GetData());
+      m_canvas->Set_Bitmap(wxBitmap(image), true);
+    }
+    Set_Status(group.name + " — 实时纠偏预览（未覆盖原文件）");
+    return;
+  }
   if (index >= m_items.size()) return;
   m_groups->SetSelection(static_cast<int>(index));
   m_canvas->Clear_Bitmap();

@@ -27,6 +27,7 @@ struct Run_Image_Processing_Options
   robot_model::Fov_Visualization_Configuration fov_configuration;
   robot_model::XyzabcPose flange_from_camera_pose{};
   robot_model::Mosaic_Configuration mosaic_configuration;
+  bool preview_only = false; // No disk writes; return full images for interactive correction.
 };
 
 struct Mosaic_Group_Result
@@ -52,8 +53,9 @@ struct Run_Image_Processing_Result
 // Synchronous worker operation: owns the supplied frames, never accesses a window.
 // PNG handlers must be registered at application startup before calling this.
 // Saves mosaic.png in compatibility mode, otherwise mosaic_group_<id>.png.
-// Returned images are bounded 360x260 previews; legacy fields use the first
-// successful group. Group order follows the configuration (implicit group ID 0).
+// Group images are bounded 360x260 previews, or full resolution in preview_only
+// mode (no files written). Legacy fields retain a bounded first-success preview.
+// Group order follows the configuration (implicit group ID 0).
 Run_Image_Processing_Result Process_Run_Images(
   std::vector<Run_Captured_Frame> captures,
   const Run_Image_Processing_Options &options);

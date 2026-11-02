@@ -63,12 +63,12 @@ Camera_2D_Bitmap_Canvas::Camera_2D_Bitmap_Canvas(wxWindow *parent)
     this);
 }
 
-void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap)
+void Camera_2D_Bitmap_Canvas::Set_Bitmap(wxBitmap bitmap, bool preserve_view)
 {
   if (!bitmap.IsOk()) return;
-  if (!m_bitmap.IsOk() ||
+  if (!preserve_view && (!m_bitmap.IsOk() ||
       m_image_width != bitmap.GetWidth() ||
-      m_image_height != bitmap.GetHeight())
+      m_image_height != bitmap.GetHeight()))
   {
     m_pan_offset = wxPoint();
   }
@@ -159,6 +159,11 @@ bool Camera_2D_Bitmap_Canvas::Has_Editable_Roi() const
   return m_roi_callback && m_has_editable_roi &&
     m_editable_roi.width >= kMinimum_Roi_Size &&
     m_editable_roi.height >= kMinimum_Roi_Size;
+}
+
+bool Camera_2D_Bitmap_Canvas::Is_Roi_Selection_Active() const
+{
+  return static_cast<bool>(m_roi_callback);
 }
 
 void Camera_2D_Bitmap_Canvas::Confirm_Roi_Selection()
@@ -469,6 +474,7 @@ void Camera_2D_Bitmap_Canvas::Update_Drawn_Roi(
 
 void Camera_2D_Bitmap_Canvas::On_Left_Down(wxMouseEvent &event)
 {
+  SetFocus();
   if (!m_roi_callback || !m_bitmap.IsOk()) return;
   const int hit = Hit_Test_Roi(event.GetPosition());
   m_roi_drag_start = Image_Point(event.GetPosition());
@@ -603,6 +609,25 @@ Camera_2D_Image_View::Camera_2D_Image_View(
   fit->Bind(wxEVT_BUTTON, &Camera_2D_Image_View::On_Fit, this);
   auto *zoom_sizer = new wxBoxSizer(wxHORIZONTAL);
   zoom_sizer->Add(fit, 0);
+  m_previous_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"上一张"));
+  m_next_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"下一张"));
+  m_resume_button = new wxButton(
+    this, wxID_ANY, wxString::FromUTF8(u8"恢复实时"));
+  m_history_text = new wxStaticText(this, wxID_ANY, wxEmptyString);
+  m_previous_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+    { Browse_Captured_Frame(-1); });
+  m_next_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+    { Browse_Captured_Frame(1); });
+  m_resume_button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+    { Resume_Live_Image(); });
+  zoom_sizer->Add(m_previous_button, 0, wxLEFT, 6);
+  zoom_sizer->Add(m_next_button, 0, wxLEFT, 6);
+  zoom_sizer->Add(m_resume_button, 0, wxLEFT, 6);
+  zoom_sizer->Add(m_history_text, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
+  // Scope arrow keys to this view, leaving other panels and ROI editing alone.
+  Bind(wxEVT_CHAR_HOOK, &Camera_2D_Image_View::On_History_Key, this);
   m_status_text = new wxStaticText(
     this, wxID_ANY, wxString::FromUTF8(u8"请先打开2D相机"),
     wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
@@ -611,6 +636,7 @@ Camera_2D_Image_View::Camera_2D_Image_View(
   sizer->Add(m_canvas, 1, wxEXPAND);
   sizer->Add(m_status_text, 0, wxEXPAND | wxALL, 6);
   SetSizer(sizer);
+  Update_History_Controls();
 
   m_timer.SetOwner(this);
   Bind(
@@ -624,6 +650,7 @@ void Camera_2D_Image_View::Begin_Template_Roi_Selection(
   std::function<void(Camera_2D_Roi)> callback)
 {
   m_canvas->Begin_Roi_Selection(std::move(callback));
+  Update_History_Controls();
   m_status_text->SetLabel(
     wxString::FromUTF8(
       u8"绘制ROI后可拖动内部移动，拖动边框或控制点调整大小"));
@@ -634,6 +661,7 @@ void Camera_2D_Image_View::Begin_Template_Roi_Editing(
   std::function<void(Camera_2D_Roi)> callback)
 {
   m_canvas->Begin_Roi_Editing(roi, std::move(callback));
+  Update_History_Controls();
   m_status_text->SetLabel(
     wxString::FromUTF8(
       u8"正在编辑模板ROI：拖动内部移动，拖动红色控制点调整大小"));
@@ -647,11 +675,13 @@ bool Camera_2D_Image_View::Has_Editable_Template_Roi() const
 void Camera_2D_Image_View::Confirm_Template_Roi_Selection()
 {
   m_canvas->Confirm_Roi_Selection();
+  Update_History_Controls();
 }
 
 void Camera_2D_Image_View::Cancel_Template_Roi_Selection()
 {
   m_canvas->Cancel_Roi_Selection();
+  Update_History_Controls();
   m_status_text->SetLabel(wxString::FromUTF8(u8"已取消ROI编辑"));
 }
 
@@ -679,11 +709,10 @@ void Camera_2D_Image_View::Show_Static_Image(
   const std::string &source_name)
 {
   m_static_image_active = true;
-  {
-    std::lock_guard<std::mutex> lock(m_worker_mutex);
-    m_pending_frame.reset();
-    m_pending_result.reset();
-  }
+  m_captured_index.reset();
+  m_captured_frame_number.reset();
+  Invalidate_Conversion();
+  Update_History_Controls();
   std::vector<Camera_2D_Cross_Detection> detections;
   {
     std::lock_guard<std::mutex> lock(m_detection_mutex);
@@ -717,9 +746,115 @@ void Camera_2D_Image_View::Show_Static_Image(
 
 void Camera_2D_Image_View::Resume_Live_Image()
 {
+  Invalidate_Conversion();
   m_static_image_active = false;
-  m_last_submitted_frame.reset();
+  m_captured_index.reset();
+  m_captured_frame_number.reset();
+  Update_History_Controls();
   m_status_text->SetLabel(wxString::FromUTF8(u8"已恢复实时2D图像"));
+}
+
+void Camera_2D_Image_View::Invalidate_Conversion()
+{
+  std::lock_guard<std::mutex> lock(m_worker_mutex);
+  ++m_conversion_generation;
+  m_pending_frame.reset();
+  m_pending_result.reset();
+  m_last_submitted_frame.reset();
+}
+
+void Camera_2D_Image_View::Set_Captured_Frames(
+  std::vector<std::shared_ptr<const jutze_camera::camera_frame>> frames)
+{
+  frames.erase(std::remove(frames.begin(), frames.end(), nullptr), frames.end());
+  const bool was_browsing = m_captured_index.has_value();
+  Invalidate_Conversion();
+  m_captured_frames = std::move(frames);
+  m_captured_index.reset();
+  m_captured_frame_number.reset();
+  if (was_browsing)
+  {
+    // Do not leave a bitmap from the previous run labelled as the new batch.
+    m_canvas->Clear_Bitmap();
+    Resume_Live_Image();
+  }
+  Update_History_Controls();
+}
+
+void Camera_2D_Image_View::Browse_Captured_Frame(int direction)
+{
+  if (m_captured_frames.empty() || m_canvas->Is_Roi_Selection_Active()) return;
+  std::size_t index = direction < 0 ? m_captured_frames.size() - 1 : 0;
+  if (m_captured_index)
+  {
+    index = *m_captured_index;
+    if (direction < 0)
+    {
+      if (index == 0) return;
+      --index;
+    }
+    else
+    {
+      if (index + 1 >= m_captured_frames.size()) return;
+      ++index;
+    }
+  }
+  Invalidate_Conversion();
+  m_static_image_active = true;
+  m_captured_index = index;
+  m_captured_frame_number.reset();
+  // Avoid showing an old frame under the newly selected index while converting.
+  m_canvas->Clear_Bitmap();
+  m_status_text->SetLabel(wxString::FromUTF8(u8"正在转换本次运行采集图像…"));
+  Update_History_Controls();
+  Submit_Frame(m_captured_frames[index]);
+}
+
+void Camera_2D_Image_View::Update_History_Controls()
+{
+  const bool can_browse = !m_captured_frames.empty() &&
+    !m_canvas->Is_Roi_Selection_Active();
+  m_previous_button->Enable(can_browse &&
+    (!m_captured_index || *m_captured_index > 0));
+  m_next_button->Enable(can_browse &&
+    (!m_captured_index || *m_captured_index + 1 < m_captured_frames.size()));
+  m_resume_button->Enable(m_static_image_active &&
+    !m_canvas->Is_Roi_Selection_Active());
+  wxString label;
+  if (m_captured_index)
+  {
+    label = wxString::Format(wxString::FromUTF8(u8"本次运行 %llu / %llu  Frame="),
+      static_cast<unsigned long long>(*m_captured_index + 1),
+      static_cast<unsigned long long>(m_captured_frames.size()));
+    label += m_captured_frame_number
+      ? wxString::Format("%llu", *m_captured_frame_number)
+      : wxString("--");
+  }
+  else
+  {
+    label = wxString::Format(
+      wxString::FromUTF8(u8"%s  本次运行 %llu 张"),
+      wxString::FromUTF8(m_static_image_active ? u8"静态图片" : u8"实时"),
+      static_cast<unsigned long long>(m_captured_frames.size()));
+  }
+  m_history_text->SetLabel(label);
+  Layout();
+}
+
+void Camera_2D_Image_View::On_History_Key(wxKeyEvent &event)
+{
+  if (event.HasAnyModifiers() || m_canvas->Is_Roi_Selection_Active() ||
+      m_captured_frames.empty() || wxWindow::GetCapture())
+  {
+    event.Skip();
+    return;
+  }
+  if (event.GetKeyCode() == WXK_LEFT)
+    Browse_Captured_Frame(-1);
+  else if (event.GetKeyCode() == WXK_RIGHT)
+    Browse_Captured_Frame(1);
+  else
+    event.Skip();
 }
 
 void Camera_2D_Image_View::On_Fit(wxCommandEvent &)
@@ -764,6 +899,7 @@ void Camera_2D_Image_View::Worker_Loop()
     std::shared_ptr<const jutze_camera::camera_frame> frame;
     std::vector<std::string> template_ids;
     unsigned long long job_id = 0;
+    unsigned long long generation = 0;
     {
       std::unique_lock<std::mutex> lock(m_worker_mutex);
       m_worker_ready.wait(
@@ -780,10 +916,12 @@ void Camera_2D_Image_View::Worker_Loop()
       m_pending_frame.reset();
       template_ids = m_matching_template_ids;
       job_id = m_next_job_id++;
+      generation = m_conversion_generation;
     }
 
     Conversion_Result result;
     result.job_id = job_id;
+    result.generation = generation;
     result.success = Convert_Camera_2D_Frame(
       *frame, &result.image, &result.error);
     if (result.success)
@@ -794,7 +932,8 @@ void Camera_2D_Image_View::Worker_Loop()
     }
     {
       std::lock_guard<std::mutex> lock(m_worker_mutex);
-      m_pending_result = std::move(result);
+      if (!m_exit_requested && generation == m_conversion_generation)
+        m_pending_result = std::move(result);
     }
   }
 }
@@ -806,7 +945,8 @@ void Camera_2D_Image_View::Consume_Result()
     std::lock_guard<std::mutex> lock(m_worker_mutex);
     if (m_pending_result)
     {
-      result = std::move(m_pending_result);
+      if (m_pending_result->generation == m_conversion_generation)
+        result = std::move(m_pending_result);
       m_pending_result.reset();
     }
   }
@@ -886,13 +1026,26 @@ void Camera_2D_Image_View::Consume_Result()
       found_detection->center_x,
       found_detection->center_y);
   }
+  if (m_captured_index)
+  {
+    m_captured_frame_number = result->image.frame_number;
+    Update_History_Controls();
+    status_label = wxString::Format(
+      wxString::FromUTF8(u8"本次运行采集图像  %u × %u  Frame=%llu"),
+      result->image.width, result->image.height, result->image.frame_number);
+    if (found_detection != result->detections.end())
+      status_label += wxString::Format(
+        wxString::FromUTF8(u8"  十字中心 X=%.2f px，Y=%.2f px"),
+        found_detection->center_x, found_detection->center_y);
+  }
   m_status_text->SetLabel(status_label);
 }
 
 void Camera_2D_Image_View::On_Timer(wxTimerEvent &)
 {
-  if (m_static_image_active) return;
+  if (m_static_image_active && !m_captured_index) return;
   Consume_Result();
+  if (m_static_image_active) return;
   if (!IsShownOnScreen())
   {
     return;

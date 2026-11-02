@@ -531,7 +531,7 @@ Run_Image_Processing_Result Process_Run_Images(
         item.error = "运动点图像为空";
       else if( !Convert_Camera_2D_Frame(*capture.frame, &item.image, &item.error) )
         item.error = "图像转换失败：" + item.error;
-      else if( options.save_original_images )
+      else if( options.save_original_images && !options.preview_only )
       {
         std::ostringstream name;
         name << "P" << std::setw(3) << std::setfill('0') << item.point.id
@@ -625,10 +625,10 @@ Run_Image_Processing_Result Process_Run_Images(
           "mosaic_group_" + std::to_string(group.id) + ".png");
         if( error.empty() && build_pose_mosaic(selected, options.fov_configuration,
               options.flange_from_camera_pose, group, &mosaic, &error) &&
-            save_rgb_image(mosaic, path, &error) )
+            (options.preview_only || save_rgb_image(mosaic, path, &error)) )
         {
-          group_result.mosaic = make_image_preview(mosaic, 360, 260);
-          group_result.mosaic_path = path;
+          group_result.mosaic = options.preview_only ? std::move(mosaic) : make_image_preview(mosaic, 360, 260);
+          if (!options.preview_only) group_result.mosaic_path = path;
           group_result.success = true;
           group_result.message = "拼图完成，共 " + std::to_string(selected.size()) + " 个运动点";
         }
@@ -639,9 +639,10 @@ Run_Image_Processing_Result Process_Run_Images(
       {
         group_result.message = std::string("拼图处理异常：") + error.what();
       }
-      if( group_result.success && result.mosaic_path.empty() )
+      if( group_result.success && result.mosaic.rgb.empty() )
       {
-        result.mosaic = group_result.mosaic;
+        result.mosaic = options.preview_only
+          ? make_image_preview(group_result.mosaic, 360, 260) : group_result.mosaic;
         result.mosaic_path = group_result.mosaic_path;
       }
       if( !group_result.success )
@@ -655,8 +656,10 @@ Run_Image_Processing_Result Process_Run_Images(
     }
     result.success = all_success;
     if( result.success )
-      result.message = "图片与拼图处理完成，共 " +
-        std::to_string(result.groups.size()) + " 组；目录：" + image_directory.string();
+      result.message = options.preview_only
+        ? "实时纠偏预览已更新（未覆盖原文件）"
+        : "图片与拼图处理完成，共 " + std::to_string(result.groups.size()) +
+          " 组；目录：" + image_directory.string();
   }
   catch( const std::exception& error )
   {

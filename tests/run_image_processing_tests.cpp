@@ -167,6 +167,54 @@ void Test_Full_Resolution_Path()
           "Panel preview should remain bounded");
 }
 
+void Test_Live_Preview()
+{
+  Temporary_Directory directory;
+  application::Run_Image_Processing_Options options;
+  options.image_directory = directory.path;
+  options.build_mosaic = true;
+  options.save_original_images = true;
+  options.fov_configuration.length_mm = 400;
+  options.fov_configuration.width_mm = 300;
+  auto capture = Capture();
+  const std::vector<std::uint8_t> pixels(400 * 300 * 3, 120);
+  capture.frame = std::make_shared<jutze_camera::camera_frame>(
+    "test", "serial", 400, 300,
+    static_cast<unsigned int>(jutze_camera::pixel_format::rgb8),
+    42, pixels.data(), pixels.size());
+  options.mosaic_configuration.groups = {Group(1, {1, 2})};
+  auto second = capture;
+  second.point.id = 2;
+  const auto saved = application::Process_Run_Images({capture, second}, options);
+  Require(saved.success, "Initial preview fixture failed");
+  const auto mosaic_time = std::filesystem::last_write_time(saved.mosaic_path);
+  const auto original_time = std::filesystem::last_write_time(directory.path / "P001_frame_42.png");
+
+  options.preview_only = true;
+  options.mosaic_configuration.groups[0].corrections = {{2, 100, 0}};
+  const auto preview = application::Process_Run_Images({capture, second}, options);
+  Require(preview.success && preview.groups.size() == 1, "Live preview failed");
+  Require(preview.groups[0].mosaic.width == 500 && preview.groups[0].mosaic.height == 300,
+          "Live correction did not return corrected full-resolution image");
+  Require(preview.mosaic.width <= 360 && preview.mosaic.height <= 260,
+          "Live preview duplicated a full image in compatibility fields");
+  Require(preview.mosaic_path.empty() && preview.groups[0].mosaic_path.empty(),
+          "Live preview advertised a saved file");
+  Require(std::filesystem::last_write_time(saved.mosaic_path) == mosaic_time &&
+          std::filesystem::last_write_time(directory.path / "P001_frame_42.png") == original_time,
+          "Live preview overwrote saved images");
+  wxImage unchanged(wxString(saved.mosaic_path.wstring()), wxBITMAP_TYPE_PNG);
+  Require(unchanged.IsOk() && unchanged.GetWidth() == 400,
+          "Live correction replaced original mosaic");
+  Require(capture.frame && second.frame && second.point.world_pose == capture.point.world_pose,
+          "Live preview mutated retained captures");
+
+  options.image_directory = directory.path / "not-created";
+  const auto memory_only = application::Process_Run_Images({capture, second}, options);
+  Require(memory_only.success && !std::filesystem::exists(options.image_directory),
+          "Preview-only mode requires or creates an output directory");
+}
+
 void Test_Failures()
 {
   Temporary_Directory directory;
@@ -596,6 +644,7 @@ int main()
     Test_Mosaic(true);
     Test_Mosaic_Placement();
     Test_Full_Resolution_Path();
+    Test_Live_Preview();
     Test_Failures();
     Test_Group_Isolation_And_Order();
     Test_Base_Axes_And_Reversal();

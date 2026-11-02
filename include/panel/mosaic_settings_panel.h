@@ -15,6 +15,7 @@ public:
     const std::vector<robot_model::Robot_Teach_Point> &points,
     const robot_model::Mosaic_Configuration &configuration, bool reset = false);
   void Set_On_Apply(std::function<bool(const robot_model::Mosaic_Configuration &)> callback);
+  void Set_On_Preview(std::function<void(const robot_model::Mosaic_Configuration &, std::size_t)> callback);
 private:
   class Editor;
   Editor *m_editor = nullptr;

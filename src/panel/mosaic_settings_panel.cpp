@@ -12,6 +12,7 @@
 #include <wx/spinctrl.h>
 #include <algorithm>
 #include <limits>
+#include <cmath>
 
 class Mosaic_Settings_Panel::Editor : public wxPanel
 {
@@ -98,11 +99,22 @@ public:
     right->Add(correction_row, 0, wxEXPAND);
     auto *zero = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"当前点归零"));
     right->Add(zero, 0, wxTOP, 4);
-    zero->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { m_u->SetValue(0); m_v->SetValue(0); Store_Correction(); });
+    zero->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+    {
+      m_loading_correction = true;
+      m_u->SetValue(0); m_v->SetValue(0);
+      m_loading_correction = false;
+      Preview_Correction();
+    });
+    for (auto *control : {m_u, m_v})
+    {
+      control->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent &) { Preview_Correction(); });
+      control->Bind(wxEVT_TEXT, [this](wxCommandEvent &) { Preview_Correction(); });
+    }
     m_selection->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &) { Store_Correction(); Load_Correction(); });
     m_selection->Bind(wxEVT_CHECKLISTBOX, [this](wxCommandEvent &) { Store_Correction(); Load_Correction(); });
     auto *correction_help = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
-      u8"仅补偿此组内该点图片，不改机器人运动。应用后下次生成拼图生效，已有PNG不变。建议保留一张图为零补偿参考。"));
+      u8"仅补偿此组内该点图片，不改机器人运动。修改U/V后自动重拼最近一次采集并更新画面预览；已有PNG不变。点击应用并保存Progress以保留参数。建议保留一张图为零补偿参考。"));
     correction_help->Wrap(350);
     right->Add(correction_help, 0, wxTOP, 6);
     body->Add(right, 0, wxEXPAND);
@@ -198,8 +210,25 @@ public:
     Refresh_Groups(); Load();
   }
   std::function<bool(const robot_model::Mosaic_Configuration &)> m_on_apply;
+  std::function<void(const robot_model::Mosaic_Configuration &, std::size_t)> m_on_preview;
 
 private:
+  void Preview_Correction()
+  {
+    if (m_loading_correction || !m_correction_id) return;
+    double u = 0, v = 0;
+    if (!m_u->GetTextValue().ToDouble(&u) || !m_v->GetTextValue().ToDouble(&v) ||
+        !std::isfinite(u) || !std::isfinite(v) ||
+        std::abs(u) > 10000 || std::abs(v) > 10000) return;
+    Store();
+    std::string error;
+    if (!robot_model::Validate_Mosaic_Configuration(m_configuration, m_points, &error))
+    {
+      Set_Status(wxString::FromUTF8(error));
+      return;
+    }
+    if (m_on_preview) m_on_preview(m_configuration, static_cast<std::size_t>(m_current));
+  }
   void Store_Correction()
   {
     if (m_current < 0 || !m_correction_id) return;
@@ -211,6 +240,7 @@ private:
   }
   void Load_Correction()
   {
+    m_loading_correction = true;
     m_correction_id = 0;
     m_u->SetValue(0); m_v->SetValue(0);
     const int selected = m_selection->GetSelection();
@@ -222,6 +252,7 @@ private:
         { m_u->SetValue(value.offset_u_mm); m_v->SetValue(value.offset_v_mm); }
     }
     m_u->Enable(m_correction_id != 0); m_v->Enable(m_correction_id != 0);
+    m_loading_correction = false;
   }
   void Store()
   {
@@ -277,6 +308,7 @@ private:
   }
   wxSpinCtrlDouble *m_u = nullptr, *m_v = nullptr;
   std::size_t m_correction_id = 0;
+  bool m_loading_correction = false;
   std::string m_model;
   std::vector<robot_model::Robot_Teach_Point> m_points;
   wxChoice *m_first = nullptr, *m_last = nullptr;
@@ -313,4 +345,9 @@ void Mosaic_Settings_Panel::Set_On_Apply(
   std::function<bool(const robot_model::Mosaic_Configuration &)> callback)
 {
   m_editor->m_on_apply = std::move(callback);
+}
+void Mosaic_Settings_Panel::Set_On_Preview(
+  std::function<void(const robot_model::Mosaic_Configuration &, std::size_t)> callback)
+{
+  m_editor->m_on_preview = std::move(callback);
 }
