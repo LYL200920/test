@@ -1,0 +1,30 @@
+&ACCESS RV1
+DEF  Fly_Capture (P_start:IN, P_end:IN, reference_point:IN, trig_time:IN, slow_speed:IN, fast_speed:IN, cdis_val:IN, finish:IN)
+   E6POS P_start,P_end
+   INT trig_time,cdis_val
+   REAL slow_speed,fast_speed
+   BOOL finish,reference_point
+   
+   $APO.CDIS = cdis_val
+   
+   CONTINUE
+   $VEL.CP = fast_speed
+   SLIN P_start C_DIS
+   IF reference_point==FALSE THEN
+      TRIGGER WHEN PATH = trig_time ONSTART DELAY = 0 DO t2() PRIO = -1
+   ELSE
+      TRIGGER WHEN PATH = trig_time DELAY = 0 DO t2() PRIO = -1
+   ENDIF
+   
+   CONTINUE
+   $VEL.CP = slow_speed
+   IF finish == FALSE THEN
+      SLIN P_end C_DIS
+   ELSE
+      SLIN P_end
+   ENDIF 
+END
+
+DEF t2()
+   Pulse($OUT[10], TRUE, 0.03)
+END

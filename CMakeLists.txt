@@ -222,6 +222,16 @@ if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
     PUBLIC camera_calibration_core
     PRIVATE opencv_imgcodecs opencv_imgproc pugixml)
 
+  add_library(camera_calibration_geometry STATIC
+    src/camera_calibration/calibration_geometry.cpp
+    src/camera_calibration/calibration_archive_repository.cpp
+    include/camera_calibration/calibration_geometry.h
+    include/camera_calibration/calibration_archive_repository.h)
+  target_include_directories(camera_calibration_geometry PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration")
+  target_link_libraries(camera_calibration_geometry
+    PUBLIC camera_calibration_core robot_model_domain PRIVATE pugixml)
+
   add_library(camera_calibration_workflow STATIC
     src/application/camera_intrinsic_calibration_workflow.cpp
     include/application/camera_intrinsic_calibration_workflow.h)
@@ -473,6 +483,7 @@ if(MSVC)
     list(APPEND msvc_project_targets
       camera_calibration_core
       camera_calibration_io
+      camera_calibration_geometry
       camera_calibration_workflow
       camera_intrinsic_calibration_cli)
   endif()
@@ -576,6 +587,9 @@ if(BUILD_TESTING)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)
 
   if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    add_project_test(calibration_geometry_tests calibration_geometry_tests.cpp)
+    target_link_libraries(calibration_geometry_tests PRIVATE camera_calibration_geometry)
+
     add_project_test(camera_intrinsic_calibration_tests
                      camera_intrinsic_calibration_tests.cpp)
     target_link_libraries(camera_intrinsic_calibration_tests PRIVATE
