@@ -24,8 +24,8 @@ public:
     auto *help = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
       u8"仅影响拼图，不改变运动或采图。无分组时：全部运动采图点 + 首张相机平面。\n"
       u8"只列出可采图的运动点；非采图点不可选。水平正向向右，垂直正向向下。"));
-    help->Wrap(350);
-    root->Add(help, 0, wxALL, 10);
+    Register_Wrapped_Text(help);
+    root->Add(help, 0, wxEXPAND | wxALL, 10);
     auto *body = new wxBoxSizer(wxVERTICAL);
     auto *left = new wxBoxSizer(wxVERTICAL);
     m_groups = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 85));
@@ -47,13 +47,17 @@ public:
     select_row->Add(all, 0, wxRIGHT, 6);
     select_row->Add(none);
     right->Add(select_row, 0, wxBOTTOM, 6);
-    auto *range_row = new wxBoxSizer(wxHORIZONTAL);
+    auto *range_row = new wxBoxSizer(wxVERTICAL);
     auto *first = m_first = new wxChoice(this, wxID_ANY);
     auto *last = m_last = new wxChoice(this, wxID_ANY);
     auto *range = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"选中区间"));
-    range_row->Add(first, 1, wxRIGHT, 4);
-    range_row->Add(last, 1, wxRIGHT, 4);
-    range_row->Add(range);
+    auto *range_choices = new wxBoxSizer(wxHORIZONTAL);
+    first->SetMinSize(FromDIP(wxSize(70, -1)));
+    last->SetMinSize(FromDIP(wxSize(70, -1)));
+    range_choices->Add(first, 1, wxRIGHT, 4);
+    range_choices->Add(last, 1);
+    range_row->Add(range_choices, 0, wxEXPAND | wxBOTTOM, 4);
+    range_row->Add(range, 0, wxEXPAND);
     range->Bind(wxEVT_BUTTON, [this, first, last](wxCommandEvent &)
     {
       if (m_current < 0 || first->GetSelection() < 0 || last->GetSelection() < 0) return;
@@ -83,9 +87,10 @@ public:
     m_reverse_v = new wxCheckBox(this, wxID_ANY, wxString::FromUTF8(u8"垂直反向"));
     right->Add(m_reverse_h);
     right->Add(m_reverse_v);
-    right->Add(new wxStaticText(this, wxID_ANY,
-      wxString::FromUTF8(u8"逐点纠偏：选择上方已勾选点，ΔU向右 / ΔV向下（mm）")),
-      0, wxTOP | wxBOTTOM, 6);
+    auto *correction_title = new wxStaticText(this, wxID_ANY,
+      wxString::FromUTF8(u8"逐点纠偏：选择上方已勾选点，ΔU向右 / ΔV向下（mm）"));
+    Register_Wrapped_Text(correction_title);
+    right->Add(correction_title, 0, wxEXPAND | wxTOP | wxBOTTOM, 6);
     auto *correction_row = new wxBoxSizer(wxHORIZONTAL);
     m_u = new wxSpinCtrlDouble(this, wxID_ANY, "0", wxDefaultPosition, wxSize(110, -1),
       wxSP_ARROW_KEYS, -10000, 10000, 0, 0.1);
@@ -115,17 +120,23 @@ public:
     m_selection->Bind(wxEVT_CHECKLISTBOX, [this](wxCommandEvent &) { Store_Correction(); Load_Correction(); });
     auto *correction_help = new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
       u8"仅补偿此组内该点图片，不改机器人运动。修改U/V后自动重拼最近一次采集并更新画面预览；已有PNG不变。点击应用并保存Progress以保留参数。建议保留一张图为零补偿参考。"));
-    correction_help->Wrap(350);
-    right->Add(correction_help, 0, wxTOP, 6);
+    Register_Wrapped_Text(correction_help);
+    right->Add(correction_help, 0, wxEXPAND | wxTOP, 6);
     body->Add(right, 0, wxEXPAND);
     root->Add(body, 0, wxEXPAND | wxLEFT | wxRIGHT, 10);
     auto *apply = new wxButton(this, wxID_ANY, wxString::FromUTF8(u8"应用拼图设置"));
     root->Add(apply, 0, wxEXPAND | wxALL, 10);
     m_status = new wxStaticText(this, wxID_ANY,
       wxString::FromUTF8(u8"修改后点击应用，再保存 Progress。切换工具页保留草稿。"));
-    m_status->Wrap(350);
+    Register_Wrapped_Text(m_status);
     root->Add(m_status, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
     SetSizer(root);
+    m_groups->SetMinSize(wxSize(1, FromDIP(85)));
+    m_selection->SetMinSize(wxSize(1, FromDIP(200)));
+    m_name->SetMinSize(wxSize(1, -1));
+    m_reference->SetMinSize(wxSize(1, -1));
+    m_horizontal->SetMinSize(FromDIP(wxSize(60, -1)));
+    m_vertical->SetMinSize(FromDIP(wxSize(60, -1)));
     m_groups->Bind(wxEVT_LISTBOX, [this](wxCommandEvent &)
     { Store(); m_current = m_groups->GetSelection(); Load(); });
     add->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
@@ -209,10 +220,48 @@ public:
     if (!m_point_ids.empty()) { m_first->SetSelection(0); m_last->SetSelection(m_point_ids.size()-1); }
     Refresh_Groups(); Load();
   }
+  void Fit_Width(int width)
+  {
+    const int text_width = std::max(FromDIP(80), width - 20);
+    for (auto &item : m_wrapped_text)
+    {
+      // wxStaticText::Wrap only breaks at spaces in this wxWidgets version.
+      // Measure characters as well so Chinese text cannot widen the sidebar.
+      wxString wrapped, line;
+      for (const auto character : item.second)
+      {
+        if (character == '\n')
+        {
+          wrapped += line + '\n';
+          line.clear();
+          continue;
+        }
+        wxString next = line;
+        next += character;
+        if (!line.empty() && item.first->GetTextExtent(next).x > text_width)
+        {
+          wrapped += line + '\n';
+          line.clear();
+        }
+        line += character;
+      }
+      wrapped += line;
+      item.first->SetLabel(wrapped);
+      item.first->SetMinSize(wxSize(1, item.first->GetBestSize().y));
+    }
+    SetMinSize(wxSize(1, GetSizer()->CalcMin().y));
+  }
+
   std::function<bool(const robot_model::Mosaic_Configuration &)> m_on_apply;
   std::function<void(const robot_model::Mosaic_Configuration &, std::size_t)> m_on_preview;
 
 private:
+  void Register_Wrapped_Text(wxStaticText *text)
+  {
+    m_wrapped_text.emplace_back(text, text->GetLabel());
+    text->SetMinSize(wxSize(1, -1));
+  }
+
   void Preview_Correction()
   {
     if (m_loading_correction || !m_correction_id) return;
@@ -303,9 +352,12 @@ private:
   }
   void Set_Status(const wxString &text)
   {
-    m_status->SetLabel(text); m_status->Wrap(350); Layout();
-    static_cast<wxScrolledWindow *>(GetParent())->FitInside();
+    for (auto &item : m_wrapped_text)
+      if (item.first == m_status) item.second = text;
+    auto *panel = static_cast<Mosaic_Settings_Panel *>(GetParent());
+    panel->Layout_Content();
   }
+  std::vector<std::pair<wxStaticText *, wxString>> m_wrapped_text;
   wxSpinCtrlDouble *m_u = nullptr, *m_v = nullptr;
   std::size_t m_correction_id = 0;
   bool m_loading_correction = false;
@@ -329,9 +381,27 @@ Mosaic_Settings_Panel::Mosaic_Settings_Panel(wxWindow *parent)
   SetScrollRate(0, 12);
   m_editor = new Editor(this);
   auto *sizer = new wxBoxSizer(wxVERTICAL);
-  sizer->Add(m_editor, 1, wxEXPAND);
+  sizer->Add(m_editor, 0, wxEXPAND);
   SetSizer(sizer);
-  FitInside();
+  Bind(wxEVT_SIZE, [this](wxSizeEvent &event)
+  {
+    Layout_Content();
+    event.Skip();
+  });
+  Layout_Content();
+}
+void Mosaic_Settings_Panel::Layout_Content()
+{
+  if (!m_editor || m_laying_out) return;
+  m_laying_out = true;
+  // The vertical scrollbar can reduce client width after FitInside().
+  for (int pass = 0; pass < 2; ++pass)
+  {
+    m_editor->Fit_Width(GetClientSize().x);
+    Layout();
+    FitInside();
+  }
+  m_laying_out = false;
 }
 Mosaic_Settings_Panel::~Mosaic_Settings_Panel() = default;
 void Mosaic_Settings_Panel::Set_Context(const std::string &model,
@@ -339,7 +409,7 @@ void Mosaic_Settings_Panel::Set_Context(const std::string &model,
   const robot_model::Mosaic_Configuration &configuration, bool reset)
 {
   m_editor->Set_Context(model, points, configuration, reset);
-  Layout(); FitInside();
+  Layout_Content();
 }
 void Mosaic_Settings_Panel::Set_On_Apply(
   std::function<bool(const robot_model::Mosaic_Configuration &)> callback)

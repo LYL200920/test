@@ -17,7 +17,9 @@ public:
   void Set_On_Apply(std::function<bool(const robot_model::Mosaic_Configuration &)> callback);
   void Set_On_Preview(std::function<void(const robot_model::Mosaic_Configuration &, std::size_t)> callback);
 private:
+  void Layout_Content();
   class Editor;
   Editor *m_editor = nullptr;
+  bool m_laying_out = false;
 };
 #endif
