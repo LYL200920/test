@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<RobotProgress version="4" robotModel="KR10_R1100_2">
+<RobotProgress version="5" robotModel="KR10_R1100_2">
   <Point id="1" name="P[1]" type="transition" a1="1.439907" a2="-103.451981" a3="110.068657" a4="0.000101" a5="83.382728999999998" a6="181.43959000000001" x="408.93927826763695" y="-10.279423056871043" z="820.13078548878184" a="-0.00030536103036147454" b="-0.00059229167334445116" c="179.99988475624988" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
   <Point id="2" name="P[2]" type="motion" a1="-4.9423954362143281" a2="-98.232824275828762" a3="115.29743868629436" a4="0.00016950122931265194" a5="72.934811889803186" a6="175.05725611803598" x="442.71292599794197" y="38.283640293354026" z="737.00733227134401" a="-0.000298704234444263" b="-0.0005855275397335342" c="179.99988799380759" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
   <Point id="3" name="P[3]" type="motion" a1="-10.027833871138673" a2="-97.674045010145548" a3="114.82532313994622" a4="0.00022168302485978364" a5="72.848156130844544" a6="169.97179951999573" x="442.71291916331234" y="78.283666861318693" z="737.00741728656521" a="-0.00030123389718044895" b="-0.00059398160040256408" c="179.99988992535464" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
@@ -24,4 +24,26 @@
   <Point id="22" name="P[22]" type="motion" a1="28.222925135364108" a2="-55.082308799442828" a3="109.60724915835534" a4="-67.380312862270046" a5="107.68986568512079" a6="241.58965856160231" x="585.44120825642142" y="-224.38445975540401" z="457.44371245043482" a="-0.00046871361129965808" b="-4.0011384279526672" c="-88.000673079814774" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
   <Point id="23" name="P[23]" type="transition" a1="15.260747547266924" a2="-75.262711892509856" a3="84.116025605046445" a4="-4.6515383865642084e-05" a5="81.146088835288865" a6="195.26044250457602" x="656.07955870926287" y="-178.99996437414836" z="797.02132549070393" a="-0.00031220131553261112" b="-0.0005884829377624213" c="179.99988708693806" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
   <Point id="24" name="P[24]" type="transition" a1="1.4399070000000016" a2="-103.451981" a3="110.068657" a4="0.00010100000000000002" a5="83.382728999999998" a6="181.43959000000001" x="408.93927826763695" y="-10.279423056871046" z="820.13078548878184" a="-0.00030536103036286606" b="-0.00059229167334444736" c="179.99988475624988" hasWorldPose="true" pointCloud="F:\software\test\test\Resource\PointCloud\test_teach_cloud.ply" pointCloudName="test_teach_cloud" templateId="template_1" templateName="test_0" hasTemplate="true" templateX="444.93000000000001" templateY="77.079999999999998" templateZ="739.32000000000005" templateA="0" templateB="0" templateC="-180" coordinateId="flange" coordinateName="Flange" hasCoordinate="true" coordinateX="0" coordinateY="0" coordinateZ="0" coordinateA="0" coordinateB="0" coordinateC="0" />
+  <MosaicGroups>
+    <Group id="1" name="Group 1" reference="first_camera" horizontalAxis="X" verticalAxis="Y" reverseHorizontal="true" reverseVertical="false">
+      <PointRef id="2" />
+      <PointRef id="3" />
+      <PointRef id="4" />
+      <PointRef id="5" />
+      <PointRef id="6" />
+      <PointRef id="7" />
+      <PointRef id="8" />
+      <PointRef id="9" />
+      <PointRef id="10" />
+      <PointRef id="11" />
+      <PointRef id="12" />
+      <PointRef id="13" />
+      <PointRef id="14" />
+      <PointRef id="15" />
+      <PointRef id="16" />
+      <PointRef id="17" />
+      <PointRef id="18" />
+      <PointRef id="19" />
+    </Group>
+  </MosaicGroups>
 </RobotProgress>
