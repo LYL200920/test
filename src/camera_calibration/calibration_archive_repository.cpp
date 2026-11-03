@@ -1,4 +1,5 @@
 #include "calibration_archive_repository.h"
+#include "telecentric_planar_calibration.h"
 #include "pugixml.hpp"
 
 #include <charconv>
@@ -273,17 +274,100 @@ void Archive(Codec &c, Calibration_Archive &v)
   c.Optional("WorkPlane", v.work_plane, Plane);
   c.List("Sample", v.samples, Sample);
 }
+void Telecentric_View(Codec &c, Telecentric_Planar_View &v)
+{
+  c.Field("image", v.image_id); c.Field("rmsPx", v.rms_px);
+  c.Field("maximumErrorPx", v.maximum_error_px);
+  c.Field("linearDeviationPercent", v.linear_deviation_percent);
+}
+void Telecentric_Result(Codec &c, Telecentric_Planar_Result &v)
+{
+  c.Field("width", v.width); c.Field("height", v.height);
+  c.Object("Board", v.board, Board);
+  c.Object("PixelsFromPlaneMm", v.pixels_from_plane_mm, Array<double, 4>);
+  c.Field("rmsPx", v.rms_px); c.Field("maximumErrorPx", v.maximum_error_px);
+  c.Field("maximumLinearDeviationPercent", v.maximum_linear_deviation_percent);
+  c.List("View", v.views, Telecentric_View);
+}
+void Telecentric_Profile(Codec &c, Telecentric_Planar_Profile &v)
+{
+  // Independent from pinhole intrinsics and robot/work-plane archives. This
+  // describes displacements only; it does not establish an absolute origin,
+  // a robot frame, depth, or a nonlinear distortion correction.
+  c.Literal("version", "1");
+  c.Literal("model", "affine-fixed-plane");
+  c.Literal("distortion", "uncorrected");
+  c.Literal("lengthUnit", "mm");
+  c.Literal("pixelAxes", "u-right-v-down");
+  c.Literal("displacementConvention", "pixel-displacement-from-board-axis-mm-row-major");
+  c.Object("Identity", v.identity, Identity);
+  c.Object("Image", v.image, Image);
+  c.Field("fixedSetupId", v.fixed_setup_id);
+  c.Object("Result", v.result, Telecentric_Result);
+}
+bool Validate_Telecentric_Profile(const Telecentric_Planar_Profile &v, std::string *error)
+{
+  if (!Match_Telecentric_Planar_Profile(v, v.image, v.fixed_setup_id, error)) return false;
+  // XML attributes must not silently truncate embedded NULs on save. Match
+  // validates the numerical/context data; also require meaningful stored IDs.
+  const auto text = [](const std::string &value)
+  {
+    return value.find('\0') == std::string::npos &&
+      value.find_first_not_of(" \t\r\n") != std::string::npos;
+  };
+  bool valid = text(v.identity.id) && text(v.identity.created_utc) && text(v.fixed_setup_id);
+  for (const auto &view : v.result.views) valid = valid && text(view.image_id);
+  if (!valid && error) *error = "Invalid telecentric profile identity or view identifier";
+  return valid;
+}
 bool Fail(std::string *error, const std::string &message)
 {
   if (error) *error = message;
   return false;
 }
+
+// Both schemas use the same strict readback and non-overwriting publication
+// path. Only the root, codec and domain validator differ.
+template <typename T, typename Schema, typename Validator>
+bool Load_Document(const std::filesystem::path &path, T *output, const char *root_name,
+  Schema schema, Validator validate, std::string *error)
+{
+  if (error) error->clear();
+  if (!output) return Fail(error, "Calibration archive output is null");
+  try
+  {
+    constexpr std::uintmax_t maximum_bytes = 32 * 1024 * 1024;
+    const auto size = std::filesystem::file_size(path);
+    if (size == 0 || size > maximum_bytes) return Fail(error, "Invalid calibration archive size");
+    std::ifstream input(path, std::ios::binary);
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    if (!input.read(bytes.data(), static_cast<std::streamsize>(size)) ||
+        input.peek() != std::char_traits<char>::eof() || bytes.find('\0') != std::string::npos)
+      return Fail(error, "Unable to read complete UTF-8 calibration archive");
+    pugi::xml_document document;
+    const auto parsed = document.load_buffer(bytes.data(), bytes.size(),
+      pugi::parse_default | pugi::parse_doctype, pugi::encoding_utf8);
+    if (!parsed) return Fail(error, "Unable to parse calibration archive XML");
+    auto root = document.child(root_name);
+    if (!root || root != document.first_child() || root.next_sibling())
+      return Fail(error, std::string("Expected a single ") + root_name + " root");
+    T value;
+    Codec codec(root, true);
+    schema(codec, value);
+    codec.Finish();
+    if (!validate(value, error)) return false;
+    *output = std::move(value);
+    return true;
+  }
+  catch (const std::exception &exception) { return Fail(error, exception.what()); }
 }
 
-bool Save_Calibration_Archive(const std::filesystem::path &path,
-  const Calibration_Archive &archive, std::string *error)
+template <typename T, typename Schema, typename Validator>
+bool Save_Document(const std::filesystem::path &path, const T &input, const char *root_name,
+  Schema schema, Validator validate, std::string *error)
 {
-  if (!Validate_Calibration_Archive(archive, error)) return false;
+  if (error) error->clear();
+  if (!validate(input, error)) return false;
   try
   {
     if (path.empty() || std::filesystem::exists(path))
@@ -299,51 +383,42 @@ bool Save_Calibration_Archive(const std::filesystem::path &path,
       std::filesystem::path path;
       ~Cleanup() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
     } cleanup{staging};
-    auto value = archive;
+    auto value = input;
     pugi::xml_document document;
-    Codec codec(document.append_child("CalibrationArchive"), false);
-    Archive(codec, value);
+    Codec codec(document.append_child(root_name), false);
+    schema(codec, value);
     const auto temporary = staging / "archive.xml";
     if (!document.save_file(temporary.wstring().c_str(), "  "))
       return Fail(error, "Unable to write calibration archive");
-    Calibration_Archive verified;
-    if (!Load_Calibration_Archive(temporary, &verified, error)) return false;
+    T verified;
+    if (!Load_Document(temporary, &verified, root_name, schema, validate, error)) return false;
     std::filesystem::create_hard_link(temporary, path);
     return true;
   }
   catch (const std::exception &exception) { return Fail(error, exception.what()); }
 }
+}
 
+bool Save_Calibration_Archive(const std::filesystem::path &path,
+  const Calibration_Archive &archive, std::string *error)
+{
+  return Save_Document(path, archive, "CalibrationArchive", Archive, Validate_Calibration_Archive, error);
+}
 bool Load_Calibration_Archive(const std::filesystem::path &path,
   Calibration_Archive *archive, std::string *error)
 {
-  if (error) error->clear();
-  if (!archive) return Fail(error, "Calibration archive output is null");
-  try
-  {
-    constexpr std::uintmax_t maximum_bytes = 32 * 1024 * 1024;
-    const auto size = std::filesystem::file_size(path);
-    if (size == 0 || size > maximum_bytes) return Fail(error, "Invalid calibration archive size");
-    std::ifstream input(path, std::ios::binary);
-    std::string bytes(static_cast<std::size_t>(size), '\0');
-    if (!input.read(bytes.data(), static_cast<std::streamsize>(size)) ||
-        input.peek() != std::char_traits<char>::eof() || bytes.find('\0') != std::string::npos)
-      return Fail(error, "Unable to read complete UTF-8 calibration archive");
-    pugi::xml_document document;
-    const auto parsed = document.load_buffer(bytes.data(), bytes.size(),
-      pugi::parse_default | pugi::parse_doctype, pugi::encoding_utf8);
-    if (!parsed) return Fail(error, "Unable to parse calibration archive XML");
-    auto root = document.child("CalibrationArchive");
-    if (!root || root != document.first_child() || root.next_sibling())
-      return Fail(error, "Expected a single CalibrationArchive root");
-    Calibration_Archive value;
-    Codec codec(root, true);
-    Archive(codec, value);
-    codec.Finish();
-    if (!Validate_Calibration_Archive(value, error)) return false;
-    *archive = std::move(value);
-    return true;
-  }
-  catch (const std::exception &exception) { return Fail(error, exception.what()); }
+  return Load_Document(path, archive, "CalibrationArchive", Archive, Validate_Calibration_Archive, error);
+}
+bool Save_Telecentric_Planar_Profile(const std::filesystem::path &path,
+  const Telecentric_Planar_Profile &profile, std::string *error)
+{
+  return Save_Document(path, profile, "TelecentricPlanarProfile", Telecentric_Profile,
+    Validate_Telecentric_Profile, error);
+}
+bool Load_Telecentric_Planar_Profile(const std::filesystem::path &path,
+  Telecentric_Planar_Profile *profile, std::string *error)
+{
+  return Load_Document(path, profile, "TelecentricPlanarProfile", Telecentric_Profile,
+    Validate_Telecentric_Profile, error);
 }
 } // namespace camera_calibration

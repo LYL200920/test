@@ -447,6 +447,8 @@ bool Intrinsic_Calibration_Session::Calibrate(
       {
         flags |= cv::CALIB_FIX_K3;
       }
+      if (options.progress) options.progress({Calibration_Stage::Solving,
+        iteration + 1, active_indices.size()});
       overall_rms = cv::calibrateCamera(
         object_points,
         image_points,
@@ -479,6 +481,9 @@ bool Intrinsic_Calibration_Session::Calibrate(
         }
       }
 
+      if (options.progress) options.progress({Calibration_Stage::Evaluating,
+        iteration + 1, active_indices.size(), overall_rms, worst_rms,
+        impl_->observations[active_indices[worst_position]].image_id});
       const bool may_remove = options.maximum_view_rms_px > 0.0 &&
         worst_rms > options.maximum_view_rms_px &&
         iteration < options.maximum_outlier_removals &&
@@ -489,6 +494,9 @@ bool Intrinsic_Calibration_Session::Calibrate(
         break;
       }
       const std::size_t rejected_index = active_indices[worst_position];
+      if (options.progress) options.progress({Calibration_Stage::Rejecting,
+        iteration + 1, active_indices.size(), overall_rms, worst_rms,
+        impl_->observations[rejected_index].image_id});
       rejected_views.push_back({
         impl_->observations[rejected_index].image_id,
         worst_rms});
@@ -496,6 +504,8 @@ bool Intrinsic_Calibration_Session::Calibrate(
                            static_cast<std::ptrdiff_t>(worst_position));
     }
 
+    if (options.progress) options.progress({Calibration_Stage::Validating,
+      rejected_views.size() + 1, active_indices.size(), overall_rms, final_worst_rms});
     Camera_Intrinsics result;
     result.image_width = impl_->image_width;
     result.image_height = impl_->image_height;
@@ -569,6 +579,8 @@ bool Intrinsic_Calibration_Session::Calibrate(
       Set_Error(error_message, validation_error);
       return false;
     }
+    if (options.progress) options.progress({Calibration_Stage::Completed,
+      result.rejected_views.size() + 1, active_indices.size(), overall_rms, final_worst_rms});
     *intrinsics = std::move(result);
     return true;
   }

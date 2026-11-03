@@ -4,8 +4,11 @@
 #include "camera_2d_image_converter.h"
 #include "camera_calibration_progress_host.h"
 #include "camera_intrinsic_calibration_workflow.h"
+#include "telecentric_planar_calibration.h"
 
 #include <wx/dialog.h>
+#include <wx/timer.h>
+#include <chrono>
 
 #include <atomic>
 #include <filesystem>
@@ -70,6 +73,7 @@ private:
     Camera_2D_Display_Image preview_image;
     std::vector<application::Camera_Calibration_Capture> captures;
     camera_calibration::Camera_Intrinsics intrinsics;
+    std::optional<camera_calibration::Telecentric_Planar_Result> planar;
     std::size_t progress_point_index = 0;
     std::size_t progress_point_id = 0;
     std::size_t progress_retry_index = 0;
@@ -113,6 +117,7 @@ private:
   application::Camera_Intrinsic_Calibration_Workflow workflow_;
   std::filesystem::path session_image_directory_;
   camera_calibration::Camera_Intrinsics result_;
+  std::optional<camera_calibration::Telecentric_Planar_Result> planar_result_;
   bool has_result_ = false;
   bool busy_ = false;
   bool progress_active_ = false;
@@ -138,6 +143,17 @@ private:
   wxSpinCtrl *progress_speed_spin_ = nullptr;
   wxSpinCtrl *progress_settle_spin_ = nullptr;
   wxStaticText *review_text_ = nullptr;
+  wxGauge *calculation_gauge_ = nullptr;
+  wxStaticText *calculation_status_ = nullptr;
+  wxTextCtrl *calculation_log_ = nullptr;
+  wxTimer calculation_timer_;
+  std::chrono::steady_clock::time_point calculation_started_;
+  std::mutex calculation_progress_mutex_;
+  std::vector<camera_calibration::Calibration_Progress> calculation_updates_;
+  std::vector<std::string> planar_updates_;
+  wxString calculation_stage_;
+  bool calculating_ = false;
+  void Drain_Calculation_Progress();
   wxTextCtrl *result_text_ = nullptr;
   wxStaticText *result_path_text_ = nullptr;
   wxButton *capture_button_ = nullptr;

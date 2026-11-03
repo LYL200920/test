@@ -107,6 +107,8 @@ void Test_Synthetic_Calibration()
 
   camera_calibration::Calibration_Options options;
   options.minimum_view_count = 10;
+  std::vector<camera_calibration::Calibration_Progress> updates;
+  options.progress = [&updates](const auto &update) { updates.push_back(update); };
   camera_calibration::Camera_Intrinsics result;
   std::string error;
   Require(session.Calibrate(options, &result, &error),
@@ -121,6 +123,11 @@ void Test_Synthetic_Calibration()
     "std::abs(result.camera_matrix[5] - 1500.0) < 2.0");
   Require(result.overall_rms_px < 0.01,
     "result.overall_rms_px < 0.01");
+  using Stage = camera_calibration::Calibration_Stage;
+  Require(updates.size() == 4 && updates[0].stage == Stage::Solving &&
+    updates[1].stage == Stage::Evaluating && updates[2].stage == Stage::Validating &&
+    updates[3].stage == Stage::Completed && updates[0].active_views == 14 &&
+    updates[3].rms_px == result.overall_rms_px, "Solver progress ordering and metrics");
 }
 
 void Test_Repository_Round_Trip()
@@ -212,10 +219,14 @@ void Test_Degenerate_Focal_Length_Is_Rejected()
     "session.Add_Observation( 4096, 3000, corners, \"flat_\" + std::to_string(index), &error)");
   }
   camera_calibration::Calibration_Options options;
+  bool reported_complete = false;
+  options.progress = [&reported_complete](const auto &update)
+  { reported_complete |= update.stage == camera_calibration::Calibration_Stage::Completed; };
   camera_calibration::Camera_Intrinsics result;
   std::string error;
   Require(!session.Calibrate(options, &result, &error),
     "!session.Calibrate(options, &result, &error)");
+  Require(!reported_complete, "Failed solve must not report completed");
   Require(!error.empty(),
     "!error.empty()");
 }

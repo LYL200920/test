@@ -41,9 +41,11 @@ void Show_Image(Camera_2D_Bitmap_Canvas *canvas, const Camera_2D_Display_Image &
 }
 Camera_Intrinsic_Profile_Dialog::Camera_Intrinsic_Profile_Dialog(wxWindow *parent,
   Camera_2D_Service &camera, const camera_calibration::Camera_Intrinsics *result,
-  const camera_calibration::Chessboard_Configuration *board)
-  : wxDialog(parent, wxID_ANY, wxString::FromUTF8(u8"内参配置与去畸变对照"),
-      wxDefaultPosition, wxSize(1050, 780), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), camera_(camera)
+  const camera_calibration::Chessboard_Configuration *board, bool telecentric,
+  const camera_calibration::Telecentric_Planar_Result *planar_result)
+  : wxDialog(parent, wxID_ANY, wxString::FromUTF8(telecentric ? u8"远心固定平面配置" : u8"内参配置与去畸变对照"),
+      wxDefaultPosition, telecentric ? wxSize(900, 560) : wxSize(1050, 780),
+      wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER), camera_(camera), telecentric_(telecentric)
 {
   auto *root = new wxBoxSizer(wxVERTICAL);
   root->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(
@@ -56,6 +58,11 @@ Camera_Intrinsic_Profile_Dialog::Camera_Intrinsic_Profile_Dialog(wxWindow *paren
   serial_ = new wxTextCtrl(this, wxID_ANY); identity->Add(serial_, 1, wxEXPAND);
   identity->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(u8"镜头配置ID（手动确认）")));
   lens_ = new wxTextCtrl(this, wxID_ANY); identity->Add(lens_, 1, wxEXPAND);
+  if (telecentric_)
+  {
+    identity->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(u8"固定工况ID（平面/高度/姿态）")));
+    setup_ = new wxTextCtrl(this, wxID_ANY); identity->Add(setup_, 1, wxEXPAND);
+  }
   root->Add(identity, 0, wxEXPAND | wxALL, 8);
   auto *geometry = new wxFlexGridSizer(4, 6, 8);
   geometry->AddGrowableCol(1); geometry->AddGrowableCol(3);
@@ -75,13 +82,16 @@ Camera_Intrinsic_Profile_Dialog::Camera_Intrinsic_Profile_Dialog(wxWindow *paren
     buttons_.push_back(b); actions->Add(b, 0, wxRIGHT, 4);
   };
   button("读取连接相机ROI", [this] { Read_Camera(); });
-  button("加载内参", [this] { Load_Profile(); });
+  button(telecentric_ ? "加载远心配置" : "加载内参", [this] { Load_Profile(); });
   button("保存新版本", [this] { Save_Profile(); });
-  button("对照最新帧", [this] { Preview(true); });
-  button("对照离线图片", [this] { Preview(false); });
+  if (!telecentric_)
+  {
+    button("对照最新帧", [this] { Preview(true); });
+    button("对照离线图片", [this] { Preview(false); });
+  }
   root->Add(actions, 0, wxEXPAND | wxALL, 8);
   auto *images = new wxBoxSizer(wxHORIZONTAL);
-  for (int i = 0; i < 2; ++i)
+  for (int i = 0; !telecentric_ && i < 2; ++i)
   {
     auto *column = new wxBoxSizer(wxVERTICAL);
     column->Add(new wxStaticText(this, wxID_ANY, wxString::FromUTF8(i == 0 ? "原图" : "去畸变：K不变、不裁剪，边缘可能为黑色")), 0, wxBOTTOM, 4);
@@ -109,7 +119,18 @@ Camera_Intrinsic_Profile_Dialog::Camera_Intrinsic_Profile_Dialog(wxWindow *paren
     Show_Image(corrected_, value->original, value->corrected);
     Status("已完成冻结帧对照；原图未修改。当前内参ID：" + profile_.identity.id);
   });
-  if (result && board)
+  if (telecentric_)
+  {
+    if (planar_result)
+    {
+      planar_profile_.result = *planar_result;
+      has_profile_ = true;
+      numbers_[0]->SetValue(std::to_string(planar_result->width));
+      numbers_[1]->SetValue(std::to_string(planar_result->height));
+    }
+    Status("远心配置仅含固定平面位移映射；未校正非线性畸变，不含Tool/手眼外参。请确认原图来源和固定工况后保存。更换平面、高度或相对姿态后须重新验证。");
+  }
+  if (!telecentric_ && result && board)
   {
     profile_.intrinsics = *result; profile_.board = *board;
     profile_.intrinsics.camera_serial_number.clear();
@@ -171,6 +192,23 @@ void Camera_Intrinsic_Profile_Dialog::Load_Profile()
   if (dialog.ShowModal() != wxID_OK) return;
   const std::filesystem::path path(dialog.GetPath().ToStdWstring());
   camera_calibration::Calibration_Archive archive; std::string error;
+  if (telecentric_)
+  {
+    camera_calibration::Telecentric_Planar_Profile candidate;
+    if (!camera_calibration::Load_Telecentric_Planar_Profile(path, &candidate, &error))
+    { Status(error); return; }
+    planar_profile_ = std::move(candidate);
+    const auto &v = planar_profile_.image;
+    serial_->SetValue(wxString::FromUTF8(v.camera_serial));
+    lens_->SetValue(wxString::FromUTF8(v.lens_configuration_id));
+    setup_->SetValue(wxString::FromUTF8(planar_profile_.fixed_setup_id));
+    const int fields[] = {v.width,v.height,v.roi_x,v.roi_y,v.roi_width,v.roi_height,v.binning_x,v.binning_y};
+    for (int i = 0; i < 8; ++i) numbers_[i]->SetValue(std::to_string(fields[i]));
+    has_profile_ = true;
+    Status("已加载远心固定平面版本：" + planar_profile_.identity.id +
+      "；RMS=" + std::to_string(planar_profile_.result.rms_px) + " px。未校正畸变，未全局启用。");
+    return;
+  }
   if (camera_calibration::Load_Calibration_Archive(path, &archive, &error) && archive.intrinsic)
   {
     profile_ = *archive.intrinsic;
@@ -200,6 +238,32 @@ void Camera_Intrinsic_Profile_Dialog::Save_Profile()
   if (!has_profile_) { Status("请先计算或加载内参"); return; }
   camera_calibration::Camera_Image_Configuration image;
   if (!Read_Configuration(&image)) return;
+  if (telecentric_)
+  {
+    auto candidate = planar_profile_;
+    candidate.image = image;
+    candidate.fixed_setup_id = Utf8(setup_);
+    std::string error;
+    if (!planar_profile_.identity.id.empty() &&
+        !camera_calibration::Match_Telecentric_Planar_Profile(planar_profile_, image, candidate.fixed_setup_id, &error))
+    { Status("不能将已标定版本重新绑定到其他设备或工况：" + error); return; }
+    const auto stamp = std::chrono::system_clock::now().time_since_epoch();
+    candidate.identity.id = "telecentric-plane-" + std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(stamp).count());
+    candidate.identity.created_utc = wxDateTime::UNow().ToUTC().FormatISOCombined('T').ToStdString() + "Z";
+    if (!camera_calibration::Match_Telecentric_Planar_Profile(candidate, image, candidate.fixed_setup_id, &error))
+    { Status(error); return; }
+    if (wxMessageBox(wxString::FromUTF8(u8"确认全部原图属于填写的相机/ROI/镜头配置，且固定工况ID代表相同平面、高度及相对姿态？\n此版本只含平面位移映射，不包含非线性畸变校正或手眼外参，不会自动启用到拼图。"),
+        wxString::FromUTF8(u8"确认远心标定来源"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
+    const auto directory = application::Get_App_Paths().config_root / "CameraCalibration";
+    std::error_code ec; std::filesystem::create_directories(directory, ec);
+    if (ec) { Status(ec.message()); return; }
+    const auto path = directory / (candidate.identity.id + ".xml");
+    if (!camera_calibration::Save_Telecentric_Planar_Profile(path, candidate, &error))
+    { Status(error); return; }
+    planar_profile_ = std::move(candidate); saved_ = true;
+    Status("已保存独立远心版本（未全局启用）：" + path.u8string());
+    return;
+  }
   if (image.width != profile_.intrinsics.image_width || image.height != profile_.intrinsics.image_height)
   { Status("来源尺寸与标定结果不一致"); return; }
   if (!profile_.intrinsics.camera_serial_number.empty() &&

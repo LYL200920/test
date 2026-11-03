@@ -227,6 +227,8 @@ if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
   add_library(camera_calibration_geometry STATIC
     src/camera_calibration/calibration_geometry.cpp
     src/camera_calibration/calibration_archive_repository.cpp
+    src/camera_calibration/telecentric_planar_calibration.cpp
+    include/camera_calibration/telecentric_planar_calibration.h
     include/camera_calibration/calibration_geometry.h
     include/camera_calibration/calibration_archive_repository.h)
   target_include_directories(camera_calibration_geometry PUBLIC
@@ -596,6 +598,9 @@ if(BUILD_TESTING)
 
     add_project_test(calibration_geometry_tests calibration_geometry_tests.cpp)
     target_link_libraries(calibration_geometry_tests PRIVATE camera_calibration_geometry)
+
+    add_project_test(telecentric_planar_calibration_tests telecentric_planar_calibration_tests.cpp)
+    target_link_libraries(telecentric_planar_calibration_tests PRIVATE camera_calibration_geometry)
 
     add_project_test(camera_intrinsic_calibration_tests
                      camera_intrinsic_calibration_tests.cpp)

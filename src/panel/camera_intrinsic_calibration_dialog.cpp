@@ -95,6 +95,7 @@ Camera_Intrinsic_Calibration_Dialog(
 Camera_Intrinsic_Calibration_Dialog::
 ~Camera_Intrinsic_Calibration_Dialog()
 {
+  calculation_timer_.Stop();
   closing_.store(true);
   if (worker_.joinable())
   {
@@ -157,7 +158,7 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
   camera_status_->Wrap(900);
   lens_choice_ = new wxChoice(page, wxID_ANY);
   lens_choice_->Append(wxString::FromUTF8(u8"普通透视镜头（针孔模型）"));
-  lens_choice_->Append(wxString::FromUTF8(u8"远心镜头"));
+  lens_choice_->Append(wxString::FromUTF8(u8"远心镜头（固定平面位移映射）"));
   lens_choice_->Append(wxString::FromUTF8(u8"不确定"));
   lens_choice_->SetSelection(0);
   auto *notice = new wxStaticText(
@@ -165,7 +166,8 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
     wxID_ANY,
     wxString::FromUTF8(
       u8"标定期间必须保持分辨率、ROI、焦距和光圈不变。相机未连接时仍可在后续步骤导入已有图片。\n"
-      u8"当前版本的正式求解模型为普通针孔 Brown-5；远心镜头不能使用该模型。"));
+      u8"普通镜头使用针孔 Brown-5；远心模式只计算固定平面映射，不估计焦距或非线性畸变。\n"
+      u8"远心采图：固定标定板、工作高度及相对姿态，仅沿平面平移，覆盖视野各区域；不要混入倾斜图。"));
   notice->Wrap(900);
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxBOTTOM, 24);
@@ -176,10 +178,11 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
   sizer->Add(lens_choice_, 0, wxEXPAND | wxBOTTOM, 20);
   sizer->Add(notice, 0, wxEXPAND);
   auto *profiles = new wxButton(page, wxID_ANY,
-    wxString::FromUTF8(u8"内参版本管理 / 去畸变对照..."));
+    wxString::FromUTF8(u8"所选模型版本管理（针孔支持去畸变对照）..."));
   profiles->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
   {
-    Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_);
+    Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_, nullptr, nullptr,
+      lens_choice_->GetSelection() == 1);
     dialog.ShowModal();
   });
   sizer->Add(profiles, 0, wxTOP, 16);
@@ -324,7 +327,7 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Capture_Page()
     page,
     wxID_ANY,
     wxString::FromUTF8(
-      u8"依次覆盖中心、四边、四角，并采集绕 X/Y 两轴正负倾斜的图像。建议 15～20 张以上。")),
+      u8"覆盖中心、四边、四角，建议15～20张以上。普通针孔需增加X/Y倾斜视角；远心固定平面模式禁止改变姿态/高度，仅平移。")),
     0, wxEXPAND | wxBOTTOM, 10);
   sizer->Add(progress_box, 0, wxEXPAND | wxBOTTOM, 10);
   sizer->Add(content, 1, wxEXPAND | wxBOTTOM, 10);
@@ -376,12 +379,31 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Review_Page()
     page,
     wxID_ANY,
     wxString::FromUTF8(
-      u8"点击“开始计算”后将在后台求解。结果必须同时通过重投影误差和物理合理性检查；低 RMS 的退化解不会被保存。"));
+      u8"计算在后台执行并记录每张图的误差。针孔模式可能多轮剔除异常图；远心模式不自动剔除。\n"
+      u8"位置覆盖和低RMS均不等于独立精度验证。远心模式仅估计固定平面映射，不求针孔内参或非线性畸变。"));
   notice->Wrap(900);
   auto *sizer = new wxBoxSizer(wxVERTICAL);
   sizer->Add(title, 0, wxBOTTOM, 24);
   sizer->Add(review_text_, 0, wxEXPAND | wxBOTTOM, 20);
   sizer->Add(notice, 0, wxEXPAND);
+  calculation_gauge_ = new wxGauge(page, wxID_ANY, 100);
+  calculation_status_ = new wxStaticText(page, wxID_ANY, wxString::FromUTF8(u8"尚未开始计算"));
+  calculation_log_ = new wxTextCtrl(page, wxID_ANY, "", wxDefaultPosition, wxSize(-1, 180),
+    wxTE_MULTILINE | wxTE_READONLY);
+  sizer->Add(calculation_gauge_, 0, wxEXPAND | wxTOP, 12);
+  sizer->Add(calculation_status_, 0, wxEXPAND | wxTOP, 6);
+  sizer->Add(calculation_log_, 1, wxEXPAND | wxTOP, 8);
+  calculation_timer_.SetOwner(this);
+  Bind(wxEVT_TIMER, [this](wxTimerEvent &)
+  {
+    if (!calculating_) return;
+    Drain_Calculation_Progress();
+    calculation_gauge_->Pulse();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::steady_clock::now() - calculation_started_).count();
+    calculation_status_->SetLabel(calculation_stage_ + wxString::Format(
+      wxString::FromUTF8(u8" | 已耗时 %lld 秒（单轮求解无百分比回调）"), static_cast<long long>(elapsed)));
+  }, calculation_timer_.GetId());
   page->SetSizer(sizer);
   return page;
 }
@@ -547,7 +569,9 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Review()
     readiness.covered_zone_count);
   if (readiness.messages.empty())
   {
-    text += wxString::FromUTF8(u8"数据数量和位置覆盖检查通过。仍需由最终求解判断透视约束是否充分。");
+    text += wxString::FromUTF8(lens_choice_->GetSelection() == 1
+      ? u8"基础覆盖通过。远心模式要求固定相对姿态/高度，仅平面内平移。\n单图RMS≤0.75px，最大角点残差≤2px，线性映射偏差≤1%；不自动剔除图像。\n通过仅代表训练数据一致，仍需独立验证精度。"
+      : u8"数据数量和位置覆盖检查通过。仍需由最终求解判断透视约束是否充分。");
   }
   else
   {
@@ -574,7 +598,7 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Navigation()
   bool next_enabled = !busy_ && !progress_active_;
   if (page == 0)
   {
-    next_enabled = next_enabled && lens_choice_->GetSelection() == 0;
+    next_enabled = next_enabled && (lens_choice_->GetSelection() == 0 || lens_choice_->GetSelection() == 1);
   }
   else if (page == 2 || page == 3)
   {
@@ -646,6 +670,47 @@ void Camera_Intrinsic_Calibration_Dialog::Set_Busy(
   Refresh_Navigation();
 }
 
+void Camera_Intrinsic_Calibration_Dialog::Drain_Calculation_Progress()
+{
+  std::vector<camera_calibration::Calibration_Progress> updates;
+  std::vector<std::string> planar_updates;
+  {
+    std::lock_guard<std::mutex> lock(calculation_progress_mutex_);
+    updates.swap(calculation_updates_);
+    planar_updates.swap(planar_updates_);
+  }
+  for (const auto &message : planar_updates)
+  {
+    calculation_stage_ = From_Utf8(message);
+    calculation_log_->AppendText(calculation_stage_ + "\n");
+  }
+  using Stage = camera_calibration::Calibration_Stage;
+  for (const auto &update : updates)
+  {
+    wxString message;
+    switch (update.stage)
+    {
+      case Stage::Solving:
+        message = wxString::Format(wxString::FromUTF8(u8"第 %zu 轮：求解内参，%zu 张有效图片"), update.round, update.active_views);
+        break;
+      case Stage::Evaluating:
+        message = wxString::Format(wxString::FromUTF8(u8"评估误差：总体 %.4f px，最差图片 %.4f px："), update.rms_px, update.worst_rms_px) + From_Utf8(update.image_id);
+        break;
+      case Stage::Rejecting:
+        message = wxString::FromUTF8(u8"剔除异常图片并重新求解：") + From_Utf8(update.image_id);
+        break;
+      case Stage::Validating:
+        message = wxString::FromUTF8(u8"正在检查焦距、数值有效性与结果质量");
+        break;
+      case Stage::Completed:
+        message = wxString::Format(wxString::FromUTF8(u8"计算通过：保留 %zu 张，总体 RMS %.4f px"), update.active_views, update.rms_px);
+        break;
+    }
+    calculation_stage_ = message;
+    calculation_log_->AppendText(message + "\n");
+  }
+}
+
 void Camera_Intrinsic_Calibration_Dialog::Start_Worker(
   std::function<Worker_Result()> task)
 {
@@ -656,7 +721,10 @@ void Camera_Intrinsic_Calibration_Dialog::Start_Worker(
   Set_Busy(true, wxString::FromUTF8(u8"处理中，请稍候…"));
   worker_ = std::thread([this, task = std::move(task)]() mutable
   {
-    Worker_Result result = task();
+    Worker_Result result;
+    try { result = task(); }
+    catch (const std::exception &error) { result.error = error.what(); }
+    catch (...) { result.error = "后台处理发生未知异常"; }
     {
       std::lock_guard<std::mutex> lock(worker_result_mutex_);
       worker_result_ = std::move(result);
@@ -688,11 +756,31 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
     result = std::move(*worker_result_);
     worker_result_.reset();
   }
+  if (calculating_)
+  {
+    calculation_timer_.Stop();
+    Drain_Calculation_Progress();
+    calculating_ = false;
+    calculation_gauge_->SetValue(result.success ? 100 : 0);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::steady_clock::now() - calculation_started_).count();
+    calculation_status_->SetLabel(wxString::Format(
+      wxString::FromUTF8(u8"%s | 耗时 %lld 秒"),
+      wxString::FromUTF8(result.success ? u8"计算完成" : u8"计算失败，原始数据保留，可返回检查"),
+      static_cast<long long>(elapsed)));
+    if (!result.success)
+    {
+      wxString explanation = From_Utf8(result.error);
+      if (result.error.find("degenerate") != std::string::npos)
+        explanation = wxString::FromUTF8(u8"焦距异常：当前图片无法可靠约束普通针孔内参。请核实是否为远心镜头，检查倾斜图的透视变化及棋盘大小；不要直接放宽阈值。\n原始诊断：") + explanation;
+      calculation_log_->AppendText(explanation + "\n");
+    }
+  }
   Set_Busy(false);
   if (!result.success)
   {
-    if (result.operation == Worker_Operation::Progress_Capture &&
-        progress_host_)
+    if ((result.operation == Worker_Operation::Progress_Capture ||
+         (result.operation == Worker_Operation::None && progress_active_)) && progress_host_)
     {
       progress_host_->Complete_Calibration_Image_Processing(
         false, result.error);
@@ -742,6 +830,37 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
   }
   else if (result.operation == Worker_Operation::Calibrate)
   {
+    planar_result_ = std::move(result.planar);
+    if (planar_result_)
+    {
+      const auto &p = *planar_result_;
+      const auto &a = p.pixels_from_plane_mm;
+      const double det = a[0] * a[3] - a[1] * a[2];
+      std::ostringstream text;
+      text << std::setprecision(12)
+           << "远心固定平面：训练数据一致性检查通过\n\n"
+           << "图像分辨率：" << p.width << " × " << p.height << "\n"
+           << "有效图像：" << p.views.size() << "（未自动剔除样本）\n"
+           << "总体 RMS：" << p.rms_px << " px\n"
+           << "最大角点残差：" << p.maximum_error_px << " px\n"
+           << "最大线性映射偏差：" << p.maximum_linear_deviation_percent << "%\n\n"
+           << "像素/毫米矩阵 A（棋盘平面轴，不是机器人轴）：\n"
+           << a[0] << "  " << a[1] << "\n" << a[2] << "  " << a[3] << "\n\n"
+           << "毫米/像素逆矩阵：\n"
+           << a[3]/det << "  " << -a[1]/det << "\n" << -a[2]/det << "  " << a[0]/det << "\n\n"
+           << "限制：只映射相对位移；棋盘轴有180°歧义。未校正非线性畸变。\n"
+           << "未求解深度、绝对原点、Tool或手眼外参；未用于拼图。\n"
+           << "以上为训练残差，不是独立测量精度；请另取已知长度验证。\n\n";
+      for (const auto &view : p.views)
+        text << view.image_id << ": RMS=" << view.rms_px << " px, max="
+             << view.maximum_error_px << " px, linear=" << view.linear_deviation_percent << "%\n";
+      result_text_->SetValue(From_Utf8(text.str()));
+      result_path_text_->SetLabel(wxString::FromUTF8(u8"保存时确认来源与固定工况，生成独立远心配置；不覆盖旧标定。"));
+      has_result_ = true;
+      book_->SetSelection(4);
+      Refresh_Navigation();
+      return;
+    }
     result_ = std::move(result.intrinsics);
     // Dataset identity is confirmed explicitly when saving; a connected camera
     // does not prove the provenance of imported images.
@@ -789,10 +908,10 @@ void Camera_Intrinsic_Calibration_Dialog::On_Next(wxCommandEvent &)
   const std::size_t page = book_->GetSelection();
   if (page == 0)
   {
-    if (lens_choice_->GetSelection() != 0)
+    if (lens_choice_->GetSelection() != 0 && lens_choice_->GetSelection() != 1)
     {
       wxMessageBox(
-        wxString::FromUTF8(u8"远心镜头不能使用当前针孔模型，请先确认镜头类型。"),
+        wxString::FromUTF8(u8"请先确认镜头类型，再选择对应模型。"),
         wxString::FromUTF8(u8"镜头模型不匹配"),
         wxOK | wxICON_WARNING,
         this);
@@ -969,6 +1088,10 @@ void Camera_Intrinsic_Calibration_Dialog::On_Start_Progress(wxCommandEvent &)
   {
     return;
   }
+  if (lens_choice_->GetSelection() == 1 && wxMessageBox(wxString::FromUTF8(
+        u8"远心固定平面模式不会自动修改Progress。\n请确认所选轨迹保持相同高度和姿态，仅沿标定板平面平移；不要使用包含倾斜点的旧针孔采图轨迹。\n已人工检查该轨迹符合要求？"),
+        wxString::FromUTF8(u8"确认远心采图轨迹"),
+        wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES) return;
   if (!workflow_.Captures().empty() &&
       wxMessageBox(
         wxString::FromUTF8(
@@ -1229,12 +1352,46 @@ bool Camera_Intrinsic_Calibration_Dialog::Apply_Board_Configuration()
 
 void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
 {
+  const bool telecentric = lens_choice_->GetSelection() == 1;
+  if (telecentric && wxMessageBox(wxString::FromUTF8(
+      u8"此模式要求固定标定板、工作高度和相对姿态，仅进行平面内平移。\n"
+      u8"确认已排除倾斜、变高度和旋转图？旧采图流程中的倾斜点不能直接混用。\n"
+      u8"至少10张图、覆盖5个区域只是基础门槛，不代表测量精度已验证。"),
+      wxString::FromUTF8(u8"确认远心固定平面数据"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) return;
   const auto captures = workflow_.Captures();
   const auto board = workflow_.Chessboard();
-  Start_Worker([captures, board]() mutable
+  {
+    std::lock_guard<std::mutex> lock(calculation_progress_mutex_);
+    calculation_updates_.clear();
+    planar_updates_.clear();
+  }
+  calculation_log_->Clear();
+  calculation_stage_ = wxString::FromUTF8(u8"正在准备有效角点数据");
+  calculation_status_->SetLabel(calculation_stage_);
+  calculation_gauge_->SetValue(0);
+  calculation_started_ = std::chrono::steady_clock::now();
+  calculating_ = true;
+  calculation_timer_.Start(200);
+  Start_Worker([this, captures, board, telecentric]() mutable
   {
     Worker_Result result;
     result.operation = Worker_Operation::Calibrate;
+    if (telecentric)
+    {
+      std::vector<camera_calibration::Image_Detection_Result> views;
+      for (const auto &capture : captures)
+        if (capture.enabled && capture.detection.chessboard_found) views.push_back(capture.detection);
+      camera_calibration::Telecentric_Planar_Options options;
+      options.progress = [this](const std::string &message)
+      {
+        std::lock_guard<std::mutex> lock(calculation_progress_mutex_);
+        planar_updates_.push_back(message);
+      };
+      camera_calibration::Telecentric_Planar_Result planar;
+      result.success = camera_calibration::Calibrate_Telecentric_Plane(board, views, options, &planar, &result.error);
+      if (result.success) result.planar = std::move(planar);
+      return result;
+    }
     application::Camera_Intrinsic_Calibration_Workflow workflow(board);
     for (auto &capture : captures)
     {
@@ -1244,6 +1401,11 @@ void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
     options.minimum_view_count = 10;
     options.maximum_view_rms_px = 1.0;
     options.maximum_outlier_removals = 6;
+    options.progress = [this](const camera_calibration::Calibration_Progress &progress)
+    {
+      std::lock_guard<std::mutex> lock(calculation_progress_mutex_);
+      calculation_updates_.push_back(progress);
+    };
     result.success = workflow.Calibrate(
       options, &result.intrinsics, &result.error);
     return result;
@@ -1253,6 +1415,8 @@ void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
 bool Camera_Intrinsic_Calibration_Dialog::Save_Result()
 {
   const auto board = workflow_.Chessboard();
-  Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_, &result_, &board);
+  Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_,
+    planar_result_ ? nullptr : &result_, &board, planar_result_.has_value(),
+    planar_result_ ? &*planar_result_ : nullptr);
   return dialog.ShowModal() == wxID_OK;
 }

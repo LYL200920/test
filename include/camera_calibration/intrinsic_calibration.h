@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,17 @@ struct Chessboard_Configuration
   double square_size_mm = 0.5;
 };
 
+enum class Calibration_Stage { Solving, Evaluating, Rejecting, Validating, Completed };
+struct Calibration_Progress
+{
+  Calibration_Stage stage = Calibration_Stage::Solving;
+  std::size_t round = 0;
+  std::size_t active_views = 0;
+  double rms_px = 0;
+  double worst_rms_px = 0;
+  std::string image_id;
+};
+
 struct Calibration_Options
 {
   std::size_t minimum_view_count = 10;
@@ -56,6 +68,8 @@ struct Calibration_Options
   // A very large focal length relative to the sensor is usually the pinhole
   // solver's degenerate affine/telecentric limit. Set to zero to disable.
   double maximum_focal_length_to_image_ratio = 20.0;
+  // Called synchronously on the solver thread. UI consumers must marshal updates.
+  std::function<void(const Calibration_Progress &)> progress;
 };
 
 struct Image_Detection_Result

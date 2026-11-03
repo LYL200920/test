@@ -2,6 +2,7 @@
 #define CAMERA_INTRINSIC_PROFILE_DIALOG_H_
 
 #include "calibration_geometry.h"
+#include "telecentric_planar_calibration.h"
 #include "camera_2d_image_converter.h"
 #include <wx/dialog.h>
 #include <thread>
@@ -19,7 +20,9 @@ class Camera_Intrinsic_Profile_Dialog : public wxDialog
 public:
   Camera_Intrinsic_Profile_Dialog(wxWindow *parent, Camera_2D_Service &camera,
     const camera_calibration::Camera_Intrinsics *result = nullptr,
-    const camera_calibration::Chessboard_Configuration *board = nullptr);
+    const camera_calibration::Chessboard_Configuration *board = nullptr,
+    bool telecentric = false,
+    const camera_calibration::Telecentric_Planar_Result *planar_result = nullptr);
   ~Camera_Intrinsic_Profile_Dialog() override;
 private:
   bool Read_Configuration(camera_calibration::Camera_Image_Configuration *image);
@@ -31,6 +34,9 @@ private:
   void Status(const std::string &text);
   Camera_2D_Service &camera_;
   camera_calibration::Intrinsic_Profile profile_;
+  camera_calibration::Telecentric_Planar_Profile planar_profile_;
+  bool telecentric_ = false;
+  wxTextCtrl *setup_ = nullptr;
   bool has_profile_ = false;
   bool busy_ = false;
   bool saved_ = false;
