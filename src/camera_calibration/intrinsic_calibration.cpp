@@ -95,6 +95,80 @@ bool Validate_Chessboard_Configuration(
   return true;
 }
 
+bool Validate_Detected_Chessboard(const Chessboard_Configuration &board,
+  const std::vector<Image_Point> &corners, int width, int height,
+  std::vector<std::size_t> *suspect_indices, std::string *error_message)
+{
+  if (error_message) error_message->clear();
+  if (suspect_indices) suspect_indices->clear();
+  if (!Validate_Chessboard_Configuration(board, error_message)) return false;
+  const auto columns = static_cast<std::size_t>(board.inner_corner_columns);
+  const auto rows = static_cast<std::size_t>(board.inner_corner_rows);
+  if (width <= 0 || height <= 0 || corners.size() != columns * rows)
+  {
+    Set_Error(error_message, "Invalid chessboard dimensions or corner count");
+    return false;
+  }
+  std::vector<std::size_t> suspects;
+  for (std::size_t i = 0; i < corners.size(); ++i)
+  {
+    const auto &p = corners[i];
+    if (!Is_Finite(p.x) || !Is_Finite(p.y) || p.x < 0 || p.y < 0 || p.x >= width || p.y >= height)
+      suspects.push_back(i);
+  }
+  if (suspects.empty())
+  {
+    // Smooth perspective/distortion may change spacing gradually. A sudden
+    // second difference flags local mislocalization without fitting a plane.
+    const auto triplet = [&](std::size_t i, std::size_t j, std::size_t k)
+    {
+      const auto &a = corners[i]; const auto &b = corners[j]; const auto &c = corners[k];
+      const double left = std::hypot(b.x - a.x, b.y - a.y);
+      const double right = std::hypot(c.x - b.x, c.y - b.y);
+      const double bend = std::hypot(a.x - 2 * b.x + c.x, a.y - 2 * b.y + c.y);
+      if (std::min(left, right) < 2.0 || bend > 0.24 * (left + right) * 0.5)
+      { suspects.push_back(i); suspects.push_back(j); suspects.push_back(k); }
+    };
+    for (std::size_t y = 0; y < rows; ++y)
+      for (std::size_t x = 0; x < columns; ++x)
+      {
+        const auto i = y * columns + x;
+        if (x + 2 < columns) triplet(i, i + 1, i + 2);
+        if (y + 2 < rows) triplet(i, i + columns, i + 2 * columns);
+      }
+    double orientation = 0;
+    for (std::size_t y = 0; y + 1 < rows; ++y)
+      for (std::size_t x = 0; x + 1 < columns; ++x)
+      {
+        const std::size_t indices[] = {y * columns + x, y * columns + x + 1,
+          (y + 1) * columns + x + 1, (y + 1) * columns + x};
+        for (int k = 0; k < 4; ++k)
+        {
+          const auto &a = corners[indices[k]];
+          const auto &b = corners[indices[(k + 1) % 4]];
+          const auto &c = corners[indices[(k + 2) % 4]];
+          const double cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+          if (orientation == 0 && std::abs(cross) > 1e-6) orientation = cross;
+          if (std::abs(cross) <= 1e-6 || cross * orientation <= 0)
+            suspects.insert(suspects.end(), std::begin(indices), std::end(indices));
+        }
+      }
+  }
+  std::sort(suspects.begin(), suspects.end());
+  suspects.erase(std::unique(suspects.begin(), suspects.end()), suspects.end());
+  if (suspect_indices) *suspect_indices = suspects;
+  if (!suspects.empty())
+  {
+    std::ostringstream message;
+    message << "Corner geometry rejected; suspect neighbourhoods (row,col; zero-based):";
+    for (std::size_t i = 0; i < std::min<std::size_t>(suspects.size(), 12); ++i)
+      message << " (" << suspects[i] / columns << "," << suspects[i] % columns << ")";
+    Set_Error(error_message, message.str());
+    return false;
+  }
+  return true;
+}
+
 bool Validate_Camera_Intrinsics(
   const Camera_Intrinsics &intrinsics,
   std::string *error_message)
@@ -238,58 +312,92 @@ bool Intrinsic_Calibration_Session::Add_Image(
       detection_image = gray;
     }
 
-    std::vector<cv::Point2f> corners;
-    const int flags = cv::CALIB_CB_NORMALIZE_IMAGE |
-                      cv::CALIB_CB_EXHAUSTIVE |
-                      cv::CALIB_CB_ACCURACY;
-    detection->chessboard_found = cv::findChessboardCornersSB(
-      detection_image,
-      cv::Size(
-        impl_->configuration.inner_corner_columns,
-        impl_->configuration.inner_corner_rows),
-      corners,
-      flags);
-    if (!detection->chessboard_found)
+    const cv::Size pattern(impl_->configuration.inner_corner_columns,
+                           impl_->configuration.inner_corner_rows);
+    const int flags = cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_EXHAUSTIVE | cv::CALIB_CB_ACCURACY;
+    const int classic_flags = cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_FILTER_QUADS;
+    std::vector<cv::Point2f> coarse;
+    std::string coarse_method = "full-SB";
+    bool found = cv::findChessboardCornersSB(detection_image, pattern, coarse, flags);
+    if (!found)
     {
-      const int classic_flags = cv::CALIB_CB_ADAPTIVE_THRESH |
-                                cv::CALIB_CB_NORMALIZE_IMAGE |
-                                cv::CALIB_CB_FILTER_QUADS;
-      detection->chessboard_found = cv::findChessboardCorners(
-        detection_image,
-        cv::Size(
-          impl_->configuration.inner_corner_columns,
-          impl_->configuration.inner_corner_rows),
-        corners,
-        classic_flags);
+      coarse_method = "full-classic";
+      found = cv::findChessboardCorners(detection_image, pattern, coarse, classic_flags);
     }
-    if (!detection->chessboard_found)
+    if (!found)
     {
+      detection->diagnostic = "Full-image SB and classic detection found no complete board";
       return true;
     }
-
-    if (detection_scale < 1.0)
+    // Use actual rounded resize dimensions, including pixel-centre alignment.
+    for (auto &corner : coarse)
     {
-      const float inverse_scale = static_cast<float>(1.0 / detection_scale);
-      for (cv::Point2f &corner : corners)
+      corner.x = static_cast<float>((corner.x + 0.5) * gray.cols / detection_image.cols - 0.5);
+      corner.y = static_cast<float>((corner.y + 0.5) * gray.rows / detection_image.rows - 0.5);
+    }
+    const auto accept = [&](std::vector<cv::Point2f> candidate, const std::string &method)
+    {
+      const auto convert = [](const std::vector<cv::Point2f> &points)
       {
-        corner *= inverse_scale;
+        std::vector<Image_Point> converted;
+        for (const auto &point : points) converted.push_back({point.x, point.y});
+        return converted;
+      };
+      auto measured = convert(candidate);
+      // Bounds/count checks before passing coordinates to OpenCV refinement.
+      if (candidate.size() != static_cast<std::size_t>(pattern.width) * pattern.height ||
+          std::any_of(measured.begin(), measured.end(), [&](const Image_Point &p)
+          { return !Is_Finite(p.x) || !Is_Finite(p.y) || p.x < 0 || p.y < 0 || p.x >= gray.cols || p.y >= gray.rows; }))
+      {
+        detection->diagnostic += method + ": invalid count/bounds; ";
+        return false;
       }
-    }
-    cv::cornerSubPix(
-      gray,
-      corners,
-      cv::Size(5, 5),
-      cv::Size(-1, -1),
-      cv::TermCriteria(
-        cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
-        40,
-        1.0e-4));
+      cv::cornerSubPix(gray, candidate, cv::Size(5, 5), cv::Size(-1, -1),
+        cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 40, 1e-4));
+      measured = convert(candidate);
+      std::string reason;
+      if (!Validate_Detected_Chessboard(impl_->configuration, measured, gray.cols, gray.rows,
+            &detection->suspect_corner_indices, &reason))
+      {
+        detection->diagnostic += method + ": " + reason + "; ";
+        return false;
+      }
+      detection->corners = std::move(measured);
+      detection->detection_method = method;
+      detection->diagnostic += method + ": local grid checks passed";
+      detection->chessboard_found = true;
+      return true;
+    };
 
-    detection->corners.reserve(corners.size());
-    for (const cv::Point2f &corner : corners)
+    // Coarse detections only locate the ROI. Redetect every corner from original
+    // pixels; never substitute fitted/predicted coordinates for measurements.
+    auto bounds = cv::boundingRect(coarse);
+    const double spacing = std::max(
+      static_cast<double>(bounds.width) / std::max(1, pattern.width - 1),
+      static_cast<double>(bounds.height) / std::max(1, pattern.height - 1));
+    const int margin = std::max(24, static_cast<int>(std::ceil(spacing * 2)));
+    const int left = std::max(0, bounds.x - margin), top = std::max(0, bounds.y - margin);
+    const int right = std::min(gray.cols, bounds.x + bounds.width + margin);
+    const int bottom = std::min(gray.rows, bounds.y + bounds.height + margin);
+    const cv::Rect roi(left, top, right - left, bottom - top);
+    detection->diagnostic = "Coarse=" + coarse_method + "; ";
+    for (int attempt = 0; attempt < 2 && !detection->chessboard_found; ++attempt)
     {
-      detection->corners.push_back({corner.x, corner.y});
+      std::vector<cv::Point2f> local;
+      const std::string method = attempt == 0 ? "ROI-SB/subpix" : "ROI-classic/subpix";
+      const bool located = attempt == 0
+        ? cv::findChessboardCornersSB(gray(roi), pattern, local, flags)
+        : cv::findChessboardCorners(gray(roi), pattern, local, classic_flags);
+      if (!located)
+      {
+        detection->diagnostic += method + ": not found; ";
+        continue;
+      }
+      for (auto &corner : local) corner += cv::Point2f(static_cast<float>(left), static_cast<float>(top));
+      accept(std::move(local), method);
     }
+    if (!detection->chessboard_found) accept(coarse, coarse_method + "/subpix-fallback");
+    if (!detection->chessboard_found) return true;
     return Add_Observation(
       image.width,
       image.height,

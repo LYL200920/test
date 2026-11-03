@@ -79,7 +79,17 @@ struct Image_Detection_Result
   int image_width = 0;
   int image_height = 0;
   std::vector<Image_Point> corners;
+  std::string detection_method;
+  std::string diagnostic;
+  // Zero-based row-major suspect neighbourhoods from the last quality check.
+  std::vector<std::size_t> suspect_corner_indices;
 };
+
+// Local grid continuity/topology check, not an affine-model or accuracy test.
+// Does not replace or synthesize measured corners; supports perspective views.
+bool Validate_Detected_Chessboard(const Chessboard_Configuration &board,
+  const std::vector<Image_Point> &corners, int width, int height,
+  std::vector<std::size_t> *suspect_indices, std::string *error_message = nullptr);
 
 struct View_Calibration_Error
 {

@@ -602,6 +602,9 @@ if(BUILD_TESTING)
     add_project_test(telecentric_planar_calibration_tests telecentric_planar_calibration_tests.cpp)
     target_link_libraries(telecentric_planar_calibration_tests PRIVATE camera_calibration_geometry)
 
+    add_project_test(chessboard_detection_tests chessboard_detection_tests.cpp)
+    target_link_libraries(chessboard_detection_tests PRIVATE camera_calibration_geometry camera_calibration_io)
+
     add_project_test(camera_intrinsic_calibration_tests
                      camera_intrinsic_calibration_tests.cpp)
     target_link_libraries(camera_intrinsic_calibration_tests PRIVATE

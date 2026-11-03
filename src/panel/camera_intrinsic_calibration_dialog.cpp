@@ -306,6 +306,16 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Capture_Page()
   capture_list_->AppendColumn(wxString::FromUTF8(u8"图像"), wxLIST_FORMAT_LEFT, 190);
   capture_list_->AppendColumn(wxString::FromUTF8(u8"角点"), wxLIST_FORMAT_LEFT, 70);
   capture_list_->AppendColumn(wxString::FromUTF8(u8"状态"), wxLIST_FORMAT_LEFT, 90);
+  capture_list_->AppendColumn(wxString::FromUTF8(u8"检测诊断"), wxLIST_FORMAT_LEFT, 360);
+  capture_list_->Bind(wxEVT_LIST_ITEM_ACTIVATED, [this](wxListEvent &event)
+  {
+    const auto index = static_cast<std::size_t>(event.GetIndex());
+    if (index < workflow_.Captures().size())
+    {
+      const auto &detection = workflow_.Captures()[index].detection;
+      wxMessageBox(From_Utf8(detection.diagnostic), From_Utf8(detection.image_id), wxOK, this);
+    }
+  });
   capture_button_ = new wxButton(
     page, wxID_ANY, wxString::FromUTF8(u8"采集当前帧"));
   import_button_ = new wxButton(
@@ -475,6 +485,7 @@ void Camera_Intrinsic_Calibration_Dialog::Refresh_Capture_List()
       capture.enabled
         ? wxString::FromUTF8(u8"有效")
         : wxString::FromUTF8(u8"排除"));
+    capture_list_->SetItem(row, 3, From_Utf8(capture.detection.diagnostic));
   }
   const auto readiness = workflow_.Readiness(10);
   capture_status_->SetLabel(wxString::Format(
@@ -1366,6 +1377,8 @@ void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
     planar_updates_.clear();
   }
   calculation_log_->Clear();
+  for (const auto &capture : captures)
+    calculation_log_->AppendText(From_Utf8(capture.detection.image_id + ": " + capture.detection.diagnostic) + "\n");
   calculation_stage_ = wxString::FromUTF8(u8"正在准备有效角点数据");
   calculation_status_->SetLabel(calculation_stage_);
   calculation_gauge_->SetValue(0);
