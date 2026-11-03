@@ -1189,6 +1189,7 @@ void Camera_Intrinsic_Calibration_Dialog::On_Start_Progress(wxCommandEvent &)
   Refresh_Capture_List();
 
   Camera_Calibration_Progress_Options options;
+  options.sample_robot_states = translation_session_.has_value();
   options.linear_velocity_mm_s = progress_speed_spin_->GetValue();
   options.settling_time_ms = progress_settle_spin_->GetValue();
   options.image_timeout_ms = 3000;
@@ -1454,7 +1455,7 @@ void Camera_Intrinsic_Calibration_Dialog::Prepare_Translation_Session()
     wxString::FromUTF8(u8"固定标定板"));
   if (board.ShowModal() != wxID_OK || board.GetValue().Strip(wxString::both).empty()) return;
   session.board_frame_id = board.GetValue().ToStdString(wxConvUTF8);
-  if (wxMessageBox(wxString::FromUTF8(u8"本轮仅建立采集审计记录，不求解或启用拼图。\n当前接口不能证明曝光时法兰位姿；缓存状态、BASE/TOOL和帧观察时刻均按原始证据保存。\n确认镜头/对焦/光圈和固定工况与所选远心版本一致？\n建立会话不会启动机器人；运动仍需单独确认。"),
+  if (wxMessageBox(wxString::FromUTF8(u8"本轮仅建立采集审计记录，不求解或启用拼图。\n将采集触发前后专用GET_STATE并检查端点稳定性（0.05mm/0.02°），但仍不能证明曝光时法兰位姿；BASE/TOOL和帧观察时刻按原始证据保存。\n确认镜头/对焦/光圈和固定工况与所选远心版本一致？\n建立会话不会启动机器人；运动仍需单独确认。"),
       wxString::FromUTF8(u8"确认采集范围"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES) return;
   const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();

@@ -311,6 +311,8 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
         m_latest_calibration_pose.joints_deg = state.axis;
         m_latest_calibration_pose.reported_base = state.base;
         m_latest_calibration_pose.reported_tool = state.tool;
+        m_calibration_state_inbox.push_back(m_latest_calibration_pose);
+        if (m_calibration_state_inbox.size() > 64) m_calibration_state_inbox.pop_front();
       }
 #endif
       auto* event = new wxThreadEvent (wxEVT_KUKA_MODEL_STATE);
@@ -326,6 +328,7 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
       {
         std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
         m_latest_calibration_pose = {};
+        m_calibration_state_inbox.clear();
       }
 #endif
       auto* event = new wxThreadEvent (wxEVT_KUKA_SERVICE_STATUS);
@@ -896,6 +899,13 @@ void Robot_Model_Panel_Controller::On_Kuka_Model_State(wxThreadEvent &event)
   const auto payload =
     event.GetPayload<std::pair<
       application::Robot_Actual_State, std::uint64_t>>();
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  if (m_calibration_progress_options.sample_robot_states &&
+      m_calibration_progress_controller.State() == application::Camera_Calibration_Progress_State::Moving &&
+      payload.first.request_sequence == m_calibration_motion_sequence &&
+      payload.first.active_sequence == 0 && payload.first.motion_state == "IDLE")
+    m_calibration_motion_acknowledged = true;
+#endif
   Apply_Robot_Actual_State(payload.first);
 }
 
@@ -976,6 +986,14 @@ void Robot_Model_Panel_Controller::Refresh_Robot_Command_Controls(
           Calibration_State::Moving &&
         status.state == application::Robot_Control_State::Ready )
     {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+      if (m_calibration_progress_options.sample_robot_states && !m_calibration_motion_acknowledged)
+      {
+        Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed(
+          "Ready 缺少当前运动序号对应的IDLE状态，拒绝触发采图"));
+        return;
+      }
+#endif
       Apply_Calibration_Progress_Transition(
         m_calibration_progress_controller.Motion_Completed());
     }
@@ -3001,6 +3019,9 @@ void Robot_Model_Panel_Controller::Dispatch_Next_Calibration_Point()
       point.world_pose, options);
 #ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
     m_calibration_motion_sequence = sequence;
+    m_calibration_motion_acknowledged = false;
+    m_translation_sampler.Reset();
+    m_translation_pending_frame.reset();
 #endif
     Notify_Calibration_Progress(
       "正在执行 " + robot_model::Format_Teach_Point_Name(point.id) +
@@ -3022,6 +3043,33 @@ void Robot_Model_Panel_Controller::Trigger_Calibration_Image()
   if( m_calibration_progress_controller.State() !=
         State::Waiting_For_Image )
     return;
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  using Sampling = camera_calibration::Translation_Sampling_State;
+  if (m_calibration_progress_options.sample_robot_states &&
+      m_translation_sampler.State() != Sampling::Trigger_Ready)
+  {
+    m_translation_pending_frame.reset();
+    std::uint64_t revision = 0;
+    {
+      std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+      revision = m_latest_calibration_pose.revision;
+      m_calibration_state_inbox.clear();
+    }
+    const auto requested = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+    try
+    {
+      const auto sequence = m_robot_connection->Synchronize();
+      m_translation_sampler.Begin(m_calibration_motion_sequence, revision, sequence, requested);
+      Notify_Calibration_Progress("正在等待触发前专用GET_STATE响应");
+    }
+    catch (const std::exception &error)
+    {
+      Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed(error.what()));
+    }
+    return;
+  }
+#endif
   const auto previous =
     m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
   m_calibration_had_previous_frame = static_cast<bool>(previous);
@@ -3035,6 +3083,15 @@ void Robot_Model_Panel_Controller::Trigger_Calibration_Image()
   }
   m_capture_evidence.trigger_requested_ns = static_cast<std::uint64_t>(
     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+  if (m_calibration_progress_options.sample_robot_states)
+  {
+    if (!m_translation_sampler.Trigger(m_capture_evidence.trigger_requested_ns))
+    {
+      Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed(m_translation_sampler.Error()));
+      return;
+    }
+    m_capture_evidence = m_translation_sampler.Evidence();
+  }
 #endif
   std::string error;
   if( !m_camera_2d_service ||
@@ -3075,13 +3132,77 @@ void Robot_Model_Panel_Controller::On_Calibration_Progress_Timer()
         State::Waiting_For_Image )
     return;
 
-  const auto frame =
-    m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  using Sampling = camera_calibration::Translation_Sampling_State;
+  const auto now_ns = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+  if (m_calibration_progress_options.sample_robot_states)
+  {
+    std::deque<camera_calibration::Translation_Pose_Snapshot> received;
+    {
+      std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+      received.swap(m_calibration_state_inbox);
+    }
+    for (const auto &pose : received) m_translation_sampler.Observe(pose);
+    m_translation_sampler.Tick(now_ns);
+    if (m_translation_sampler.State() == Sampling::Failed)
+    {
+      Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed(
+        "平移采集状态核验失败：" + m_translation_sampler.Error()));
+      return;
+    }
+    if (m_translation_sampler.State() == Sampling::Trigger_Ready)
+    {
+      // Synchronize publishes Ready separately from its state callback.
+      if (m_robot_connection_status.state == application::Robot_Control_State::Ready)
+        Trigger_Calibration_Image();
+      else if (now_ns > m_translation_sampler.Evidence().before.received_ns + 250000000ULL)
+        Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed("采样后机器人未及时就绪"));
+      return;
+    }
+    if (m_translation_sampler.State() == Sampling::Before || m_translation_sampler.State() == Sampling::After) return;
+    if (m_translation_sampler.State() == Sampling::Image && now >= m_calibration_progress_deadline)
+    {
+      Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Image_Timed_Out());
+      return;
+    }
+    if (m_translation_sampler.State() == Sampling::Complete &&
+        m_robot_connection_status.state != application::Robot_Control_State::Ready)
+    {
+      if (now_ns > m_translation_sampler.Evidence().after.received_ns + 250000000ULL)
+        Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed("后采样完成但机器人未及时就绪"));
+      return;
+    }
+  }
+#endif
+  auto frame = m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  if (m_calibration_progress_options.sample_robot_states && m_translation_pending_frame)
+    frame = m_translation_pending_frame;
+#endif
   const bool has_new_frame =
     frame && (!m_calibration_had_previous_frame ||
               frame->m_frame_num != m_calibration_previous_frame_number);
   if( has_new_frame )
   {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+    if (m_calibration_progress_options.sample_robot_states && m_translation_sampler.State() == Sampling::Image)
+    {
+      m_translation_pending_frame = frame;
+      const auto requested = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+      try
+      {
+        const auto sequence = m_robot_connection->Synchronize();
+        m_translation_sampler.Image(frame->m_frame_num, now_ns, sequence, requested);
+        Notify_Calibration_Progress("已观察到新帧，等待后置GET_STATE响应和端点稳定性检查");
+      }
+      catch (const std::exception &error)
+      {
+        Apply_Calibration_Progress_Transition(m_calibration_progress_controller.Effect_Failed(error.what()));
+      }
+      return;
+    }
+#endif
     const std::size_t index =
       m_calibration_progress_controller.Current_Point_Index();
     if( index >= m_calibration_progress_points.size() )
@@ -3108,6 +3229,8 @@ void Robot_Model_Panel_Controller::On_Calibration_Progress_Timer()
         std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
         m_capture_evidence.after = m_latest_calibration_pose;
       }
+      if (m_calibration_progress_options.sample_robot_states)
+        m_capture_evidence = m_translation_sampler.Evidence();
       m_calibration_progress_observer->On_Calibration_Capture_Evidence(m_capture_evidence);
 #endif
       m_calibration_progress_observer->On_Calibration_Progress_Frame(
@@ -3162,6 +3285,10 @@ void Robot_Model_Panel_Controller::Apply_Calibration_Progress_Transition(
       Notify_Calibration_Progress("正在保存图片并检测棋盘格角点");
       return;
     case Action::Request_Stop:
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+      m_translation_sampler.Reset();
+      m_translation_pending_frame.reset();
+#endif
       m_progress_stop_sequence = 0;
       m_progress_stop_deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(STOP_ACK_TIMEOUT_MS);
@@ -3219,6 +3346,14 @@ void Robot_Model_Panel_Controller::Finish_Calibration_Progress(
   bool success,
   const std::string &message)
 {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  m_translation_sampler.Reset();
+  m_translation_pending_frame.reset();
+  {
+    std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+    m_calibration_state_inbox.clear();
+  }
+#endif
   if( m_run_timer.IsRunning() &&
       !m_progress_run_controller.Is_Motion_Active() )
     m_run_timer.Stop();

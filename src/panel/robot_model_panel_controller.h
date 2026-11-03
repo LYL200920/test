@@ -32,6 +32,8 @@
 #include <memory>
 #ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
 #include "telecentric_translation_session.h"
+#include "translation_capture_sampler.h"
+#include <deque>
 #include <mutex>
 #endif
 #include <map>
@@ -373,6 +375,10 @@ private:
   camera_calibration::Translation_Pose_Snapshot m_latest_calibration_pose;
   camera_calibration::Translation_Capture_Evidence m_capture_evidence;
   std::uint32_t m_calibration_motion_sequence = 0;
+  camera_calibration::Translation_Capture_Sampler m_translation_sampler;
+  std::deque<camera_calibration::Translation_Pose_Snapshot> m_calibration_state_inbox;
+  std::shared_ptr<const jutze_camera::camera_frame> m_translation_pending_frame;
+  bool m_calibration_motion_acknowledged = false;
 #endif
   bool m_calibration_had_previous_frame = false;
   bool m_run_save_images = false;

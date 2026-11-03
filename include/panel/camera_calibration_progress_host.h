@@ -27,6 +27,7 @@ struct Camera_Calibration_Progress_Options
   int settling_time_ms = 500;
   int image_timeout_ms = 3000;
   std::size_t maximum_detection_retries = 1;
+  bool sample_robot_states = false; // Translation sessions only; host timing, not exposure verification.
 };
 
 struct Camera_Calibration_Progress_Update

@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<TelecentricPlanarProfile version="1" model="affine-fixed-plane" distortion="uncorrected" lengthUnit="mm" pixelAxes="u-right-v-down" displacementConvention="pixel-displacement-from-board-axis-mm-row-major" fixedSetupId="001">
+  <Identity id="telecentric-plane-1793691856889598600" createdUtc="2026-11-03T07:44:16Z" />
+  <Image serial="EK28861AAK00022" lensConfiguration="001" width="4096" height="3000" roiX="0" roiY="0" roiWidth="4096" roiHeight="3000" binningX="1" binningY="1" />
+  <Result width="4096" height="3000" rmsPx="0.20583495075595959" maximumErrorPx="1.0791943109376485" maximumLinearDeviationPercent="0.13411419780503625">
+    <Board columns="17" rows="19" squareMm="0.5" />
+    <PixelsFromPlaneMm v0="-66.930905615023846" v1="0.40645529351897242" v2="-0.406142073471773" v3="-66.919444263394965" />
+    <View image="P002_try1_frame36.png" rmsPx="0.15338690411087003" maximumErrorPx="0.61219803244704118" linearDeviationPercent="0.02298723741908627" />
+    <View image="P003_try1_frame37.png" rmsPx="0.1856388255285491" maximumErrorPx="0.66281667104992614" linearDeviationPercent="0.036111892419586539" />
+    <View image="P004_try1_frame38.png" rmsPx="0.17288162304592694" maximumErrorPx="0.58027187441648476" linearDeviationPercent="0.028274915911877828" />
+    <View image="P005_try1_frame39.png" rmsPx="0.16674543044238233" maximumErrorPx="0.49624098045036746" linearDeviationPercent="0.019484043187942047" />
+    <View image="P006_try1_frame40.png" rmsPx="0.15733218915117009" maximumErrorPx="0.58466308665633127" linearDeviationPercent="0.014305243041488244" />
+    <View image="P007_try1_frame41.png" rmsPx="0.20451094029810668" maximumErrorPx="0.69829286114921651" linearDeviationPercent="0.041127285056895092" />
+    <View image="P008_try1_frame42.png" rmsPx="0.17882758062693546" maximumErrorPx="0.55031407570317425" linearDeviationPercent="0.020471971962719784" />
+    <View image="P009_try1_frame43.png" rmsPx="0.16700607613927804" maximumErrorPx="0.52475640390395706" linearDeviationPercent="0.0083924980068791136" />
+    <View image="P010_try1_frame44.png" rmsPx="0.18448921225523016" maximumErrorPx="0.6112017274717878" linearDeviationPercent="0.0089428753479148353" />
+    <View image="P011_try1_frame45.png" rmsPx="0.18049661278042173" maximumErrorPx="0.63027003330014753" linearDeviationPercent="0.035352063628047881" />
+    <View image="P012_try1_frame46.png" rmsPx="0.19053929256383778" maximumErrorPx="0.67009042139989283" linearDeviationPercent="0.031486090971711414" />
+    <View image="P013_try1_frame47.png" rmsPx="0.18161173474542858" maximumErrorPx="0.58990499151332676" linearDeviationPercent="0.022078987524734122" />
+    <View image="P014_try1_frame48.png" rmsPx="0.30759313806236938" maximumErrorPx="0.94043783601831987" linearDeviationPercent="0.093839886829089891" />
+    <View image="P015_try1_frame49.png" rmsPx="0.17988918418551947" maximumErrorPx="0.63356745286982452" linearDeviationPercent="0.024520209296730423" />
+    <View image="P016_try1_frame50.png" rmsPx="0.16892883008624945" maximumErrorPx="0.59622612195505842" linearDeviationPercent="0.018501495074949355" />
+    <View image="P017_try1_frame51.png" rmsPx="0.16383788987957612" maximumErrorPx="0.64782875575117083" linearDeviationPercent="0.02111655127432157" />
+    <View image="P018_try1_frame52.png" rmsPx="0.23121416490683708" maximumErrorPx="0.73998560677662373" linearDeviationPercent="0.061153310604221398" />
+    <View image="P019_try1_frame53.png" rmsPx="0.37406386869336594" maximumErrorPx="1.0791943109376485" linearDeviationPercent="0.13411419780503625" />
+    <View image="P020_try1_frame54.png" rmsPx="0.19460395844851097" maximumErrorPx="0.50897622396391673" linearDeviationPercent="0.045312040845018109" />
+    <View image="P021_try1_frame55.png" rmsPx="0.17269186794753116" maximumErrorPx="0.52587558754713648" linearDeviationPercent="0.027100223494349207" />
+    <View image="P022_try1_frame56.png" rmsPx="0.2435398014961912" maximumErrorPx="0.68742545001705768" linearDeviationPercent="0.075427654540856467" />
+    <View image="P023_try1_frame57.png" rmsPx="0.27676006599867892" maximumErrorPx="0.8688762348564526" linearDeviationPercent="0.090166912510577221" />
+    <View image="P024_try1_frame58.png" rmsPx="0.1774457733964562" maximumErrorPx="0.59438603329078743" linearDeviationPercent="0.033195782698700584" />
+    <View image="P025_try1_frame59.png" rmsPx="0.19595120749627307" maximumErrorPx="0.53499146615535598" linearDeviationPercent="0.048780526897666834" />
+    <View image="P026_try1_frame60.png" rmsPx="0.19713888466155166" maximumErrorPx="0.62678541166627766" linearDeviationPercent="0.048720401233414042" />
+    <View image="P027_try1_frame61.png" rmsPx="0.18828084462432548" maximumErrorPx="0.64479914601825783" linearDeviationPercent="0.0394742717313551" />
+  </Result>
+</TelecentricPlanarProfile>
