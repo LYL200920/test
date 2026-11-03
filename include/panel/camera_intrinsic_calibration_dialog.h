@@ -107,7 +107,6 @@ private:
   bool Apply_Board_Configuration();
   void Start_Calibration();
   bool Save_Result();
-  std::filesystem::path Default_Result_Path() const;
 
   Camera_2D_Service &camera_service_;
   Camera_Calibration_Progress_Host *progress_host_ = nullptr;

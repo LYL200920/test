@@ -309,6 +309,52 @@ bool Camera_2D_Service::Apply_Configuration(
   return true;
 }
 
+bool Camera_2D_Service::Read_Image_Geometry(
+  Camera_2D_Image_Geometry *geometry, std::string *error_message) const
+{
+  const auto fail = [error_message](const std::string &message)
+  { if (error_message) *error_message = message; return false; };
+  if (!geometry) return fail("相机几何配置输出为空");
+  std::shared_ptr<jutze_camera::camera_dahua> camera;
+  Camera_2D_Image_Geometry result;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    camera = m_camera;
+    result.serial = m_status.serial_number;
+  }
+  if (!camera || result.serial.empty()) return fail("请先连接具有有效序列号的2D相机");
+  auto *handle = camera->get_handle();
+  const auto read = [handle](const char *name, int *output)
+  {
+    int64_t value = 0;
+    if (IMV_GetIntFeatureValue(handle, name, &value) != IMV_OK || value < 0 || value > 2147483647)
+      return false;
+    *output = static_cast<int>(value);
+    return true;
+  };
+  if (!read("Width", &result.width) || !read("Height", &result.height) ||
+      !read("OffsetX", &result.offset_x) || !read("OffsetY", &result.offset_y) ||
+      result.width <= 0 || result.height <= 0)
+    return fail("无法读取Width/Height/OffsetX/OffsetY，不能推测ROI配置");
+  for (const auto *name : {"BinningHorizontal", "BinningVertical", "DecimationHorizontal", "DecimationVertical"})
+  {
+    if (!IMV_FeatureIsAvailable(handle, name)) continue;
+    int value = 0;
+    if (!read(name, &value) || value != 1)
+      return fail("当前标定配置读取仅支持binning/decimation=1，请关闭缩采样");
+  }
+  for (const auto *name : {"ReverseX", "ReverseY"})
+  {
+    if (!IMV_FeatureIsAvailable(handle, name)) continue;
+    bool value = false;
+    if (IMV_GetBoolFeatureValue(handle, name, &value) != IMV_OK || value)
+      return fail("标定预览不支持相机ReverseX/ReverseY镜像，请关闭镜像");
+  }
+  *geometry = result;
+  if (error_message) error_message->clear();
+  return true;
+}
+
 bool Camera_2D_Service::Read_Parameters(
   Camera_2D_Parameters *parameters,
   std::string *error_message) const

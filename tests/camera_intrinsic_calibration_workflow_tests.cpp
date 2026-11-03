@@ -1,10 +1,19 @@
 #include "camera_intrinsic_calibration_workflow.h"
 
-#include <cassert>
+#include <iostream>
+#include <stdexcept>
 #include <string>
 
 namespace
 {
+
+void Require(bool condition, const char *message)
+{
+  if (!condition)
+  {
+    throw std::runtime_error(message);
+  }
+}
 
 camera_calibration::Image_Detection_Result Make_Detection(
   int zone_x,
@@ -41,9 +50,12 @@ void Test_Readiness_Requires_Count_And_Coverage()
       "image_" + std::to_string(index))});
   }
   const auto readiness = workflow.Readiness(10);
-  assert(readiness.ready);
-  assert(readiness.enabled_image_count == 10);
-  assert(readiness.covered_zone_count >= 5);
+  Require(readiness.ready,
+    "readiness.ready");
+  Require(readiness.enabled_image_count == 10,
+    "readiness.enabled_image_count == 10");
+  Require(readiness.covered_zone_count >= 5,
+    "readiness.covered_zone_count >= 5");
 }
 
 void Test_Failed_Detection_Cannot_Be_Enabled()
@@ -52,16 +64,27 @@ void Test_Failed_Detection_Cannot_Be_Enabled()
   camera_calibration::Image_Detection_Result failed;
   failed.image_id = "failed.png";
   workflow.Add_Capture({failed});
-  assert(workflow.Captures().size() == 1);
-  assert(!workflow.Captures().front().enabled);
-  assert(!workflow.Set_Capture_Enabled(0, true));
+  Require(workflow.Captures().size() == 1,
+    "workflow.Captures().size() == 1");
+  Require(!workflow.Captures().front().enabled,
+    "!workflow.Captures().front().enabled");
+  Require(!workflow.Set_Capture_Enabled(0, true),
+    "!workflow.Set_Capture_Enabled(0, true)");
 }
 
 } // namespace
 
 int main()
 {
-  Test_Readiness_Requires_Count_And_Coverage();
-  Test_Failed_Detection_Cannot_Be_Enabled();
-  return 0;
+  try
+  {
+    Test_Readiness_Requires_Count_And_Coverage();
+    Test_Failed_Detection_Cannot_Be_Enabled();
+    return 0;
+  }
+  catch (const std::exception &exception)
+  {
+    std::cerr << exception.what() << std::endl;
+    return 1;
+  }
 }

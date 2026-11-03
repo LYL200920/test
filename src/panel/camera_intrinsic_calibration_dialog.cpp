@@ -1,4 +1,5 @@
 #include "camera_intrinsic_calibration_dialog.h"
+#include "camera_intrinsic_profile_dialog.h"
 
 #include "app_paths.h"
 #include "camera_2d_service.h"
@@ -54,23 +55,6 @@ std::filesystem::path Make_Session_Image_Directory()
 wxString From_Utf8(const std::string &text)
 {
   return wxString::FromUTF8(text.c_str());
-}
-
-std::string Safe_File_Component(std::string text)
-{
-  for (char &character : text)
-  {
-    const bool valid =
-      (character >= 'a' && character <= 'z') ||
-      (character >= 'A' && character <= 'Z') ||
-      (character >= '0' && character <= '9') || character == '-' ||
-      character == '_';
-    if (!valid)
-    {
-      character = '_';
-    }
-  }
-  return text.empty() ? "offline" : text;
 }
 
 } // namespace
@@ -191,6 +175,14 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
     0, wxBOTTOM, 6);
   sizer->Add(lens_choice_, 0, wxEXPAND | wxBOTTOM, 20);
   sizer->Add(notice, 0, wxEXPAND);
+  auto *profiles = new wxButton(page, wxID_ANY,
+    wxString::FromUTF8(u8"内参版本管理 / 去畸变对照..."));
+  profiles->Bind(wxEVT_BUTTON, [this](wxCommandEvent &)
+  {
+    Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_);
+    dialog.ShowModal();
+  });
+  sizer->Add(profiles, 0, wxTOP, 16);
   page->SetSizer(sizer);
   lens_choice_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &)
   {
@@ -751,11 +743,11 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
   else if (result.operation == Worker_Operation::Calibrate)
   {
     result_ = std::move(result.intrinsics);
-    const auto camera_status = camera_service_.Status();
-    result_.camera_serial_number = camera_status.serial_number;
-    result_.camera_model = camera_status.device_name;
-    result_.pixel_format = jutze_camera::pixel_format_name(
-      camera_status.pixel_format);
+    // Dataset identity is confirmed explicitly when saving; a connected camera
+    // does not prove the provenance of imported images.
+    result_.camera_serial_number.clear();
+    result_.camera_model.clear();
+    result_.pixel_format.clear();
     has_result_ = true;
     std::ostringstream text;
     text << std::setprecision(12)
@@ -775,9 +767,8 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
          << "p2 = " << result_.distortion[3] << "\n"
          << "k3 = " << result_.distortion[4] << "\n";
     result_text_->SetValue(From_Utf8(text.str()));
-    result_path_text_->SetLabel(
-      wxString::FromUTF8(u8"保存位置：") +
-      Default_Result_Path().wstring());
+    result_path_text_->SetLabel(wxString::FromUTF8(
+      u8"保存时确认相机/ROI/镜头来源，生成独立内参版本；不覆盖旧标定。"));
     book_->SetSelection(4);
     Refresh_Navigation();
   }
@@ -1259,32 +1250,9 @@ void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
   });
 }
 
-std::filesystem::path
-Camera_Intrinsic_Calibration_Dialog::Default_Result_Path() const
-{
-  const auto status = camera_service_.Status();
-  const std::string serial = Safe_File_Component(status.serial_number);
-  return application::Get_App_Paths().config_root /
-         "CameraCalibration" /
-         (serial + "_" + std::to_string(result_.image_width) + "x" +
-          std::to_string(result_.image_height) + ".xml");
-}
-
 bool Camera_Intrinsic_Calibration_Dialog::Save_Result()
 {
-  std::string error;
-  const auto path = Default_Result_Path();
-  if (!camera_calibration::Save_Camera_Intrinsics(
-        path, workflow_.Chessboard(), result_, &error))
-  {
-    wxMessageBox(
-      From_Utf8(error),
-      wxString::FromUTF8(u8"保存内参失败"),
-      wxOK | wxICON_ERROR,
-      this);
-    return false;
-  }
-  result_path_text_->SetLabel(
-    wxString::FromUTF8(u8"已保存：") + path.wstring());
-  return true;
+  const auto board = workflow_.Chessboard();
+  Camera_Intrinsic_Profile_Dialog dialog(this, camera_service_, &result_, &board);
+  return dialog.ShowModal() == wxID_OK;
 }

@@ -3,7 +3,8 @@
 #include "intrinsic_calibration_dataset.h"
 
 #include <array>
-#include <cassert>
+#include <iostream>
+#include <stdexcept>
 #include <cmath>
 #include <filesystem>
 #include <string>
@@ -11,6 +12,14 @@
 
 namespace
 {
+
+void Require(bool condition, const char *message)
+{
+  if (!condition)
+  {
+    throw std::runtime_error(message);
+  }
+}
 
 using Matrix3 = std::array<double, 9>;
 
@@ -91,20 +100,27 @@ void Test_Synthetic_Calibration()
       -3.0 + (index % 4) * 1.7,
       105.0 + index * 2.5);
     std::string error;
-    assert(session.Add_Observation(
-      4096, 3000, corners, "view_" + std::to_string(index), &error));
+    Require(session.Add_Observation(
+      4096, 3000, corners, "view_" + std::to_string(index), &error),
+    "session.Add_Observation( 4096, 3000, corners, \"view_\" + std::to_string(index), &error)");
   }
 
   camera_calibration::Calibration_Options options;
   options.minimum_view_count = 10;
   camera_calibration::Camera_Intrinsics result;
   std::string error;
-  assert(session.Calibrate(options, &result, &error));
-  assert(std::abs(result.camera_matrix[0] - 3200.0) < 2.0);
-  assert(std::abs(result.camera_matrix[4] - 3180.0) < 2.0);
-  assert(std::abs(result.camera_matrix[2] - 2048.0) < 2.0);
-  assert(std::abs(result.camera_matrix[5] - 1500.0) < 2.0);
-  assert(result.overall_rms_px < 0.01);
+  Require(session.Calibrate(options, &result, &error),
+    "session.Calibrate(options, &result, &error)");
+  Require(std::abs(result.camera_matrix[0] - 3200.0) < 2.0,
+    "std::abs(result.camera_matrix[0] - 3200.0) < 2.0");
+  Require(std::abs(result.camera_matrix[4] - 3180.0) < 2.0,
+    "std::abs(result.camera_matrix[4] - 3180.0) < 2.0");
+  Require(std::abs(result.camera_matrix[2] - 2048.0) < 2.0,
+    "std::abs(result.camera_matrix[2] - 2048.0) < 2.0");
+  Require(std::abs(result.camera_matrix[5] - 1500.0) < 2.0,
+    "std::abs(result.camera_matrix[5] - 1500.0) < 2.0");
+  Require(result.overall_rms_px < 0.01,
+    "result.overall_rms_px < 0.01");
 }
 
 void Test_Repository_Round_Trip()
@@ -130,25 +146,39 @@ void Test_Repository_Round_Trip()
     std::filesystem::temp_directory_path() /
     "camera_intrinsic_calibration_tests.xml";
   std::string error;
-  assert(camera_calibration::Save_Camera_Intrinsics(
-    path, board, value, &error));
+  Require(camera_calibration::Save_Camera_Intrinsics(
+    path, board, value, &error),
+    "camera_calibration::Save_Camera_Intrinsics( path, board, value, &error)");
 
   camera_calibration::Chessboard_Configuration loaded_board;
   camera_calibration::Camera_Intrinsics loaded;
-  assert(camera_calibration::Load_Camera_Intrinsics(
-    path, &loaded_board, &loaded, &error));
-  assert(loaded_board.inner_corner_columns == 17);
-  assert(loaded_board.inner_corner_rows == 19);
-  assert(std::abs(loaded_board.square_size_mm - 0.5) < 1.0e-12);
-  assert(loaded.image_width == value.image_width);
-  assert(loaded.image_height == value.image_height);
-  assert(loaded.camera_serial_number == value.camera_serial_number);
-  assert(loaded.camera_model == value.camera_model);
-  assert(loaded.pixel_format == value.pixel_format);
-  assert(std::abs(loaded.camera_matrix[0] - value.camera_matrix[0]) < 1.0e-12);
-  assert(std::abs(loaded.distortion[4] - value.distortion[4]) < 1.0e-12);
-  assert(loaded.accepted_views.size() == 1);
-  assert(loaded.rejected_views.size() == 1);
+  Require(camera_calibration::Load_Camera_Intrinsics(
+    path, &loaded_board, &loaded, &error),
+    "camera_calibration::Load_Camera_Intrinsics( path, &loaded_board, &loaded, &error)");
+  Require(loaded_board.inner_corner_columns == 17,
+    "loaded_board.inner_corner_columns == 17");
+  Require(loaded_board.inner_corner_rows == 19,
+    "loaded_board.inner_corner_rows == 19");
+  Require(std::abs(loaded_board.square_size_mm - 0.5) < 1.0e-12,
+    "std::abs(loaded_board.square_size_mm - 0.5) < 1.0e-12");
+  Require(loaded.image_width == value.image_width,
+    "loaded.image_width == value.image_width");
+  Require(loaded.image_height == value.image_height,
+    "loaded.image_height == value.image_height");
+  Require(loaded.camera_serial_number == value.camera_serial_number,
+    "loaded.camera_serial_number == value.camera_serial_number");
+  Require(loaded.camera_model == value.camera_model,
+    "loaded.camera_model == value.camera_model");
+  Require(loaded.pixel_format == value.pixel_format,
+    "loaded.pixel_format == value.pixel_format");
+  Require(std::abs(loaded.camera_matrix[0] - value.camera_matrix[0]) < 1.0e-12,
+    "std::abs(loaded.camera_matrix[0] - value.camera_matrix[0]) < 1.0e-12");
+  Require(std::abs(loaded.distortion[4] - value.distortion[4]) < 1.0e-12,
+    "std::abs(loaded.distortion[4] - value.distortion[4]) < 1.0e-12");
+  Require(loaded.accepted_views.size() == 1,
+    "loaded.accepted_views.size() == 1");
+  Require(loaded.rejected_views.size() == 1,
+    "loaded.rejected_views.size() == 1");
   std::filesystem::remove(path);
 }
 
@@ -157,9 +187,11 @@ void Test_Invalid_Board_Is_Rejected()
   camera_calibration::Chessboard_Configuration board;
   board.square_size_mm = 0.0;
   std::string error;
-  assert(!camera_calibration::Validate_Chessboard_Configuration(
-    board, &error));
-  assert(!error.empty());
+  Require(!camera_calibration::Validate_Chessboard_Configuration(
+    board, &error),
+    "!camera_calibration::Validate_Chessboard_Configuration( board, &error)");
+  Require(!error.empty(),
+    "!error.empty()");
 }
 
 void Test_Degenerate_Focal_Length_Is_Rejected()
@@ -175,14 +207,17 @@ void Test_Degenerate_Focal_Length_Is_Rejected()
       -1.0 + index * 0.2,
       105.0);
     std::string error;
-    assert(session.Add_Observation(
-      4096, 3000, corners, "flat_" + std::to_string(index), &error));
+    Require(session.Add_Observation(
+      4096, 3000, corners, "flat_" + std::to_string(index), &error),
+    "session.Add_Observation( 4096, 3000, corners, \"flat_\" + std::to_string(index), &error)");
   }
   camera_calibration::Calibration_Options options;
   camera_calibration::Camera_Intrinsics result;
   std::string error;
-  assert(!session.Calibrate(options, &result, &error));
-  assert(!error.empty());
+  Require(!session.Calibrate(options, &result, &error),
+    "!session.Calibrate(options, &result, &error)");
+  Require(!error.empty(),
+    "!error.empty()");
 }
 
 void Test_Unicode_Image_Path_Round_Trip()
@@ -195,12 +230,15 @@ void Test_Unicode_Image_Path_Round_Trip()
     pixels.data(), 64, 64, 64U * 3U,
     camera_calibration::Pixel_Format::RGB8};
   std::string error;
-  assert(camera_calibration::Save_Calibration_Image(
-    path, image, &error));
+  Require(camera_calibration::Save_Calibration_Image(
+    path, image, &error),
+    "camera_calibration::Save_Calibration_Image( path, image, &error)");
   camera_calibration::Image_Detection_Result detection;
-  assert(camera_calibration::Detect_Calibration_Image_File(
-    path, {}, &detection, &error));
-  assert(!detection.chessboard_found);
+  Require(camera_calibration::Detect_Calibration_Image_File(
+    path, {}, &detection, &error),
+    "camera_calibration::Detect_Calibration_Image_File( path, {}, &detection, &error)");
+  Require(!detection.chessboard_found,
+    "!detection.chessboard_found");
   std::filesystem::remove(path);
 }
 
@@ -208,10 +246,18 @@ void Test_Unicode_Image_Path_Round_Trip()
 
 int main()
 {
-  Test_Synthetic_Calibration();
-  Test_Repository_Round_Trip();
-  Test_Invalid_Board_Is_Rejected();
-  Test_Degenerate_Focal_Length_Is_Rejected();
-  Test_Unicode_Image_Path_Round_Trip();
-  return 0;
+  try
+  {
+    Test_Synthetic_Calibration();
+    Test_Repository_Round_Trip();
+    Test_Invalid_Board_Is_Rejected();
+    Test_Degenerate_Focal_Length_Is_Rejected();
+    Test_Unicode_Image_Path_Round_Trip();
+    return 0;
+  }
+  catch (const std::exception &exception)
+  {
+    std::cerr << exception.what() << std::endl;
+    return 1;
+  }
 }

@@ -201,6 +201,8 @@ if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
 
   add_library(camera_calibration_core STATIC
     src/camera_calibration/intrinsic_calibration.cpp
+    src/camera_calibration/intrinsic_undistortion.cpp
+    include/camera_calibration/intrinsic_undistortion.h
     include/camera_calibration/intrinsic_calibration.h)
   target_include_directories(camera_calibration_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include/camera_calibration")
@@ -427,9 +429,11 @@ if(BUILD_DESKTOP_APP)
   file(GLOB panel_headers CONFIGURE_DEPENDS "include/panel/*.h" "include/panel/*.hpp")
   if(NOT ENABLE_CAMERA_INTRINSIC_CALIBRATION)
     list(REMOVE_ITEM panel_sources
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/panel/camera_intrinsic_calibration_dialog.cpp")
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/panel/camera_intrinsic_calibration_dialog.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/panel/camera_intrinsic_profile_dialog.cpp")
     list(REMOVE_ITEM panel_headers
-      "${CMAKE_CURRENT_SOURCE_DIR}/include/panel/camera_intrinsic_calibration_dialog.h")
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/panel/camera_intrinsic_calibration_dialog.h"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/panel/camera_intrinsic_profile_dialog.h")
   endif()
   add_library(panel STATIC ${panel_sources} ${panel_headers})
   target_include_directories(panel PUBLIC
@@ -454,7 +458,7 @@ if(BUILD_DESKTOP_APP)
     target_compile_definitions(panel PRIVATE
       CAMERA_INTRINSIC_CALIBRATION_ENABLED=1)
     target_link_libraries(panel PUBLIC
-      camera_calibration_io camera_calibration_workflow)
+      camera_calibration_io camera_calibration_workflow camera_calibration_geometry)
   endif()
 
   add_executable(test_app WIN32 src/main.cpp)
@@ -587,6 +591,9 @@ if(BUILD_TESTING)
   target_link_libraries(camera_frame_buffer_tests PRIVATE camera)
 
   if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
+    add_project_test(intrinsic_undistortion_tests intrinsic_undistortion_tests.cpp)
+    target_link_libraries(intrinsic_undistortion_tests PRIVATE camera_calibration_core)
+
     add_project_test(calibration_geometry_tests calibration_geometry_tests.cpp)
     target_link_libraries(calibration_geometry_tests PRIVATE camera_calibration_geometry)
 

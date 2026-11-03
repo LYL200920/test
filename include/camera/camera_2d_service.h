@@ -74,6 +74,14 @@ struct Camera_2D_Parameters
   std::vector<Camera_2D_Pixel_Format_Option> pixel_formats;
 };
 
+struct Camera_2D_Image_Geometry
+{
+  std::string serial;
+  int width = 0, height = 0;
+  int offset_x = 0, offset_y = 0;
+  // This reader currently accepts unbinned, undecimated sensor ROI only.
+};
+
 class Camera_2D_Service
 {
 public:
@@ -107,6 +115,8 @@ public:
     unsigned long long pixel_format,
     std::string *error_message = nullptr);
 
+  bool Read_Image_Geometry(Camera_2D_Image_Geometry *geometry,
+    std::string *error_message = nullptr) const;
   Camera_2D_Status Status() const;
   std::shared_ptr<const jutze_camera::camera_frame> Latest_Frame() const;
   bool Is_Open() const;
