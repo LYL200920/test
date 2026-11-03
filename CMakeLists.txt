@@ -458,7 +458,9 @@ if(BUILD_DESKTOP_APP)
     wx::core
     wx::gl)
   if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
-    target_compile_definitions(panel PRIVATE
+    # Public controller headers contain members guarded by this feature macro.
+    # Consumers must see the same class layout as the panel implementation.
+    target_compile_definitions(panel PUBLIC
       CAMERA_INTRINSIC_CALIBRATION_ENABLED=1)
     target_link_libraries(panel PUBLIC
       camera_calibration_io camera_calibration_workflow camera_calibration_geometry)
