@@ -5,6 +5,7 @@
 #include "camera_calibration_progress_host.h"
 #include "camera_intrinsic_calibration_workflow.h"
 #include "telecentric_planar_calibration.h"
+#include "telecentric_translation_session.h"
 
 #include <wx/dialog.h>
 #include <wx/timer.h>
@@ -51,6 +52,8 @@ public:
     std::size_t point_index,
     std::size_t point_id,
     std::size_t retry_index) override;
+  void On_Calibration_Capture_Evidence(
+    const camera_calibration::Translation_Capture_Evidence &evidence) override;
   void On_Calibration_Progress_Finished(
     bool success,
     const std::string &message) override;
@@ -111,6 +114,12 @@ private:
   bool Apply_Board_Configuration();
   void Start_Calibration();
   bool Save_Result();
+  void Prepare_Translation_Session();
+  bool Save_Translation_Checkpoint();
+  std::optional<camera_calibration::Telecentric_Translation_Session> translation_session_;
+  camera_calibration::Translation_Capture_Evidence capture_evidence_;
+  std::filesystem::path translation_directory_;
+  wxButton *translation_button_ = nullptr;
 
   Camera_2D_Service &camera_service_;
   Camera_Calibration_Progress_Host *progress_host_ = nullptr;

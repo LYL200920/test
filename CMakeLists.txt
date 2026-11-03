@@ -228,6 +228,7 @@ if(ENABLE_CAMERA_INTRINSIC_CALIBRATION)
     src/camera_calibration/calibration_geometry.cpp
     src/camera_calibration/calibration_archive_repository.cpp
     src/camera_calibration/telecentric_planar_calibration.cpp
+    src/camera_calibration/telecentric_translation_session.cpp
     include/camera_calibration/telecentric_planar_calibration.h
     include/camera_calibration/calibration_geometry.h
     include/camera_calibration/calibration_archive_repository.h)
@@ -601,6 +602,9 @@ if(BUILD_TESTING)
 
     add_project_test(telecentric_planar_calibration_tests telecentric_planar_calibration_tests.cpp)
     target_link_libraries(telecentric_planar_calibration_tests PRIVATE camera_calibration_geometry)
+
+    add_project_test(telecentric_translation_session_tests telecentric_translation_session_tests.cpp)
+    target_link_libraries(telecentric_translation_session_tests PRIVATE camera_calibration_geometry)
 
     add_project_test(chessboard_detection_tests chessboard_detection_tests.cpp)
     target_link_libraries(chessboard_detection_tests PRIVATE camera_calibration_geometry camera_calibration_io)

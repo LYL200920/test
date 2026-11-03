@@ -30,6 +30,10 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+#include "telecentric_translation_session.h"
+#include <mutex>
+#endif
 #include <map>
 #include "mosaic_configuration.h"
 #include <set>
@@ -364,6 +368,12 @@ private:
   std::chrono::steady_clock::time_point
     m_calibration_progress_deadline;
   unsigned long long m_calibration_previous_frame_number = 0;
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  std::mutex m_calibration_evidence_mutex;
+  camera_calibration::Translation_Pose_Snapshot m_latest_calibration_pose;
+  camera_calibration::Translation_Capture_Evidence m_capture_evidence;
+  std::uint32_t m_calibration_motion_sequence = 0;
+#endif
   bool m_calibration_had_previous_frame = false;
   bool m_run_save_images = false;
   bool m_run_build_mosaic = true;

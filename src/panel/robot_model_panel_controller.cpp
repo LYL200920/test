@@ -296,6 +296,23 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
     [this] (const application::Robot_Actual_State& state,
             std::uint64_t revision)
     {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+      {
+        std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+        m_latest_calibration_pose.available = true;
+        m_latest_calibration_pose.revision = revision;
+        m_latest_calibration_pose.request_sequence = state.request_sequence;
+        m_latest_calibration_pose.motion_state = state.motion_state;
+        m_latest_calibration_pose.active_sequence = state.active_sequence;
+        m_latest_calibration_pose.matched_state_request = false;
+        m_latest_calibration_pose.received_ns = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+        m_latest_calibration_pose.reported_pose = state.pose;
+        m_latest_calibration_pose.joints_deg = state.axis;
+        m_latest_calibration_pose.reported_base = state.base;
+        m_latest_calibration_pose.reported_tool = state.tool;
+      }
+#endif
       auto* event = new wxThreadEvent (wxEVT_KUKA_MODEL_STATE);
       event->SetPayload (std::make_pair (state, revision));
       wxQueueEvent (this, event);
@@ -303,6 +320,14 @@ Robot_Model_Panel_Controller::Robot_Model_Panel_Controller (
   robot_observer.status =
     [this] (const application::Robot_Connection_Status& status)
     {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+      if (status.state == application::Robot_Control_State::Disconnected ||
+          status.state == application::Robot_Control_State::Fault)
+      {
+        std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+        m_latest_calibration_pose = {};
+      }
+#endif
       auto* event = new wxThreadEvent (wxEVT_KUKA_SERVICE_STATUS);
       event->SetPayload (status);
       wxQueueEvent (this, event);
@@ -2974,6 +2999,9 @@ void Robot_Model_Panel_Controller::Dispatch_Next_Calibration_Point()
     options.blend_mm = 0.0;
     const auto sequence = m_robot_connection->Move_Linear(
       point.world_pose, options);
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+    m_calibration_motion_sequence = sequence;
+#endif
     Notify_Calibration_Progress(
       "正在执行 " + robot_model::Format_Teach_Point_Name(point.id) +
       "（LIN " +
@@ -2998,6 +3026,16 @@ void Robot_Model_Panel_Controller::Trigger_Calibration_Image()
     m_camera_2d_service ? m_camera_2d_service->Latest_Frame() : nullptr;
   m_calibration_had_previous_frame = static_cast<bool>(previous);
   m_calibration_previous_frame_number = previous ? previous->m_frame_num : 0;
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+  m_capture_evidence = {};
+  m_capture_evidence.motion_sequence = m_calibration_motion_sequence;
+  {
+    std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+    m_capture_evidence.before = m_latest_calibration_pose;
+  }
+  m_capture_evidence.trigger_requested_ns = static_cast<std::uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+#endif
   std::string error;
   if( !m_camera_2d_service ||
       !m_camera_2d_service->Software_Trigger(&error) )
@@ -3060,6 +3098,18 @@ void Robot_Model_Panel_Controller::On_Calibration_Progress_Timer()
           application::Camera_Calibration_Progress_Action::Process_Image &&
         m_calibration_progress_observer )
     {
+#ifdef CAMERA_INTRINSIC_CALIBRATION_ENABLED
+      // This is UI observation time, not camera reception/exposure time.
+      m_capture_evidence.frame_observed_ns = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count());
+      m_capture_evidence.camera_frame_id = frame->m_frame_num;
+      m_capture_evidence.software_triggered = true;
+      {
+        std::lock_guard<std::mutex> lock(m_calibration_evidence_mutex);
+        m_capture_evidence.after = m_latest_calibration_pose;
+      }
+      m_calibration_progress_observer->On_Calibration_Capture_Evidence(m_capture_evidence);
+#endif
       m_calibration_progress_observer->On_Calibration_Progress_Frame(
         frame,
         index,

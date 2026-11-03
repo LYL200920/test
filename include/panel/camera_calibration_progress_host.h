@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+namespace camera_calibration { struct Translation_Capture_Evidence; }
 
 namespace jutze_camera
 {
@@ -52,6 +53,8 @@ public:
     std::size_t point_index,
     std::size_t point_id,
     std::size_t retry_index) = 0;
+  virtual void On_Calibration_Capture_Evidence(
+    const camera_calibration::Translation_Capture_Evidence &) {}
   virtual void On_Calibration_Progress_Finished(
     bool success,
     const std::string &message) = 0;

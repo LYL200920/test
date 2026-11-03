@@ -22,6 +22,8 @@
 #include <wx/statbox.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/textdlg.h>
+#include <wx/datetime.h>
 
 #include <algorithm>
 #include <chrono>
@@ -186,6 +188,9 @@ wxWindow *Camera_Intrinsic_Calibration_Dialog::Build_Preparation_Page()
     dialog.ShowModal();
   });
   sizer->Add(profiles, 0, wxTOP, 16);
+  translation_button_ = new wxButton(page, wxID_ANY, wxString::FromUTF8(u8"建立远心平移采集会话（实际状态审计）..."));
+  translation_button_->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { Prepare_Translation_Session(); });
+  sizer->Add(translation_button_, 0, wxTOP, 10);
   page->SetSizer(sizer);
   lens_choice_->Bind(wxEVT_CHOICE, [this](wxCommandEvent &)
   {
@@ -671,9 +676,9 @@ void Camera_Intrinsic_Calibration_Dialog::Set_Busy(
 {
   busy_ = busy;
   capture_button_->Enable(
-    !busy && !progress_active_ && camera_service_.Latest_Frame() != nullptr);
-  import_button_->Enable(!busy && !progress_active_);
-  remove_button_->Enable(!busy && !progress_active_);
+    !translation_session_ && !busy && !progress_active_ && camera_service_.Latest_Frame() != nullptr);
+  import_button_->Enable(!translation_session_ && !busy && !progress_active_);
+  remove_button_->Enable(!translation_session_ && !busy && !progress_active_);
   if (!message.empty())
   {
     capture_status_->SetLabel(message);
@@ -820,6 +825,26 @@ void Camera_Intrinsic_Calibration_Dialog::On_Worker_Complete(
       result.captures.front().detection.chessboard_found;
     for (auto &capture : result.captures)
     {
+      if (translation_session_ && result.operation == Worker_Operation::Progress_Capture)
+      {
+        camera_calibration::Telecentric_Translation_Sample sample;
+        sample.id = capture.detection.image_id;
+        sample.captured_utc = wxDateTime::UNow().ToUTC().FormatISOCombined('T').ToStdString() + "Z";
+        sample.point_id = result.progress_point_id;
+        sample.retry_index = result.progress_retry_index;
+        sample.role = result.progress_point_index % 4 == 3
+          ? camera_calibration::Translation_Sample_Role::Validation
+          : camera_calibration::Translation_Sample_Role::Training;
+        sample.image_path = "images/" + capture.source_path.filename().u8string();
+        sample.detection = capture.detection;
+        sample.evidence = capture_evidence_;
+        translation_session_->samples.push_back(std::move(sample));
+        if (!Save_Translation_Checkpoint())
+        {
+          if (progress_host_) progress_host_->Complete_Calibration_Image_Processing(false, "平移会话归档失败，停止采集；原图保留");
+          return;
+        }
+      }
       workflow_.Add_Capture(std::move(capture));
     }
     if (!result.preview_image.rgb.empty())
@@ -958,6 +983,7 @@ void Camera_Intrinsic_Calibration_Dialog::On_Next(wxCommandEvent &)
 
 void Camera_Intrinsic_Calibration_Dialog::On_Capture(wxCommandEvent &)
 {
+  if (translation_session_) return;
   const auto frame = camera_service_.Latest_Frame();
   if (!frame)
   {
@@ -1022,6 +1048,7 @@ void Camera_Intrinsic_Calibration_Dialog::On_Capture(wxCommandEvent &)
 
 void Camera_Intrinsic_Calibration_Dialog::On_Import(wxCommandEvent &)
 {
+  if (translation_session_) return;
   wxDirDialog dialog(
     this,
     wxString::FromUTF8(u8"选择标定图片目录"),
@@ -1057,6 +1084,7 @@ void Camera_Intrinsic_Calibration_Dialog::On_Import(wxCommandEvent &)
 
 void Camera_Intrinsic_Calibration_Dialog::On_Remove(wxCommandEvent &)
 {
+  if (translation_session_) return;
   const long selection = capture_list_->GetNextItem(
     -1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
   if (selection == -1)
@@ -1128,9 +1156,36 @@ void Camera_Intrinsic_Calibration_Dialog::On_Start_Progress(wxCommandEvent &)
   }
 
   const auto board = workflow_.Chessboard();
+  if (translation_session_)
+  {
+    if (!translation_session_->samples.empty())
+    {
+      wxMessageBox(wxString::FromUTF8(u8"此会话已有记录。请重新打开向导建立新会话，避免混合采集批次。"));
+      return;
+    }
+    Camera_2D_Image_Geometry geometry;
+    std::string error;
+    if (!camera_service_.Read_Image_Geometry(&geometry, &error))
+    { wxMessageBox(From_Utf8(error)); return; }
+    auto image = translation_session_->planar_profile.image;
+    image.camera_serial = geometry.serial; image.width = geometry.width; image.height = geometry.height;
+    image.roi_x = geometry.offset_x; image.roi_y = geometry.offset_y;
+    image.roi_width = geometry.width; image.roi_height = geometry.height;
+    image.binning_x = image.binning_y = 1;
+    Camera_Calibration_Progress_Summary summary;
+    if (!camera_calibration::Image_Configurations_Match(translation_session_->planar_profile.image, image, &error) ||
+        !progress_host_->Inspect_Calibration_Progress(std::filesystem::path(progress_path_text_->GetValue().ToStdWstring()), &summary, &error))
+    { wxMessageBox(From_Utf8(error)); return; }
+    const auto &expected = translation_session_->planar_profile.result.board;
+    if (board.inner_corner_columns != expected.inner_corner_columns || board.inner_corner_rows != expected.inner_corner_rows ||
+        board.square_size_mm != expected.square_size_mm)
+    { wxMessageBox(wxString::FromUTF8(u8"棋盘设置与绑定远心版本不一致")); return; }
+    translation_session_->robot.robot_model_id = summary.robot_model_id;
+    if (!Save_Translation_Checkpoint()) return;
+  }
   workflow_.Reset(board);
   has_result_ = false;
-  session_image_directory_ = Make_Session_Image_Directory();
+  session_image_directory_ = translation_session_ ? translation_directory_ / "images" : Make_Session_Image_Directory();
   Refresh_Capture_List();
 
   Camera_Calibration_Progress_Options options;
@@ -1202,6 +1257,12 @@ On_Calibration_Progress_Update(
   Refresh_Navigation();
 }
 
+void Camera_Intrinsic_Calibration_Dialog::On_Calibration_Capture_Evidence(
+  const camera_calibration::Translation_Capture_Evidence &evidence)
+{
+  capture_evidence_ = evidence;
+}
+
 void Camera_Intrinsic_Calibration_Dialog::On_Calibration_Progress_Frame(
   std::shared_ptr<const jutze_camera::camera_frame> frame,
   std::size_t point_index,
@@ -1217,6 +1278,18 @@ void Camera_Intrinsic_Calibration_Dialog::On_Calibration_Progress_Frame(
         frame ? "上一张标定图片仍在处理" : "相机返回了空图片");
     }
     return;
+  }
+  if (translation_session_)
+  {
+    const auto &image = translation_session_->planar_profile.image;
+    if (frame->m_device_serial != image.camera_serial || frame->m_width != image.width ||
+        frame->m_height != image.height || capture_evidence_.camera_frame_id != frame->m_frame_num ||
+        !capture_evidence_.software_triggered)
+    {
+      if (progress_host_) progress_host_->Complete_Calibration_Image_Processing(false,
+        "平移会话的帧来源/尺寸或采集证据不匹配，停止采集");
+      return;
+    }
   }
   std::ostringstream filename;
   filename << 'P' << std::setw(3) << std::setfill('0') << point_id
@@ -1361,8 +1434,73 @@ bool Camera_Intrinsic_Calibration_Dialog::Apply_Board_Configuration()
   return true;
 }
 
+void Camera_Intrinsic_Calibration_Dialog::Prepare_Translation_Session()
+{
+  if (busy_ || progress_active_ || translation_session_) return;
+  wxFileDialog file(this, wxString::FromUTF8(u8"选择已保存的远心固定平面版本"),
+    wxString((application::Get_App_Paths().config_root / "CameraCalibration").wstring()), "",
+    "XML (*.xml)|*.xml", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+  if (file.ShowModal() != wxID_OK) return;
+  camera_calibration::Telecentric_Translation_Session session;
+  std::string error;
+  if (!camera_calibration::Load_Telecentric_Planar_Profile(
+        std::filesystem::path(file.GetPath().ToStdWstring()), &session.planar_profile, &error))
+  { wxMessageBox(From_Utf8(error)); return; }
+  wxTextEntryDialog reference(this, wxString::FromUTF8(u8"填写机器人参考坐标来源标签（仅记录，不代表已核验BASE/TOOL）"),
+    wxString::FromUTF8(u8"平移会话参考"));
+  if (reference.ShowModal() != wxID_OK || reference.GetValue().Strip(wxString::both).empty()) return;
+  session.robot.reference_frame_id = reference.GetValue().ToStdString(wxConvUTF8);
+  wxTextEntryDialog board(this, wxString::FromUTF8(u8"填写固定标定板/安装位置ID；整个会话中不得移动标定板"),
+    wxString::FromUTF8(u8"固定标定板"));
+  if (board.ShowModal() != wxID_OK || board.GetValue().Strip(wxString::both).empty()) return;
+  session.board_frame_id = board.GetValue().ToStdString(wxConvUTF8);
+  if (wxMessageBox(wxString::FromUTF8(u8"本轮仅建立采集审计记录，不求解或启用拼图。\n当前接口不能证明曝光时法兰位姿；缓存状态、BASE/TOOL和帧观察时刻均按原始证据保存。\n确认镜头/对焦/光圈和固定工况与所选远心版本一致？\n建立会话不会启动机器人；运动仍需单独确认。"),
+      wxString::FromUTF8(u8"确认采集范围"), wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES) return;
+  const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  session.identity = {"translation-" + std::to_string(stamp),
+    wxDateTime::UNow().ToUTC().FormatISOCombined('T').ToStdString() + "Z"};
+  translation_directory_ = application::Get_App_Paths().config_root / "CameraCalibration" / "TranslationSessions" / session.identity.id;
+  std::error_code ec;
+  std::filesystem::create_directories(translation_directory_.parent_path(), ec);
+  if (ec || !std::filesystem::create_directory(translation_directory_, ec))
+  { wxMessageBox(From_Utf8("无法独占创建会话目录：" + ec.message())); return; }
+  std::filesystem::create_directory(translation_directory_ / "images", ec);
+  if (ec) { wxMessageBox(From_Utf8(ec.message())); return; }
+  translation_session_ = std::move(session);
+  workflow_.Reset(translation_session_->planar_profile.result.board);
+  Refresh_Capture_List();
+  const auto &configuration = translation_session_->planar_profile.result.board;
+  columns_spin_->SetValue(configuration.inner_corner_columns); rows_spin_->SetValue(configuration.inner_corner_rows);
+  square_size_spin_->SetValue(configuration.square_size_mm);
+  lens_choice_->SetSelection(1); lens_choice_->Disable(); translation_button_->Disable();
+  columns_spin_->Disable(); rows_spin_->Disable(); square_size_spin_->Disable();
+  capture_button_->Disable(); import_button_->Disable(); remove_button_->Disable();
+  camera_status_->SetLabel(wxString::FromUTF8(u8"平移采集会话已准备（位姿未核验，不可求解）。请在采图页选择已检查的平移Progress。\n") +
+    wxString(translation_directory_.wstring()));
+  Refresh_Navigation();
+}
+
+bool Camera_Intrinsic_Calibration_Dialog::Save_Translation_Checkpoint()
+{
+  if (!translation_session_) return false;
+  const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+  const auto path = translation_directory_ / ("session-" + std::to_string(stamp) + ".xml");
+  std::string error;
+  if (!camera_calibration::Save_Telecentric_Translation_Session(path, *translation_session_, &error))
+  { wxMessageBox(From_Utf8(error), wxString::FromUTF8(u8"保存平移会话失败")); return false; }
+  progress_status_text_->SetLabel(wxString::FromUTF8(u8"已保存未核验采集记录：") + wxString(path.wstring()));
+  return true;
+}
+
 void Camera_Intrinsic_Calibration_Dialog::Start_Calibration()
 {
+  if (translation_session_)
+  {
+    wxMessageBox(wxString::FromUTF8(u8"当前为平移采集审计会话，每张图及原始状态已另存。\n尚未具备曝光关联和参考坐标核验，本轮不提供映射求解；不能把缓存状态当作已验证法兰位姿。"));
+    return;
+  }
   const bool telecentric = lens_choice_->GetSelection() == 1;
   if (telecentric && wxMessageBox(wxString::FromUTF8(
       u8"此模式要求固定标定板、工作高度和相对姿态，仅进行平面内平移。\n"

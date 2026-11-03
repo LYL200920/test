@@ -1,5 +1,6 @@
 #include "calibration_archive_repository.h"
 #include "telecentric_planar_calibration.h"
+#include "telecentric_translation_session.h"
 #include "pugixml.hpp"
 
 #include <charconv>
@@ -320,6 +321,54 @@ bool Validate_Telecentric_Profile(const Telecentric_Planar_Profile &v, std::stri
   if (!valid && error) *error = "Invalid telecentric profile identity or view identifier";
   return valid;
 }
+void Translation_Pose(Codec &c, Translation_Pose_Snapshot &v)
+{
+  c.Field("available", v.available); c.Field("revision", v.revision);
+  c.Field("requestSequence", v.request_sequence); c.Field("receivedNs", v.received_ns);
+  c.Field("motionState", v.motion_state); c.Field("activeSequence", v.active_sequence);
+  c.Field("matchedStateRequest", v.matched_state_request);
+  c.Field("reportedBase", v.reported_base); c.Field("reportedTool", v.reported_tool);
+  c.Object("ReportedPose", v.reported_pose, Array<double, 6>);
+  c.Object("JointsDeg", v.joints_deg, Array<double, 6>);
+}
+void Translation_Evidence(Codec &c, Translation_Capture_Evidence &v)
+{
+  c.Field("motionSequence", v.motion_sequence); c.Field("triggerRequestedNs", v.trigger_requested_ns);
+  c.Field("frameObservedNs", v.frame_observed_ns); c.Field("cameraFrameId", v.camera_frame_id);
+  c.Field("softwareTriggered", v.software_triggered);
+  c.Object("Before", v.before, Translation_Pose);
+  c.Object("After", v.after, Translation_Pose);
+}
+void Translation_Sample(Codec &c, Telecentric_Translation_Sample &v)
+{
+  c.Field("id", v.id); c.Field("capturedUtc", v.captured_utc); c.Field("pointId", v.point_id);
+  c.Field("retryIndex", v.retry_index); c.Field("imagePath", v.image_path);
+  std::string role = v.role == Translation_Sample_Role::Training ? "training" : "validation";
+  c.Field("role", role);
+  if (role == "training") v.role = Translation_Sample_Role::Training;
+  else if (role == "validation") v.role = Translation_Sample_Role::Validation;
+  else throw std::runtime_error("Invalid translation sample role");
+  c.Object("Evidence", v.evidence, Translation_Evidence);
+  c.Object("Detection", v.detection, [](Codec &d, Image_Detection_Result &r)
+  {
+    d.Field("imageId", r.image_id); d.Field("found", r.chessboard_found);
+    d.Field("width", r.image_width); d.Field("height", r.image_height);
+    d.Field("method", r.detection_method); d.Field("diagnostic", r.diagnostic);
+    d.List("Corner", r.corners, Corner);
+    d.List("Suspect", r.suspect_corner_indices, [](Codec &s, std::size_t &index) { s.Field("index", index); });
+  });
+}
+void Translation_Session(Codec &c, Telecentric_Translation_Session &v)
+{
+  c.Literal("version", "1"); c.Literal("purpose", "acquisition-only-unverified");
+  c.Literal("lengthUnit", "mm"); c.Literal("angleUnit", "degree");
+  c.Literal("poseConvention", "raw-controller-cartesian-not-verified-flange");
+  c.Literal("clock", "host-steady-nanoseconds-not-exposure-time");
+  c.Object("Identity", v.identity, Identity); c.Object("Robot", v.robot, Reference);
+  c.Field("boardFrameId", v.board_frame_id);
+  c.Object("PlanarProfile", v.planar_profile, Telecentric_Profile);
+  c.List("Sample", v.samples, Translation_Sample);
+}
 bool Fail(std::string *error, const std::string &message)
 {
   if (error) *error = message;
@@ -420,5 +469,17 @@ bool Load_Telecentric_Planar_Profile(const std::filesystem::path &path,
 {
   return Load_Document(path, profile, "TelecentricPlanarProfile", Telecentric_Profile,
     Validate_Telecentric_Profile, error);
+}
+bool Save_Telecentric_Translation_Session(const std::filesystem::path &path,
+  const Telecentric_Translation_Session &session, std::string *error)
+{
+  return Save_Document(path, session, "TelecentricTranslationSession", Translation_Session,
+    Validate_Telecentric_Translation_Session, error);
+}
+bool Load_Telecentric_Translation_Session(const std::filesystem::path &path,
+  Telecentric_Translation_Session *session, std::string *error)
+{
+  return Load_Document(path, session, "TelecentricTranslationSession", Translation_Session,
+    Validate_Telecentric_Translation_Session, error);
 }
 } // namespace camera_calibration
